@@ -15,18 +15,12 @@
 # docker-compose.yml).
 
 [[report]]
-key      = "connectivity"
-title    = "Connectivity check"
-database = "analytics"
-sql_file = "sql/report.sql"    # default now()/current_user/current_database() probe
+key      = "project_tasks"
+title    = "Project tasks (WBS)"
+database = "rocketlane"
+sql_file = "sql/project_tasks.sql"
 
 # Add more like this:
-#
-# [[report]]
-# key      = "rocketlane_projects"
-# title    = "Rocketlane projects"
-# database = "rocketlane"
-# sql_file = "sql/rocketlane_projects.sql"
 #
 # [[report]]
 # key      = "active_users"

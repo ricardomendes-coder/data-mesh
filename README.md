@@ -54,9 +54,9 @@ connection to go stale.
 
    Open http://localhost:8000 and log in with the admin credentials.
 
-The default `connectivity` report (`sql/report.sql`) returns `now()`, the DB
-user, and the DB name — so you can confirm the whole pipeline works before
-writing your real reports.
+`sql/report.sql` holds a simple `now()`/`current_user`/`current_database()`
+probe you can point a report at to confirm the whole pipeline works. (Add it
+back to `reports.toml` as a `connectivity` report if you want a quick check.)
 
 ## Defining reports
 
