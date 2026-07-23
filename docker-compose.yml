@@ -1,0 +1,23 @@
+services:
+  hub:
+    build: .
+    container_name: report-hub
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # SSH private key used to open the tunnel (read-only).
+      # Make sure the file is readable by the container user (uid 10001),
+      # e.g. a dedicated deploy key with chmod 644 on the host.
+
+      # Persisted user store (usernames + bcrypt hashes).
+      - hub_data:/app/data
+
+      # Edit the report query without rebuilding the image.
+      # Comment this out if you'd rather bake the SQL into the image.
+      - ./sql/report.sql:/app/sql/report.sql:ro
+
+volumes:
+  hub_data:

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+secrets/
+data/
+__pycache__/
+*.pyc
+.venv/
+
+# Editor swap/backup files (podem conter conteúdo do .env)
+*.swp
+*.swo
+*~
