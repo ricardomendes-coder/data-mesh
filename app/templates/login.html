@@ -1,14 +1,36 @@
 {% extends "base.html" %}
-{% block content %}
-<div class="card" style="max-width:380px; margin:4rem auto;">
-  <h1>{{ title }}</h1>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="post" action="{{ url_for('login_submit') }}">
-    <label for="username">Username</label>
-    <input id="username" name="username" autocomplete="username" required autofocus>
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">Log in</button>
-  </form>
+{% block body %}
+<div class="bi-login">
+  <div class="bi-login-card">
+    <div class="bi-login-brand">
+      <div class="bi-brand-mark">V</div>
+      <div>
+        <b>{{ title }}</b>
+        <span>V360 · Data</span>
+      </div>
+    </div>
+
+    <div class="bi-login-h">Sign in</div>
+    <div class="bi-login-p">Enter your credentials to access the hub.</div>
+
+    {% if error %}
+    <div class="bi-err">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('login_submit') }}">
+      <div class="bi-fld">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="bi-fld">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="bi-btn" type="submit">Log in</button>
+    </form>
+  </div>
 </div>
 {% endblock %}

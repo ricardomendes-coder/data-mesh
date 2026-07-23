@@ -56,10 +56,12 @@ def test_auth_flow():
         )
         assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
 
-        # Now the dashboard is reachable and shows the user + query console
+        # Now the dashboard is reachable and shows the user + Query/Reports tabs
         r = client.get("/")
         assert r.status_code == 200 and "Signed in as admin" in r.text
-        assert "Run a query" in r.text, "query console missing from dashboard"
+        assert 'data-tab="query"' in r.text and 'data-tab="reports"' in r.text, (
+            "query/reports tabs missing from dashboard"
+        )
 
         # Logout clears the session
         r = client.post("/logout", follow_redirects=False)

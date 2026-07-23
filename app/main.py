@@ -106,9 +106,11 @@ def _dashboard_context(user: str, **extra) -> dict:
     the page (banner + empty list) instead of 500ing the whole dashboard.
     """
     databases: list[str] = []
+    db_ok = False
     db_error = None
     try:
         databases = db.list_databases()
+        db_ok = True
     except Exception:
         logger.exception("Could not list databases")
         db_error = "Could not load the database list — check the server logs."
@@ -128,9 +130,12 @@ def _dashboard_context(user: str, **extra) -> dict:
         "sql": None,
         "database": settings.db_name,
         "databases": databases,
+        "db_host": settings.db_host,
+        "db_ok": db_ok,
         "db_error": db_error,
         "reports": report_list,
         "result": None,
+        "active_tab": "query",
     }
     context.update(extra)
     return context
@@ -172,7 +177,7 @@ def run_query(
         shown = result.rows[:QUERY_DISPLAY_LIMIT]
         context["result"] = {
             "columns": result.columns,
-            "rows": [["" if v is None else str(v) for v in row] for row in shown],
+            "rows": [[None if v is None else str(v) for v in row] for row in shown],
             "total": result.rowcount,
             "shown": len(shown),
             "truncated": result.rowcount > QUERY_DISPLAY_LIMIT,
@@ -231,7 +236,9 @@ def export_report(
     try:
         df = reports.get_report_df(key)
     except KeyError:
-        context = _dashboard_context(user, error=f"Unknown report: {key!r}.")
+        context = _dashboard_context(
+            user, error=f"Unknown report: {key!r}.", active_tab="reports"
+        )
         return templates.TemplateResponse(
             request, "dashboard.html", context, status_code=404
         )
@@ -240,7 +247,9 @@ def export_report(
         # we never leak connection strings or credentials into the browser.
         logger.exception("Report generation failed for %r", key)
         context = _dashboard_context(
-            user, error="Could not generate the report. Check the server logs."
+            user,
+            error="Could not generate the report. Check the server logs.",
+            active_tab="reports",
         )
         return templates.TemplateResponse(
             request, "dashboard.html", context, status_code=502

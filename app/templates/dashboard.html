@@ -1,76 +1,174 @@
 {% extends "base.html" %}
-{% block content %}
-<div class="topbar">
-  <div>
-    <h1 style="margin:0;">{{ title }}</h1>
-    <div class="muted">Signed in as {{ user }}</div>
-  </div>
-  <form method="post" action="{{ url_for('logout') }}">
-    <button class="btn secondary" type="submit">Log out</button>
-  </form>
-</div>
-
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-{% if message %}<div class="notice">{{ message }}</div>{% endif %}
-{% if db_error %}<div class="error">{{ db_error }}</div>{% endif %}
-
-<div class="card">
-  <h1 style="font-size:1.1rem;">Run a query</h1>
-  <p class="muted">Pick a database and run SQL against it. Add a <code>LIMIT</code> for big tables — the browser shows the first {{ 500 }} rows; Export always returns every row.</p>
-  <form method="post">
-    <label for="database">Database</label>
-    <select id="database" name="database" required>
-      {% for db_name in databases %}
-      <option value="{{ db_name }}" {% if db_name == database %}selected{% endif %}>{{ db_name }}</option>
-      {% endfor %}
-    </select>
-    <label for="sql">SQL</label>
-    <textarea id="sql" name="sql" rows="7" spellcheck="false" placeholder="SELECT * FROM ... LIMIT 100;" required autofocus>{{ sql or '' }}</textarea>
-    <div class="row">
-      <button type="submit" formaction="{{ url_for('run_query') }}">Run</button>
-      {% if result %}
-      <button class="btn" type="submit" formaction="{{ url_for('export_query') }}?format=csv">Export CSV</button>
-      <button class="btn secondary" type="submit" formaction="{{ url_for('export_query') }}?format=xlsx">Export Excel</button>
-      {% endif %}
-    </div>
-  </form>
-
-  {% if result %}
-    <div class="muted" style="margin-top:1rem;">
-      {{ result.total }} row(s){% if result.truncated %} — showing the first {{ result.shown }}{% endif %}.
-    </div>
-    <div class="tablewrap">
-      <table>
-        <thead>
-          <tr>{% for c in result.columns %}<th>{{ c }}</th>{% endfor %}</tr>
-        </thead>
-        <tbody>
-          {% for row in result.rows %}
-          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-</div>
-
-<div class="card" style="margin-top:1.25rem;">
-  <h1 style="font-size:1.1rem;">Reports</h1>
-  {% if reports %}
-    {% for report in reports %}
-    <div class="report-row">
-      <div>
-        <div>{{ report.title }}</div>
-        <div class="muted">database: <code>{{ report.database }}</code></div>
+{% block body %}
+<div class="bi-shell">
+  <aside class="bi-side">
+    <div class="bi-side-inner">
+      <div class="bi-brand">
+        <div class="bi-brand-mark">V</div>
+        <div class="bi-brand-tx"><b>{{ title }}</b><span>V360 · Data</span></div>
       </div>
-      <div class="row">
-        <a class="btn" href="{{ url_for('export_report', key=report.key) }}?format=csv">CSV</a>
-        <a class="btn secondary" href="{{ url_for('export_report', key=report.key) }}?format=xlsx">Excel</a>
+      <nav class="bi-side-nav">
+        <button class="bi-nav-item {{ 'active' if active_tab != 'reports' else '' }}" data-tab="query" type="button">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
+          <span>Query</span>
+        </button>
+        <button class="bi-nav-item {{ 'active' if active_tab == 'reports' else '' }}" data-tab="reports" type="button">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+          <span>Reports</span>
+        </button>
+      </nav>
+      <div class="bi-conn-pill">
+        <span class="bi-conn-dot {{ 'on' if db_ok else 'warn' }}"></span>
+        <span class="bi-conn-tx">{{ db_host or 'not configured' }}</span>
       </div>
     </div>
-    {% endfor %}
-  {% else %}
-    <p class="muted">No reports defined. Add one to <code>reports.toml</code>.</p>
-  {% endif %}
+  </aside>
+
+  <main class="bi-main">
+    <div class="bi-topbar">
+      <div class="bi-topbar-tt">
+        <div class="bi-topbar-title">{{ title }}</div>
+        <div class="bi-topbar-sub">Signed in as {{ user }}</div>
+      </div>
+      <div class="bi-topbar-actions">
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="bi-btn ghost" type="submit">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6"/></svg>
+            Log out
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="bi-scroll">
+      <div class="bi-page">
+
+        {% if error %}
+        <div class="bi-err">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+          <span>{{ error }}</span>
+        </div>
+        {% endif %}
+        {% if message %}<div class="bi-ok">{{ message }}</div>{% endif %}
+        {% if db_error %}
+        <div class="bi-err">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+          <span>{{ db_error }}</span>
+        </div>
+        {% endif %}
+
+        <div class="bi-panel-tabs">
+          <button class="bi-ptab {{ 'active' if active_tab != 'reports' else '' }}" data-tab="query" type="button">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
+            Query
+          </button>
+          <button class="bi-ptab {{ 'active' if active_tab == 'reports' else '' }}" data-tab="reports" type="button">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+            Reports
+          </button>
+        </div>
+
+        <!-- ── QUERY PANE ── -->
+        <section class="pane {{ 'active' if active_tab != 'reports' else '' }}" data-pane="query">
+          <form method="post">
+            <div class="bi-fld">
+              <label for="database">Database</label>
+              <select id="database" name="database" required>
+                {% for db_name in databases %}
+                <option value="{{ db_name }}" {% if db_name == database %}selected{% endif %}>{{ db_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="bi-editor">
+              <div class="bi-editor-bar">
+                <span class="bi-editor-dot"></span>
+                <span class="bi-editor-tag">query.sql</span>
+                <span class="bi-editor-hint">⌘/Ctrl + Enter to run</span>
+                <button class="bi-btn sm" type="submit" id="run-btn" formaction="{{ url_for('run_query') }}">
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor"><path d="M4 3l7 4-7 4z"/></svg>
+                  Run
+                </button>
+                {% if result %}
+                <button class="bi-btn sm ghost" type="submit" formaction="{{ url_for('export_query') }}?format=csv">CSV</button>
+                <button class="bi-btn sm ghost" type="submit" formaction="{{ url_for('export_query') }}?format=xlsx">Excel</button>
+                {% endif %}
+              </div>
+              <textarea class="bi-ta" id="sql" name="sql" spellcheck="false" placeholder="SELECT * FROM ... LIMIT 100;" required autofocus>{{ sql or '' }}</textarea>
+            </div>
+          </form>
+
+          {% if result %}
+          <div class="bi-result-meta">
+            {{ result.total }} row(s){% if result.truncated %} — showing the first {{ result.shown }}{% endif %}
+          </div>
+          <div class="bi-restbl-wrap">
+            <table class="bi-restbl">
+              <thead>
+                <tr>{% for c in result.columns %}<th>{{ c }}</th>{% endfor %}</tr>
+              </thead>
+              <tbody>
+                {% for row in result.rows %}
+                <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </section>
+
+        <!-- ── REPORTS PANE ── -->
+        <section class="pane {{ 'active' if active_tab == 'reports' else '' }}" data-pane="reports">
+          {% if reports %}
+          <div class="bi-cards">
+            {% for report in reports %}
+            <div class="bi-card">
+              <div class="bi-card-ic">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+              </div>
+              <div class="bi-card-nm">{{ report.title }}</div>
+              <div class="bi-card-sub">database: <code>{{ report.database }}</code></div>
+              <div class="bi-card-meta">
+                <a class="bi-btn sm" href="{{ url_for('export_report', key=report.key) }}?format=csv">
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1v8M4 6l3 3 3-3M2 12h10"/></svg>
+                  CSV
+                </a>
+                <a class="bi-btn sm ghost" href="{{ url_for('export_report', key=report.key) }}?format=xlsx">Excel</a>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="bi-empty-lg">No reports defined. Add one to <code>reports.toml</code>.</div>
+          {% endif %}
+        </section>
+
+      </div>
+    </div>
+  </main>
 </div>
+
+<script>
+(function(){
+  function activate(tab){
+    document.querySelectorAll('[data-tab]').forEach(function(el){
+      el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.pane').forEach(function(p){
+      p.classList.toggle('active', p.getAttribute('data-pane') === tab);
+    });
+  }
+  document.querySelectorAll('[data-tab]').forEach(function(el){
+    el.addEventListener('click', function(){ activate(el.getAttribute('data-tab')); });
+  });
+  var ta = document.getElementById('sql');
+  if (ta) ta.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){
+      e.preventDefault();
+      var b = document.getElementById('run-btn');
+      if (b) b.click();
+    }
+  });
+})();
+</script>
 {% endblock %}
