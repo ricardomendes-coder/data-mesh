@@ -7,6 +7,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Local reference material (V360 design assets), not part of the app
+datameshproject/
+
 # Editor swap/backup files (podem conter conteúdo do .env)
 *.swp
 *.swo

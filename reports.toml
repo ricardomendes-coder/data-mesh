@@ -16,7 +16,7 @@
 
 [[report]]
 key      = "project_tasks"
-title    = "Project tasks (WBS)"
+title    = "Relatório Rocketlane - Taylor - Projetos Pague Menos"
 database = "rocketlane"
 sql_file = "sql/project_tasks.sql"
 
