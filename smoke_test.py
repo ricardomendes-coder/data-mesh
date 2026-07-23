@@ -8,6 +8,8 @@ os.environ["SESSION_SECRET"] = "test-secret"
 os.environ["INITIAL_ADMIN_USER"] = "admin"
 os.environ["INITIAL_ADMIN_PASSWORD"] = "s3cret-pass"
 
+from urllib.parse import urlsplit
+
 import pandas as pd
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -16,11 +18,22 @@ from app import reports
 from app.main import app
 
 
+def _redirect_path(response) -> str:
+    # Starlette's url_for() returns an absolute URL (e.g. http://testserver/login),
+    # so compare the path, not the whole Location header.
+    return urlsplit(response.headers["location"]).path
+
+
 def test_auth_flow():
-    with TestClient(app) as client:  # `with` runs the lifespan -> bootstrap admin
+    # https base_url so the Secure session cookie (https_only=True) is retained.
+    with TestClient(app, base_url="https://testserver") as client:  # `with` runs lifespan -> bootstrap admin
         # Unauthenticated dashboard redirects to /login
         r = client.get("/", follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"] == "/login", r.status_code
+        assert r.status_code == 303 and _redirect_path(r) == "/login", r.status_code
+
+        # Protected POST routes redirect too (the new query console)
+        r = client.post("/query", data={"sql": "SELECT 1"}, follow_redirects=False)
+        assert r.status_code == 303 and _redirect_path(r) == "/login", r.status_code
 
         # Login page renders
         r = client.get("/login")
@@ -40,15 +53,16 @@ def test_auth_flow():
             data={"username": "admin", "password": "s3cret-pass"},
             follow_redirects=False,
         )
-        assert r.status_code == 303 and r.headers["location"] == "/", r.status_code
+        assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
 
-        # Now the dashboard is reachable and shows the user
+        # Now the dashboard is reachable and shows the user + query console
         r = client.get("/")
         assert r.status_code == 200 and "Signed in as admin" in r.text
+        assert "Run a query" in r.text, "query console missing from dashboard"
 
         # Logout clears the session
         r = client.post("/logout", follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"] == "/login"
+        assert r.status_code == 303 and _redirect_path(r) == "/login"
         r = client.get("/", follow_redirects=False)
         assert r.status_code == 303
     print("auth flow: OK")

@@ -2,7 +2,7 @@ from fastapi import Request
 
 
 class NotAuthenticated(Exception):
-    """Raised by `require_login` when there is no logged-in user. teste"""
+    """Raised by `require_login` when there is no logged-in user."""
 
 
 def get_current_user(request: Request) -> str | None:

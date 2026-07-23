@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import reports, users
+from . import db, reports, users
 from .auth import NotAuthenticated, require_login
 from .config import get_settings
 
@@ -16,6 +16,28 @@ logger = logging.getLogger("report_hub")
 settings = get_settings()
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+# Cap how many result rows are rendered in the browser. The full result set is
+# still available via Export — this only bounds the HTML we build per request.
+QUERY_DISPLAY_LIMIT = 500
+
+
+def _file_response(df, fmt: str, basename: str) -> Response:
+    """Serialize a DataFrame to CSV/xlsx and return it as a file download."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if fmt == "xlsx":
+        data = reports.to_xlsx_bytes(df)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{basename}_{timestamp}.xlsx"
+    else:
+        data = reports.to_csv_bytes(df)
+        media = "text/csv"
+        filename = f"{basename}_{timestamp}.csv"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @asynccontextmanager
@@ -86,6 +108,84 @@ def dashboard(request: Request, user: str = Depends(require_login)):
     )
 
 
+@app.post("/query", response_class=HTMLResponse)
+def run_query(
+    request: Request,
+    sql: str = Form(...),
+    user: str = Depends(require_login),
+):
+    context = {
+        "user": user,
+        "title": settings.app_title,
+        "error": None,
+        "message": None,
+        "sql": sql,
+    }
+    try:
+        result = db.execute(sql)
+    except Exception as exc:
+        # This is a trusted, login-gated internal console, so showing the real
+        # DB error is the useful behavior (unlike the fixed report export).
+        logger.exception("Ad-hoc query failed")
+        context["error"] = f"Query failed: {exc}"
+        return templates.TemplateResponse(
+            request, "dashboard.html", context, status_code=400
+        )
+
+    if result.returns_rows:
+        shown = result.rows[:QUERY_DISPLAY_LIMIT]
+        context["result"] = {
+            "columns": result.columns,
+            "rows": [["" if v is None else str(v) for v in row] for row in shown],
+            "total": result.rowcount,
+            "shown": len(shown),
+            "truncated": result.rowcount > QUERY_DISPLAY_LIMIT,
+        }
+    else:
+        context["message"] = f"OK — {result.rowcount} row(s) affected."
+    return templates.TemplateResponse(request, "dashboard.html", context)
+
+
+@app.post("/query/export")
+def export_query(
+    request: Request,
+    format: str = "csv",
+    sql: str = Form(...),
+    user: str = Depends(require_login),
+):
+    try:
+        result = db.execute(sql)
+    except Exception as exc:
+        logger.exception("Ad-hoc query export failed")
+        return templates.TemplateResponse(
+            request,
+            "dashboard.html",
+            {
+                "user": user,
+                "title": settings.app_title,
+                "error": f"Query failed: {exc}",
+                "message": None,
+                "sql": sql,
+            },
+            status_code=400,
+        )
+
+    if not result.returns_rows:
+        return templates.TemplateResponse(
+            request,
+            "dashboard.html",
+            {
+                "user": user,
+                "title": settings.app_title,
+                "error": None,
+                "message": f"OK — {result.rowcount} row(s) affected. Nothing to export.",
+                "sql": sql,
+            },
+        )
+
+    return _file_response(result.to_dataframe(), format, "query")
+
+
 @app.get("/report/export")
 def export_report(
     request: Request,
@@ -109,21 +209,7 @@ def export_report(
             status_code=502,
         )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if format == "xlsx":
-        data = reports.to_xlsx_bytes(df)
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        filename = f"report_{timestamp}.xlsx"
-    else:
-        data = reports.to_csv_bytes(df)
-        media = "text/csv"
-        filename = f"report_{timestamp}.csv"
-
-    return Response(
-        content=data,
-        media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _file_response(df, format, "report")
 
 
 @app.get("/healthz")

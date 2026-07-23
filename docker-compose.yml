@@ -8,10 +8,6 @@ services:
     env_file:
       - .env
     volumes:
-      # SSH private key used to open the tunnel (read-only).
-      # Make sure the file is readable by the container user (uid 10001),
-      # e.g. a dedicated deploy key with chmod 644 on the host.
-
       # Persisted user store (usernames + bcrypt hashes).
       - hub_data:/app/data
 

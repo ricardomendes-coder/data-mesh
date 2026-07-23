@@ -14,13 +14,30 @@
       margin:0; background:var(--bg); color:var(--fg);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem; }
     .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; }
     h1 { font-size:1.35rem; margin:0 0 1rem; }
     label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:.35rem; }
-    input {
+    code { background:#0b1220; padding:.1rem .35rem; border-radius:5px; font-size:.85em; }
+    input, textarea {
       width:100%; padding:.6rem .7rem; border-radius:8px; margin-bottom:1rem;
       border:1px solid var(--border); background:#0b1220; color:var(--fg);
+    }
+    textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:.9rem; resize:vertical;
+    }
+    .tablewrap { overflow-x:auto; margin-top:1rem; border:1px solid var(--border); border-radius:8px; }
+    table { border-collapse:collapse; width:100%; font-size:.85rem; }
+    th, td {
+      text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--border);
+      white-space:nowrap;
+    }
+    th { position:sticky; top:0; background:#0b1220; color:var(--muted); font-weight:600; }
+    tbody tr:last-child td { border-bottom:none; }
+    .notice {
+      background:#0b2a1d; border:1px solid #14532d; color:#bbf7d0;
+      padding:.6rem .75rem; border-radius:8px; margin-bottom:1rem; font-size:.9rem;
     }
     button, .btn {
       display:inline-block; padding:.6rem 1rem; border-radius:8px; cursor:pointer;

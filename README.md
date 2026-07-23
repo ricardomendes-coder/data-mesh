@@ -1,20 +1,21 @@
 # Report Hub
 
-A minimal internal hub that runs in Docker on a machine with SSH access to your
-database. Version 1 does exactly one thing: users log in and export a predefined
-report (CSV or Excel). It's structured so you can grow it from here.
+A minimal internal hub that runs in Docker on a machine with network access to
+your database (e.g. an EC2 instance in the same VPC). Users log in, then either
+run ad-hoc SQL or export the predefined report (CSV or Excel). It's structured
+so you can grow it from here.
 
 ## How it works
 
 ```
-Browser ──HTTP──▶  Docker container (this app)  ──SSH tunnel──▶  DB host  ──▶  Database
-                   login + report export
+Browser ──HTTP──▶  Docker container (this app)  ──▶  Database
+                   login + query / report export
 ```
 
-For each report, the app opens an SSH tunnel to `SSH_HOST`, forwards a local
-port to `DB_HOST:DB_PORT` (as seen *from the SSH host*), runs `sql/report.sql`,
-and streams the results back as a file. The tunnel is opened and closed per
-request, so there's no long-lived connection to go stale.
+The app connects directly to `DB_HOST:DB_PORT` using the `DB_*` settings. For
+the predefined report it runs `sql/report.sql`; the "Run a query" console runs
+whatever SQL you type. Connections are opened and disposed per request, so
+there's no long-lived connection to go stale.
 
 ## Setup
 
@@ -34,18 +35,10 @@ request, so there's no long-lived connection to go stale.
    Key values in `.env`:
    - `INITIAL_ADMIN_USER` / `INITIAL_ADMIN_PASSWORD` — the first user, created
      automatically on first startup.
-   - `SSH_*` — how to reach the DB host over SSH.
-   - `DB_*` — the database, addressed **from the SSH host** (often `127.0.0.1`
-     if the DB runs on that host).
+   - `DB_*` — the database endpoint reachable from this host (e.g. the RDS
+     endpoint or private IP from your EC2 instance).
 
-2. **Add the SSH key**
-
-   Put the private key the app should use to open the tunnel at
-   `secrets/ssh_key`. Use a **dedicated deploy key**, and make sure the file is
-   readable by the container user (uid 10001) — e.g. `chmod 644 secrets/ssh_key`.
-   (paramiko, unlike the `ssh` CLI, does not require `600`.)
-
-3. **Run**
+2. **Run**
 
    ```bash
    docker compose up --build
@@ -81,20 +74,27 @@ The app uses SQLAlchemy, so switching databases is a config change:
 
 ## Security notes (please read before exposing this)
 
-- **Use a read-only database user.** V1 only reads.
-- **Put it behind HTTPS** (a reverse proxy like Caddy/Nginx/Traefik) and then
-  set `https_only=True` in `app/main.py`'s `SessionMiddleware`.
-- Don't commit `.env` or `secrets/` (already in `.gitignore`).
-- Consider restricting network access to the hub (VPN / internal network only).
+- **Use a read-only database user.** The "Run a query" console executes *any*
+  SQL a logged-in user submits — including writes and DDL — so the DB user's
+  own permissions are your only guardrail. Grant only what you're comfortable
+  with every logged-in user having.
+- **Everyone who can log in gets the SQL console.** There are no roles yet, so
+  only hand out accounts to people you'd trust with that DB user.
+- **HTTPS is required as configured.** `app/main.py` sets `https_only=True` on
+  the session cookie, so login only works over `https://` (put it behind a
+  reverse proxy like Caddy/Nginx/Traefik). For plain-HTTP local testing, flip
+  it to `False` temporarily.
+- Don't commit `.env` (already in `.gitignore`).
+- Restrict network access to the hub (VPN / internal network only).
 
 ## Project layout
 
 ```
 app/
-  main.py       FastAPI app: routes, sessions, report export
+  main.py       FastAPI app: routes, sessions, query console + report export
   auth.py       login dependency
   users.py      JSON-backed user store (swap for a table later)
-  db.py         SSH tunnel + SQLAlchemy query
+  db.py         direct SQLAlchemy connection (run_query + execute)
   reports.py    predefined report + CSV/Excel serialization
   config.py     settings from environment
   templates/    login + dashboard pages

@@ -16,14 +16,7 @@ class Settings(BaseSettings):
     initial_admin_user: str | None = None
     initial_admin_password: str | None = None
 
-    # ---- SSH tunnel: the box running this container reaches the DB over SSH ----
-    ssh_host: str = ""
-    ssh_port: int = 22
-    ssh_user: str = ""
-    ssh_key_path: str = "/app/secrets/ssh_key"
-    ssh_key_passphrase: str | None = None
-
-    # ---- Database (address as seen FROM the SSH host) ----
+    # ---- Database (direct connection from wherever this app runs) ----
     db_host: str = "127.0.0.1"
     db_port: int = 5432
     db_name: str = ""

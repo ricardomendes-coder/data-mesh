@@ -11,10 +11,44 @@
 </div>
 
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if message %}<div class="notice">{{ message }}</div>{% endif %}
 
 <div class="card">
+  <h1 style="font-size:1.1rem;">Run a query</h1>
+  <p class="muted">Run SQL against the database. Add a <code>LIMIT</code> for big tables — the browser shows the first {{ 500 }} rows; Export always returns every row.</p>
+  <form method="post">
+    <textarea name="sql" rows="7" spellcheck="false" placeholder="SELECT * FROM ... LIMIT 100;" required autofocus>{{ sql or '' }}</textarea>
+    <div class="row">
+      <button type="submit" formaction="{{ url_for('run_query') }}">Run</button>
+      {% if result %}
+      <button class="btn" type="submit" formaction="{{ url_for('export_query') }}?format=csv">Export CSV</button>
+      <button class="btn secondary" type="submit" formaction="{{ url_for('export_query') }}?format=xlsx">Export Excel</button>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if result %}
+    <div class="muted" style="margin-top:1rem;">
+      {{ result.total }} row(s){% if result.truncated %} — showing the first {{ result.shown }}{% endif %}.
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>{% for c in result.columns %}<th>{{ c }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in result.rows %}
+          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:1.25rem;">
   <h1 style="font-size:1.1rem;">Predefined report</h1>
-  <p class="muted">Run the report against the database and download the results.</p>
+  <p class="muted">The saved query in <code>sql/report.sql</code>.</p>
   <div class="row">
     <a class="btn" href="{{ url_for('export_report') }}?format=csv">Export CSV</a>
     <a class="btn secondary" href="{{ url_for('export_report') }}?format=xlsx">Export Excel</a>
