@@ -12,12 +12,20 @@
 
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 {% if message %}<div class="notice">{{ message }}</div>{% endif %}
+{% if db_error %}<div class="error">{{ db_error }}</div>{% endif %}
 
 <div class="card">
   <h1 style="font-size:1.1rem;">Run a query</h1>
-  <p class="muted">Run SQL against the database. Add a <code>LIMIT</code> for big tables — the browser shows the first {{ 500 }} rows; Export always returns every row.</p>
+  <p class="muted">Pick a database and run SQL against it. Add a <code>LIMIT</code> for big tables — the browser shows the first {{ 500 }} rows; Export always returns every row.</p>
   <form method="post">
-    <textarea name="sql" rows="7" spellcheck="false" placeholder="SELECT * FROM ... LIMIT 100;" required autofocus>{{ sql or '' }}</textarea>
+    <label for="database">Database</label>
+    <select id="database" name="database" required>
+      {% for db_name in databases %}
+      <option value="{{ db_name }}" {% if db_name == database %}selected{% endif %}>{{ db_name }}</option>
+      {% endfor %}
+    </select>
+    <label for="sql">SQL</label>
+    <textarea id="sql" name="sql" rows="7" spellcheck="false" placeholder="SELECT * FROM ... LIMIT 100;" required autofocus>{{ sql or '' }}</textarea>
     <div class="row">
       <button type="submit" formaction="{{ url_for('run_query') }}">Run</button>
       {% if result %}
@@ -47,11 +55,22 @@
 </div>
 
 <div class="card" style="margin-top:1.25rem;">
-  <h1 style="font-size:1.1rem;">Predefined report</h1>
-  <p class="muted">The saved query in <code>sql/report.sql</code>.</p>
-  <div class="row">
-    <a class="btn" href="{{ url_for('export_report') }}?format=csv">Export CSV</a>
-    <a class="btn secondary" href="{{ url_for('export_report') }}?format=xlsx">Export Excel</a>
-  </div>
+  <h1 style="font-size:1.1rem;">Reports</h1>
+  {% if reports %}
+    {% for report in reports %}
+    <div class="report-row">
+      <div>
+        <div>{{ report.title }}</div>
+        <div class="muted">database: <code>{{ report.database }}</code></div>
+      </div>
+      <div class="row">
+        <a class="btn" href="{{ url_for('export_report', key=report.key) }}?format=csv">CSV</a>
+        <a class="btn secondary" href="{{ url_for('export_report', key=report.key) }}?format=xlsx">Excel</a>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No reports defined. Add one to <code>reports.toml</code>.</p>
+  {% endif %}
 </div>
 {% endblock %}

@@ -99,33 +99,69 @@ def logout(request: Request):
     return RedirectResponse(request.url_for("login_form"), status_code=303)
 
 
+def _dashboard_context(user: str, **extra) -> dict:
+    """Base template context: the DB picker list and the reports manifest.
+
+    Both DB discovery and manifest parsing are best-effort — a failure degrades
+    the page (banner + empty list) instead of 500ing the whole dashboard.
+    """
+    databases: list[str] = []
+    db_error = None
+    try:
+        databases = db.list_databases()
+    except Exception:
+        logger.exception("Could not list databases")
+        db_error = "Could not load the database list — check the server logs."
+
+    try:
+        report_list = reports.load_reports()
+    except Exception:
+        logger.exception("Could not load the reports manifest")
+        report_list = []
+        db_error = db_error or "Could not load the reports — check the server logs."
+
+    context = {
+        "user": user,
+        "title": settings.app_title,
+        "error": None,
+        "message": None,
+        "sql": None,
+        "database": settings.db_name,
+        "databases": databases,
+        "db_error": db_error,
+        "reports": report_list,
+        "result": None,
+    }
+    context.update(extra)
+    return context
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, user: str = Depends(require_login)):
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {"user": user, "title": settings.app_title, "error": None},
-    )
+    return templates.TemplateResponse(request, "dashboard.html", _dashboard_context(user))
 
 
 @app.post("/query", response_class=HTMLResponse)
 def run_query(
     request: Request,
     sql: str = Form(...),
+    database: str = Form(...),
     user: str = Depends(require_login),
 ):
-    context = {
-        "user": user,
-        "title": settings.app_title,
-        "error": None,
-        "message": None,
-        "sql": sql,
-    }
+    context = _dashboard_context(user, sql=sql, database=database)
+
+    # Only accept a database the server actually reported (when we have a list).
+    if context["databases"] and database not in context["databases"]:
+        context["error"] = f"Unknown database: {database!r}."
+        return templates.TemplateResponse(
+            request, "dashboard.html", context, status_code=400
+        )
+
     try:
-        result = db.execute(sql)
+        result = db.execute(sql, database)
     except Exception as exc:
         # This is a trusted, login-gated internal console, so showing the real
-        # DB error is the useful behavior (unlike the fixed report export).
+        # DB error is the useful behavior (unlike report export).
         logger.exception("Ad-hoc query failed")
         context["error"] = f"Query failed: {exc}"
         return templates.TemplateResponse(
@@ -151,65 +187,66 @@ def export_query(
     request: Request,
     format: str = "csv",
     sql: str = Form(...),
+    database: str = Form(...),
     user: str = Depends(require_login),
 ):
-    try:
-        result = db.execute(sql)
-    except Exception as exc:
-        logger.exception("Ad-hoc query export failed")
+    def _error(msg: str, status: int = 400):
+        context = _dashboard_context(user, sql=sql, database=database, error=msg)
         return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "user": user,
-                "title": settings.app_title,
-                "error": f"Query failed: {exc}",
-                "message": None,
-                "sql": sql,
-            },
-            status_code=400,
+            request, "dashboard.html", context, status_code=status
         )
 
+    try:
+        databases = db.list_databases()
+    except Exception:
+        databases = []
+    if databases and database not in databases:
+        return _error(f"Unknown database: {database!r}.")
+
+    try:
+        result = db.execute(sql, database)
+    except Exception as exc:
+        logger.exception("Ad-hoc query export failed")
+        return _error(f"Query failed: {exc}")
+
     if not result.returns_rows:
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "user": user,
-                "title": settings.app_title,
-                "error": None,
-                "message": f"OK — {result.rowcount} row(s) affected. Nothing to export.",
-                "sql": sql,
-            },
+        context = _dashboard_context(
+            user,
+            sql=sql,
+            database=database,
+            message=f"OK — {result.rowcount} row(s) affected. Nothing to export.",
         )
+        return templates.TemplateResponse(request, "dashboard.html", context)
 
     return _file_response(result.to_dataframe(), format, "query")
 
 
-@app.get("/report/export")
+@app.get("/report/{key}/export")
 def export_report(
     request: Request,
+    key: str,
     format: str = "csv",
     user: str = Depends(require_login),
 ):
     try:
-        df = reports.get_report()
+        df = reports.get_report_df(key)
+    except KeyError:
+        context = _dashboard_context(user, error=f"Unknown report: {key!r}.")
+        return templates.TemplateResponse(
+            request, "dashboard.html", context, status_code=404
+        )
     except Exception:
         # Full details go to the server log; the user sees a generic message so
         # we never leak connection strings or credentials into the browser.
-        logger.exception("Report generation failed")
+        logger.exception("Report generation failed for %r", key)
+        context = _dashboard_context(
+            user, error="Could not generate the report. Check the server logs."
+        )
         return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "user": user,
-                "title": settings.app_title,
-                "error": "Could not generate the report. Check the server logs.",
-            },
-            status_code=502,
+            request, "dashboard.html", context, status_code=502
         )
 
-    return _file_response(df, format, "report")
+    return _file_response(df, format, key)
 
 
 @app.get("/healthz")

@@ -1,8 +1,8 @@
 """Database access (direct connection).
 
-The app connects straight to DB_HOST:DB_PORT (see config.py). This is the
-right model when the app runs somewhere with network access to the database
-(e.g. an EC2 instance in the same VPC as the DB).
+The app connects straight to DB_HOST:DB_PORT (see config.py). All targets live
+on the same server and share one login — only the *database* varies, so queries
+take an optional `database` argument that overrides just that part of the URL.
 """
 
 from dataclasses import dataclass, field
@@ -13,29 +13,57 @@ from sqlalchemy.engine import URL
 
 from .config import get_settings
 
+# Databases that exist on the server but are never useful to target.
+_SYSTEM_DATABASES = {"rdsadmin"}
 
-def _engine():
+
+def build_url(database: str | None = None) -> URL:
+    """Build the SQLAlchemy URL for `database` (defaults to settings.db_name)."""
     s = get_settings()
-    url = URL.create(
+    return URL.create(
         drivername=s.db_driver,
         username=s.db_user,
         password=s.db_password,
         host=s.db_host,
         port=s.db_port,
-        database=s.db_name,
+        database=database or s.db_name,
     )
-    return create_engine(url)
 
 
-def run_query(sql: str) -> pd.DataFrame:
+def _engine(database: str | None = None):
+    return create_engine(build_url(database))
+
+
+def run_query(sql: str, database: str | None = None) -> pd.DataFrame:
     """Run a row-returning query (SELECT) and return the rows as a DataFrame.
 
-    Used by the predefined report. Raises if `sql` does not return rows.
+    Used by reports. Raises if `sql` does not return rows.
     """
-    engine = _engine()
+    engine = _engine(database)
     try:
         with engine.connect() as conn:
             return pd.read_sql(text(sql), conn)
+    finally:
+        engine.dispose()
+
+
+def list_databases() -> list[str]:
+    """Return the databases available on the server, for the ad-hoc DB picker.
+
+    Connects to the catalog database (settings.db_catalog, usually "postgres")
+    and reads pg_database. Raises on failure so the caller can degrade the UI.
+    """
+    engine = _engine(get_settings().db_catalog)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT datname FROM pg_database "
+                    "WHERE datistemplate = false AND datallowconn "
+                    "ORDER BY datname"
+                )
+            )
+            return [r[0] for r in rows if r[0] not in _SYSTEM_DATABASES]
     finally:
         engine.dispose()
 
@@ -58,14 +86,14 @@ class QueryResult:
         return pd.DataFrame(self.rows, columns=self.columns)
 
 
-def execute(sql: str) -> QueryResult:
-    """Run an arbitrary SQL statement.
+def execute(sql: str, database: str | None = None) -> QueryResult:
+    """Run an arbitrary SQL statement against `database`.
 
     Row-returning statements come back as columns + rows; write/DDL statements
     are committed and reported via rowcount. Whatever the DB rejects is raised
     to the caller so the console can show the real error.
     """
-    engine = _engine()
+    engine = _engine(database)
     try:
         with engine.connect() as conn:
             result = conn.execute(text(sql))

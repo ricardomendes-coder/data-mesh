@@ -1,8 +1,8 @@
--- Predefined report query.
+-- Connectivity check (the "connectivity" report in reports.toml).
 --
--- This default works on any PostgreSQL database and lets you verify the whole
--- pipeline end to end (login -> SSH tunnel -> query -> file download) BEFORE you
--- write the real report. Replace it with your actual query when ready.
+-- Works on any PostgreSQL database and confirms the pipeline end to end
+-- (login -> query -> file download). Point a report at your real query by
+-- adding a [[report]] entry with its own sql_file.
 --
 -- MySQL note: use DATABASE() instead of current_database().
 

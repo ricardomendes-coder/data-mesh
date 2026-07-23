@@ -1,0 +1,35 @@
+# Report definitions.
+#
+# Each [[report]] runs SQL against a database on the configured server (the
+# DB_* connection in .env — only the database name changes per report).
+#
+# Fields:
+#   key       unique id, used in the export URL (/report/<key>/export)
+#   title     shown on the dashboard
+#   database  which database on the server to run against
+#   sql_file  path (relative to the repo root) to a .sql file  -- OR --
+#   sql       inline SQL (use one or the other)
+#
+# The manifest and the .sql files are read fresh on each export, so edits take
+# effect immediately — no rebuild or restart needed (both are mounted; see
+# docker-compose.yml).
+
+[[report]]
+key      = "connectivity"
+title    = "Connectivity check"
+database = "analytics"
+sql_file = "sql/report.sql"    # default now()/current_user/current_database() probe
+
+# Add more like this:
+#
+# [[report]]
+# key      = "rocketlane_projects"
+# title    = "Rocketlane projects"
+# database = "rocketlane"
+# sql_file = "sql/rocketlane_projects.sql"
+#
+# [[report]]
+# key      = "active_users"
+# title    = "Active users (last 30d)"
+# database = "analytics"
+# sql      = "SELECT count(*) FROM users WHERE last_seen > now() - interval '30 days'"

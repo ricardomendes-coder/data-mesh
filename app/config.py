@@ -16,10 +16,17 @@ class Settings(BaseSettings):
     initial_admin_user: str | None = None
     initial_admin_password: str | None = None
 
+    # ---- Reports ----
+    # Manifest declaring the available reports (see reports.toml).
+    reports_file: str = "reports.toml"
+
     # ---- Database (direct connection from wherever this app runs) ----
     db_host: str = "127.0.0.1"
     db_port: int = 5432
+    # Default database: the one preselected in the query picker.
     db_name: str = ""
+    # Catalog database used only to enumerate the others for the picker.
+    db_catalog: str = "postgres"
     db_user: str = ""
     db_password: str = ""
     # SQLAlchemy driver string. Change this to target another database:

@@ -7,6 +7,7 @@ os.environ["USERS_FILE"] = os.path.join(_tmp, "users.json")
 os.environ["SESSION_SECRET"] = "test-secret"
 os.environ["INITIAL_ADMIN_USER"] = "admin"
 os.environ["INITIAL_ADMIN_PASSWORD"] = "s3cret-pass"
+os.environ["REPORTS_FILE"] = os.path.join(_tmp, "reports.toml")
 
 from urllib.parse import urlsplit
 
@@ -96,8 +97,61 @@ def test_read_sql_pattern():
     print("read_sql pattern: OK")
 
 
+def test_query_picker_and_reports():
+    # Stub the "server": a temp SQLite DB stands in, and list_databases() returns
+    # a fixed set (no Postgres in the sandbox). Patching the app.db module is
+    # enough because main.py and reports.py both call it by attribute.
+    from app import db
+
+    dbfile = os.path.join(_tmp, "t.db")
+    eng = create_engine(f"sqlite:///{dbfile}")
+    with eng.connect() as conn:
+        conn.execute(text("CREATE TABLE t (id INTEGER, name TEXT)"))
+        conn.execute(text("INSERT INTO t VALUES (1, 'alice'), (2, NULL)"))
+        conn.commit()
+
+    db._engine = lambda database=None: create_engine(f"sqlite:///{dbfile}")
+    db.list_databases = lambda: ["main", "other"]
+
+    with open(os.environ["REPORTS_FILE"], "w") as f:
+        f.write(
+            '[[report]]\n'
+            'key = "t_report"\n'
+            'title = "Temp report"\n'
+            'database = "main"\n'
+            'sql = "SELECT * FROM t ORDER BY id"\n'
+        )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.post("/login", data={"username": "admin", "password": "s3cret-pass"})
+
+        # Dashboard shows the DB picker + the manifest report
+        r = client.get("/")
+        assert ">main<" in r.text and ">other<" in r.text, "db picker not populated"
+        assert "Temp report" in r.text, "report not listed"
+
+        # Query against a listed database -> rendered table (NULL shown blank)
+        r = client.post("/query", data={"sql": "SELECT * FROM t ORDER BY id", "database": "main"})
+        assert r.status_code == 200 and "alice" in r.text, r.status_code
+
+        # A database not in the list is rejected
+        r = client.post("/query", data={"sql": "SELECT 1", "database": "bogus"})
+        assert r.status_code == 400 and "Unknown database" in r.text, r.status_code
+
+        # Report export -> CSV attachment named after the report key
+        r = client.get("/report/t_report/export?format=csv")
+        assert r.status_code == 200 and r.content.startswith(b"id,name"), r.content[:30]
+        assert 'filename="t_report_' in r.headers["content-disposition"]
+
+        # Unknown report key -> 404
+        r = client.get("/report/nope/export", follow_redirects=False)
+        assert r.status_code == 404, r.status_code
+    print("query picker + reports: OK")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_report_serialization()
     test_read_sql_pattern()
+    test_query_picker_and_reports()
     print("\nAll smoke tests passed.")
