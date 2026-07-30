@@ -331,6 +331,91 @@ def test_dataset_preview_is_not_injectable():
     print("dataset preview guard: OK")
 
 
+def test_chart_spec():
+    """Shaping rules, including the ones the palette validation obliges."""
+    from app import charts as ch
+
+    cols = ["dia", "total", "erros"]
+    rows = [("2026-01-01", 10, 1), ("2026-01-02", 20, 3)]
+
+    assert ch.numeric_columns(cols, rows) == ["total", "erros"]
+
+    spec = ch.build_spec(cols, rows, "bar", "dia", ["total", "erros"])
+    assert spec.labels == ["2026-01-01", "2026-01-02"], spec.labels
+    assert [d["label"] for d in spec.datasets] == ["total", "erros"]
+    # hues are assigned by slot, in the validated order
+    assert spec.datasets[0]["color"] == ch.SERIES_COLORS[0]
+    assert spec.datasets[1]["color"] == ch.SERIES_COLORS[1]
+    assert spec.show_legend is True
+
+    # one series names itself in the title -> no legend box
+    assert ch.build_spec(cols, rows, "line", "dia", ["total"]).show_legend is False
+
+    # a pie encodes one whole
+    pie = ch.build_spec(cols, rows, "pie", "dia", ["total", "erros"])
+    assert len(pie.datasets) == 1, pie.datasets
+    assert any("one measure" in w for w in pie.warnings), pie.warnings
+    assert isinstance(pie.datasets[0]["color"], list), "pie colours vary per slice"
+
+    # unknown columns are reported, not silently charted
+    bad = ch.build_spec(cols, rows, "bar", "nope", ["total"])
+    assert not bad.datasets and bad.warnings
+    dropped = ch.build_spec(cols, rows, "bar", "dia", ["total", "ghost"])
+    assert [d["label"] for d in dropped.datasets] == ["total"]
+    assert any("ghost" in w for w in dropped.warnings)
+
+    # series are capped rather than cycled — two series must never share a hue
+    wide_cols = ["x"] + ["m%d" % i for i in range(12)]
+    wide_rows = [tuple(["a"] + list(range(12)))]
+    capped = ch.build_spec(wide_cols, wide_rows, "bar", "x", wide_cols[1:])
+    assert len(capped.datasets) == ch.MAX_SERIES, len(capped.datasets)
+    hues = [d["color"] for d in capped.datasets]
+    assert len(set(hues)) == len(hues), "hues were cycled: %r" % hues
+
+    # too many points is called out, not silently smeared
+    many = [("d%d" % i, i) for i in range(ch.MAX_POINTS + 25)]
+    big = ch.build_spec(["d", "v"], many, "line", "d", ["v"])
+    assert len(big.labels) == ch.MAX_POINTS
+    assert any("past what a chart can show" in w for w in big.warnings), big.warnings
+
+    # non-numeric text must not become a silent zero
+    assert ch.numeric_columns(["a"], [("hello",)]) == []
+    print("chart spec: OK")
+
+
+def test_charts_disabled_without_app_db():
+    """With no app database the Charts tab explains itself instead of 500ing."""
+    import importlib
+
+    from app import config
+    from app import main as main_mod
+    from app import store
+
+    saved = os.environ.get("APP_DB_PASSWORD")
+    os.environ["APP_DB_PASSWORD"] = ""
+    config.get_settings.cache_clear()
+    store.reset_engine()
+    reloaded = importlib.reload(main_mod)
+    try:
+        assert not reloaded.store.available()
+        with TestClient(reloaded.app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            r = client.get("/charts")
+            assert r.status_code == 503, r.status_code
+            assert "not configured" in r.text
+            r = client.get("/charts/new")
+            assert r.status_code == 503, r.status_code
+    finally:
+        if saved is None:
+            os.environ.pop("APP_DB_PASSWORD", None)
+        else:
+            os.environ["APP_DB_PASSWORD"] = saved
+        config.get_settings.cache_clear()
+        store.reset_engine()
+        importlib.reload(main_mod)
+    print("charts disabled path: OK")
+
+
 def test_superset_delegated_mode():
     """AUTH_MODE=superset: identity comes from Superset's /api/v1/me/."""
     import importlib
@@ -560,7 +645,9 @@ if __name__ == "__main__":
     test_datasets_pages()
     test_inline_code_filter()
     test_dataset_preview_is_not_injectable()
+    test_chart_spec()
     # Last: these reload app.main, which rebinds this module's `app` reference.
+    test_charts_disabled_without_app_db()
     test_superset_delegated_mode()
     test_superset_break_glass()
     test_sso_only_mode()

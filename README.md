@@ -140,6 +140,43 @@ Flask-based and its cookie is called `session`; since both apps live on
 `bi.v360.io`, sharing the name would make each one silently overwrite the
 other's login. Don't set `SESSION_COOKIE_NAME=session`.
 
+## Charts
+
+Write SQL, run it, map columns to axes, save. The chart re-runs its query each
+time you open it.
+
+Charts live in the app's **own database** (`report_hub`), not in `analytics`.
+That separation is deliberate: the query console can write to `analytics`, and
+the Datasets tab enumerates it — app state belongs in neither blast radius. The
+database has its own owner role, matching the convention already used on that
+server (`gitlab_user`, `keycloak_user`, `robots_api_user`).
+
+Schema changes are append-only steps in `MIGRATIONS` (see `app/store.py`), each
+applied once and recorded in `schema_migrations`. Never edit a shipped step —
+add another.
+
+Without `APP_DB_PASSWORD` the Charts tab shows a "not configured" notice; the
+rest of the app is unaffected.
+
+### About the colours
+
+The eight series colours in `app/charts.py` are not a taste call. They were run
+through the data-viz validator against the app's white card surface and clear
+every gate — lightness band, chroma floor, adjacent colour-blind separation
+(ΔE 9.5) and normal-vision separation (ΔE 16.8). Three consequences are load
+bearing:
+
+- Hues are assigned **by slot, in fixed order, never cycled**. A ninth series
+  would reuse a hue and two series would look identical, so series are capped
+  at eight and the chart says so.
+- Aqua, yellow and magenta fall below 3:1 contrast on white, which obliges
+  "relief" — an alternative to colour. That's why every chart page also renders
+  its rows as a table.
+- **No dual axes.** Two measures at wildly different scales belong in two
+  charts, not on two y-scales.
+
+Reordering those hexes invalidates the validation. Re-run it before changing them.
+
 ## Datasets
 
 The **Datasets** tab is a catalog over the analytics database. Every table,

@@ -247,6 +247,24 @@
     .bi-example-hd .bi-btn{margin-left:auto;}
     .bi-example .bi-snippet{margin-top:.7rem;}
 
+    /* ── charts ── */
+    .bi-card-ic-chart{background:var(--orange-50);color:var(--orange-600);}
+    .bi-chartbox{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.1rem 1.15rem;box-shadow:var(--sh-1);position:relative;height:340px;}
+    .bi-chartbox-lg{height:400px;margin-bottom:1.4rem;}
+    .bi-chart-grid{display:grid;grid-template-columns:268px 1fr;gap:1.3rem;align-items:start;margin-top:1.5rem;}
+    @media(max-width:900px){.bi-chart-grid{grid-template-columns:1fr;}}
+    .bi-chart-cfg{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);}
+    .bi-chart-cfg .bi-fld{max-width:none;}
+    .bi-chart-cfg .bi-group-tt{margin-bottom:.9rem;}
+    .bi-checks{display:flex;flex-direction:column;gap:.15rem;max-height:210px;overflow-y:auto;}
+    .bi-check{display:flex;align-items:center;gap:.5rem;padding:.32rem .4rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--body);cursor:pointer;}
+    .bi-check:hover{background:var(--page);color:var(--title);}
+    .bi-check input{width:14px;height:14px;accent-color:var(--orange);flex-shrink:0;}
+    .bi-hint{font-size:.74rem;color:var(--muted);line-height:1.5;margin-top:.5rem;}
+    .bi-chart-main .bi-fld{max-width:none;}
+    #chart-warnings:not(:empty){margin-top:1rem;}
+    #chart-warnings .bi-err{margin-bottom:.6rem;}
+
     /* ── login ──
        The low-poly artwork is the same login-background.png the main app uses,
        over a navy fallback in case the image can't be fetched. */

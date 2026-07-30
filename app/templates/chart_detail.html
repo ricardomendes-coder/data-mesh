@@ -1,0 +1,73 @@
+{% extends "_shell.html" %}
+{% block page_title %}{{ chart.title }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('charts_index') }}">Charts</a> /
+  <span class="bi-kind bi-kind-view">{{ chart.chart_type }}</span>
+  <code>{{ chart.source_db }}</code>
+{% endblock %}
+
+{% block content %}
+{% if chart_error %}
+<div class="bi-err">
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+  <span>{{ chart_error }}</span>
+</div>
+{% else %}
+
+{% if spec and spec.warnings %}
+{% for w in spec.warnings %}<div class="bi-err">{{ w }}</div>{% endfor %}
+{% endif %}
+
+<div class="bi-chartbox bi-chartbox-lg">
+  <canvas id="chart" height="360"></canvas>
+</div>
+
+<div class="bi-panel-tabs">
+  <button class="bi-ptab active" data-tab="data" type="button">Data</button>
+  <button class="bi-ptab" data-tab="sql" type="button">SQL</button>
+</div>
+
+{# The validator flags three palette slots as sub-3:1 on white, which obliges
+   "relief" — a readable alternative to colour. This table is it. #}
+<section class="pane active" data-pane="data">
+  <div class="bi-result-meta">{{ rows|length }} row(s)</div>
+  <div class="bi-restbl-wrap">
+    <table class="bi-restbl">
+      <thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="pane" data-pane="sql">
+  <pre class="bi-snippet">{{ chart.sql }}</pre>
+  <a class="bi-btn sm ghost" href="{{ url_for('dashboard') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|urlencode }}">Open in Query</a>
+</section>
+
+<script id="chart-data" type="application/json">{{ spec.to_dict()|tojson if spec else 'null' }}</script>
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script>
+(function(){
+  var node = document.getElementById('chart-data');
+  var spec = node ? JSON.parse(node.textContent) : null;
+  if (spec) window.renderChart('chart', spec);
+  document.querySelectorAll('button[data-tab]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var tab = el.getAttribute('data-tab');
+      document.querySelectorAll('button[data-tab]').forEach(function(b){
+        b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+      });
+      document.querySelectorAll('.pane').forEach(function(p){
+        p.classList.toggle('active', p.getAttribute('data-pane') === tab);
+      });
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

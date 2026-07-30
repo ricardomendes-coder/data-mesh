@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import datasets, db, oidc, reports, superset_session, users
+from . import charts, datasets, db, oidc, reports, store, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
@@ -83,6 +83,17 @@ async def lifespan(app: FastAPI):
     ):
         users.add_user(settings.initial_admin_user, settings.initial_admin_password)
         logger.info("Created bootstrap admin user %r", settings.initial_admin_user)
+
+    if store.available():
+        try:
+            store.init_schema()
+            logger.info("App database ready: %s", settings.app_db_name)
+        except Exception:
+            # Charts degrade to an error banner; the rest of the app is
+            # unaffected, so a bad app-DB config must not stop startup.
+            logger.exception("Could not initialise the app database")
+    else:
+        logger.info("App database not configured — charts are disabled")
 
     if settings.superset_auth_enabled:
         logger.info(
@@ -600,6 +611,229 @@ def export_report(
         )
 
     return _file_response(df, format, key)
+
+
+def _charts_unavailable(request: Request, user: str, status: int = 503):
+    context = _shell_context(
+        user,
+        "charts",
+        charts=[],
+        db_ok=False,
+        db_error=(
+            "The app database is not configured, so charts can't be saved. "
+            "Set APP_DB_PASSWORD (see .env.example)."
+        ),
+    )
+    return templates.TemplateResponse(
+        request, "charts.html", context, status_code=status
+    )
+
+
+@app.get("/charts", response_class=HTMLResponse)
+def charts_index(request: Request, user: str = Depends(require_login)):
+    if not store.available():
+        return _charts_unavailable(request, user)
+    context = _shell_context(user, "charts", charts=[])
+    try:
+        context["charts"] = store.list_charts()
+    except Exception:
+        logger.exception("Could not list charts")
+        context["db_ok"] = False
+        context["db_error"] = "Could not read saved charts — check the server logs."
+    return templates.TemplateResponse(request, "charts.html", context)
+
+
+def _builder_context(user: str, **extra) -> dict:
+    """Context for the chart builder, including everything needed to re-render
+    the form after a run so nothing the user typed is lost."""
+    databases: list[str] = []
+    try:
+        databases = db.list_databases()
+    except Exception:
+        logger.exception("Could not list databases for the chart builder")
+    context = _shell_context(
+        user,
+        "charts",
+        databases=databases,
+        chart_types=charts.CHART_TYPES,
+        chart=None,
+        sql="",
+        source_db=settings.datasets_database,
+        title="",
+        chart_type="bar",
+        x_column="",
+        y_columns=[],
+        columns=[],
+        rows=[],
+        numeric_columns=[],
+        spec=None,
+        ran=False,
+        # Handed to the browser so the live preview re-colours from the same
+        # validated palette instead of keeping a second copy of the hexes.
+        series_colors=charts.SERIES_COLORS,
+        max_series=charts.MAX_SERIES,
+        max_points=charts.MAX_POINTS,
+    )
+    context.update(extra)
+    return context
+
+
+@app.get("/charts/new", response_class=HTMLResponse)
+def chart_new(request: Request, user: str = Depends(require_login)):
+    if not store.available():
+        return _charts_unavailable(request, user)
+    return templates.TemplateResponse(
+        request, "chart_builder.html", _builder_context(user)
+    )
+
+
+@app.post("/charts/new", response_class=HTMLResponse)
+def chart_run(
+    request: Request,
+    sql: str = Form(...),
+    source_db: str = Form(...),
+    title: str = Form(""),
+    chart_type: str = Form("bar"),
+    x_column: str = Form(""),
+    y_columns: list[str] = Form(default=[]),
+    user: str = Depends(require_login),
+):
+    """Run the builder's SQL and re-render with the column pickers + preview."""
+    if not store.available():
+        return _charts_unavailable(request, user)
+
+    context = _builder_context(
+        user,
+        sql=sql,
+        source_db=source_db,
+        title=title,
+        chart_type=chart_type,
+        x_column=x_column,
+        y_columns=y_columns,
+        ran=True,
+    )
+
+    try:
+        result = db.execute(sql, source_db)
+    except Exception as exc:
+        # Same reasoning as the query console: this is a login-gated internal
+        # tool, so the real database error is the useful thing to show.
+        logger.exception("Chart query failed")
+        context["error"] = f"Query failed: {exc}"
+        return templates.TemplateResponse(
+            request, "chart_builder.html", context, status_code=400
+        )
+
+    if not result.returns_rows:
+        context["error"] = "That statement returned no rows to chart."
+        return templates.TemplateResponse(
+            request, "chart_builder.html", context, status_code=400
+        )
+
+    context["columns"] = result.columns
+    context["rows"] = result.rows[: charts.MAX_POINTS]
+    context["numeric_columns"] = charts.numeric_columns(result.columns, result.rows)
+
+    # Sensible first guess: first column on x, first numeric column as the measure.
+    if not x_column and result.columns:
+        context["x_column"] = result.columns[0]
+    if not y_columns and context["numeric_columns"]:
+        first = context["numeric_columns"][0]
+        # Don't measure the same column we're labelling by.
+        if first == context["x_column"] and len(context["numeric_columns"]) > 1:
+            first = context["numeric_columns"][1]
+        context["y_columns"] = [first]
+
+    context["spec"] = charts.build_spec(
+        result.columns,
+        result.rows,
+        context["chart_type"],
+        context["x_column"],
+        context["y_columns"],
+    )
+    return templates.TemplateResponse(request, "chart_builder.html", context)
+
+
+@app.post("/charts/save")
+def chart_save(
+    request: Request,
+    sql: str = Form(...),
+    source_db: str = Form(...),
+    title: str = Form(...),
+    chart_type: str = Form(...),
+    x_column: str = Form(...),
+    y_columns: list[str] = Form(default=[]),
+    slug: str = Form(""),
+    user: str = Depends(require_login),
+):
+    if not store.available():
+        return _charts_unavailable(request, user)
+
+    title = title.strip() or "Untitled chart"
+    chart = store.Chart(
+        slug=slug or store.unique_slug(title),
+        title=title,
+        source_db=source_db,
+        sql=sql,
+        chart_type=chart_type if chart_type in charts.CHART_TYPE_KEYS else "bar",
+        x_column=x_column,
+        y_columns=list(y_columns),
+        created_by=user,
+    )
+    saved = store.save_chart(chart)
+    logger.info("Chart %r saved by %s", saved.slug, user)
+    return RedirectResponse(
+        request.url_for("chart_detail", slug=saved.slug), status_code=303
+    )
+
+
+@app.get("/charts/{slug}", response_class=HTMLResponse)
+def chart_detail(request: Request, slug: str, user: str = Depends(require_login)):
+    if not store.available():
+        return _charts_unavailable(request, user)
+
+    try:
+        chart = store.get_chart(slug)
+    except Exception:
+        logger.exception("Could not load chart %r", slug)
+        return _charts_unavailable(request, user)
+    if chart is None:
+        context = _shell_context(
+            user, "charts", charts=[], error=f"Unknown chart: {slug!r}."
+        )
+        return templates.TemplateResponse(
+            request, "charts.html", context, status_code=404
+        )
+
+    context = _shell_context(
+        user, "charts", chart=chart, spec=None, columns=[], rows=[], chart_error=None
+    )
+    try:
+        result = db.execute(chart.sql, chart.source_db)
+    except Exception:
+        logger.exception("Chart %r failed to refresh", slug)
+        context["chart_error"] = (
+            "This chart's query failed. Edit it, or check the server logs."
+        )
+        return templates.TemplateResponse(request, "chart_detail.html", context)
+
+    context["columns"] = result.columns
+    context["rows"] = [
+        [None if v is None else str(v) for v in row]
+        for row in result.rows[: charts.MAX_POINTS]
+    ]
+    context["spec"] = charts.build_spec(
+        result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns
+    )
+    return templates.TemplateResponse(request, "chart_detail.html", context)
+
+
+@app.post("/charts/{slug}/delete")
+def chart_delete(request: Request, slug: str, user: str = Depends(require_login)):
+    if store.available():
+        store.delete_chart(slug)
+        logger.info("Chart %r deleted by %s", slug, user)
+    return RedirectResponse(request.url_for("charts_index"), status_code=303)
 
 
 @app.get("/healthz")

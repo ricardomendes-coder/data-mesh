@@ -1,0 +1,117 @@
+{% extends "_shell.html" %}
+{% block page_title %}New chart{% endblock %}
+{% block page_sub %}Write the SQL, run it, then map the columns{% endblock %}
+
+{% block content %}
+<form method="post" action="{{ url_for('chart_run') }}" id="builder">
+  <div class="bi-fld">
+    <label for="source_db">Database</label>
+    <select id="source_db" name="source_db" required>
+      {% for name in databases %}
+      <option value="{{ name }}" {% if name == source_db %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+      {% if not databases %}<option value="{{ source_db }}">{{ source_db }}</option>{% endif %}
+    </select>
+  </div>
+
+  <div class="bi-editor">
+    <div class="bi-editor-bar">
+      <span class="bi-editor-dot"></span>
+      <span class="bi-editor-tag">chart.sql</span>
+      <span class="bi-editor-hint">one row per point — aggregate here, not in the chart</span>
+      <button class="bi-btn sm" type="submit">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor"><path d="M4 3l7 4-7 4z"/></svg>
+        Run
+      </button>
+    </div>
+    <textarea class="bi-ta" id="sql" name="sql" spellcheck="false" required
+      placeholder="SELECT date_trunc('day', created_at) AS dia, count(*) AS total&#10;FROM companies&#10;GROUP BY 1 ORDER BY 1">{{ sql }}</textarea>
+  </div>
+</form>
+
+{% if ran and columns %}
+<div class="bi-chart-grid">
+  <div class="bi-chart-cfg">
+    <h2 class="bi-group-tt">Configure</h2>
+
+    <div class="bi-fld">
+      <label for="chart_type">Chart type</label>
+      {# Name only in the option: the hint doesn't fit the sidebar width and
+         gets clipped mid-word. It renders below the select instead. #}
+      <select id="chart_type" name="chart_type" form="builder">
+        {% for key, label, hint in chart_types %}
+        <option value="{{ key }}" data-hint="{{ hint }}" {% if key == chart_type %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="bi-hint" id="type-hint"></p>
+    </div>
+
+    <div class="bi-fld">
+      <label for="x_column">X axis (labels)</label>
+      <select id="x_column" name="x_column" form="builder">
+        {% for c in columns %}
+        <option value="{{ c }}" {% if c == x_column %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="bi-fld">
+      <label>Measures (numeric columns)</label>
+      {% if numeric_columns %}
+      <div class="bi-checks">
+        {% for c in numeric_columns %}
+        <label class="bi-check">
+          <input type="checkbox" name="y_columns" value="{{ c }}" form="builder"
+                 {% if c in y_columns %}checked{% endif %}>
+          <span>{{ c }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="bi-hint">No numeric columns in this result — a chart needs at least one.</p>
+      {% endif %}
+    </div>
+
+    <p class="bi-hint">Changes preview instantly. Run again after editing the SQL.</p>
+  </div>
+
+  <div class="bi-chart-main">
+    <div class="bi-fld">
+      <label for="title">Title</label>
+      <input id="title" name="title" form="builder" value="{{ title }}"
+             placeholder="e.g. Capturas por dia" required>
+    </div>
+
+    <div class="bi-chartbox">
+      <canvas id="preview" height="300"></canvas>
+    </div>
+
+    <div id="chart-warnings"></div>
+
+    <form method="post" action="{{ url_for('chart_save') }}" id="saveform">
+      <input type="hidden" name="sql" value="{{ sql }}">
+      <input type="hidden" name="source_db" value="{{ source_db }}">
+      <input type="hidden" name="title" id="save-title">
+      <input type="hidden" name="chart_type" id="save-type">
+      <input type="hidden" name="x_column" id="save-x">
+      <div id="save-y"></div>
+      <button class="bi-btn" type="submit">Save chart</button>
+    </form>
+  </div>
+</div>
+
+{# The result travels to the browser once; re-mapping columns is instant and
+   never re-runs the query. #}
+<script id="chart-data" type="application/json">
+  {{ {"columns": columns, "rows": rows|map('list')|list,
+      "spec": spec.to_dict() if spec else None,
+      "warnings": spec.warnings if spec else [],
+      "colors": series_colors, "maxSeries": max_series, "maxPoints": max_points}|tojson }}
+</script>
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='chart-builder.js') }}"></script>
+{% elif ran %}
+<div class="bi-empty-lg">That query returned no columns to chart.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "_shell.html" %}
+{% block page_title %}Charts{% endblock %}
+{% block page_sub %}{{ charts|length }} saved{% endblock %}
+{% block topbar_extra %}
+<a class="bi-btn" href="{{ url_for('chart_new') }}">
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+  New chart
+</a>
+{% endblock %}
+
+{% block content %}
+{% if charts %}
+<div class="bi-cards">
+  {% for c in charts %}
+  <div class="bi-card">
+    <div class="bi-card-ic bi-card-ic-chart">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14h12"/><rect x="3" y="8" width="2.6" height="5"/><rect x="7" y="4.5" width="2.6" height="8.5"/><rect x="11" y="6.5" width="2.6" height="6.5"/></svg>
+    </div>
+    <div class="bi-card-nm">{{ c.title }}</div>
+    <div class="bi-card-sub">
+      <span class="bi-kind bi-kind-view">{{ c.chart_type }}</span>
+      <code>{{ c.source_db }}</code>
+    </div>
+    <div class="bi-card-meta">
+      <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.slug) }}">Open</a>
+      <form method="post" action="{{ url_for('chart_delete', slug=c.slug) }}"
+            onsubmit="return confirm('Delete {{ c.title }}?')">
+        <button class="bi-btn sm ghost" type="submit">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bi-empty-lg">
+  No charts yet. <a href="{{ url_for('chart_new') }}">Create one</a> — write the
+  SQL, pick which column is the x-axis and which are the measures.
+</div>
+{% endif %}
+{% endblock %}

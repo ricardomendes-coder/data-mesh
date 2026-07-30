@@ -93,6 +93,23 @@ class Settings(BaseSettings):
     # Ceiling on a preview/count so a scan of a huge table can't hang a page.
     dataset_timeout_ms: int = 10_000
 
+    # ---- Application database ----
+    # The app's own transactional store: charts (and later dashboards, users).
+    # A dedicated database + owner role on the internal RDS, following the same
+    # convention as gitlab/gitlab_user and keycloak/keycloak_user there. Kept
+    # well away from `analytics`, which is a 300GB warehouse the query console
+    # can write to — app state must not share that blast radius.
+    # Host/port fall back to the DB_* connection when blank (same server).
+    app_db_host: str = ""
+    app_db_port: int = 0
+    app_db_name: str = "report_hub"
+    app_db_user: str = "report_hub_user"
+    app_db_password: str = ""
+
+    @property
+    def app_db_configured(self) -> bool:
+        return bool(self.app_db_password and (self.app_db_host or self.db_host))
+
     # ---- Database (direct connection from wherever this app runs) ----
     db_host: str = "127.0.0.1"
     db_port: int = 5432
