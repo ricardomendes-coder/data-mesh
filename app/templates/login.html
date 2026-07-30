@@ -12,7 +12,8 @@
 
     <div class="bi-login-h">Sign in</div>
     <div class="bi-login-p">
-      {% if sso_enabled %}Use your V360 account to access the hub.
+      {% if superset_enabled %}Sign in through BI 360 to access the hub.
+      {% elif sso_enabled %}Use your V360 account to access the hub.
       {% else %}Enter your credentials to access the hub.{% endif %}
     </div>
 
@@ -23,14 +24,19 @@
     </div>
     {% endif %}
 
-    {% if sso_enabled %}
+    {% if superset_enabled %}
+    <a class="bi-btn sso" href="{{ superset_login_url }}">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
+      Continue with BI 360
+    </a>
+    {% elif sso_enabled %}
     <a class="bi-btn sso" href="{{ url_for('sso_login') }}">
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
       Continue with V360 SSO
     </a>
     {% endif %}
 
-    {% if sso_enabled and password_login_enabled %}
+    {% if (sso_enabled or superset_enabled) and password_login_enabled %}
     <div class="bi-login-or">or</div>
     {% endif %}
 
@@ -39,15 +45,15 @@
       <div class="bi-fld">
         <label for="username">Username</label>
         <input id="username" name="username" autocomplete="username" required
-               {% if not sso_enabled %}autofocus{% endif %}>
+               {% if not (sso_enabled or superset_enabled) %}autofocus{% endif %}>
       </div>
       <div class="bi-fld">
         <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
       </div>
-      <button class="bi-btn{% if sso_enabled %} ghost{% endif %}" type="submit">Log in</button>
+      <button class="bi-btn{% if sso_enabled or superset_enabled %} ghost{% endif %}" type="submit">Log in</button>
     </form>
-    {% if sso_enabled %}
+    {% if sso_enabled or superset_enabled %}
     <div class="bi-login-note">Local accounts are a fallback for when single sign-on is unavailable.</div>
     {% endif %}
     {% endif %}

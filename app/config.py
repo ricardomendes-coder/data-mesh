@@ -24,11 +24,35 @@ class Settings(BaseSettings):
     session_cookie_path: str = "/"
 
     # ---- Authentication ----
-    # sso      -> Keycloak only (the production setting)
+    # superset -> delegate to the Superset login on the same origin (no
+    #             Keycloak client change needed; see app/superset_session.py)
+    # sso      -> talk to Keycloak directly (needs our redirect URI registered)
     # password -> local username/password only
-    # both     -> Keycloak, with the local form still reachable at /login/local
-    #             as a break-glass path if the IdP is unavailable
-    auth_mode: Literal["sso", "password", "both"] = "sso"
+    # both     -> "sso" plus the local form (kept as an alias; prefer
+    #             ENABLE_LOCAL_LOGIN, which works with every mode)
+    auth_mode: Literal["superset", "sso", "password", "both"] = "sso"
+
+    # Break-glass switch, independent of auth_mode: re-exposes the bcrypt form
+    # at /login/local when the identity provider is unreachable.
+    enable_local_login: bool = False
+
+    # How long a signed-in session stays valid. Matters most in "superset" mode,
+    # where the Superset session is checked once at login and not re-checked on
+    # every request — this bounds how long a hub session can outlive it.
+    session_max_age: int = 12 * 60 * 60
+
+    # ---- Delegated auth (AUTH_MODE=superset) ----
+    # bi.v360.io/ is Superset and bi.v360.io/report is this app, so the browser
+    # sends Superset's cookie here too. We hand it back to Superset's
+    # /api/v1/me/ and let Superset say who the caller is.
+    # Docker bridge gateway: the host's nginx, reachable from the container.
+    superset_internal_url: str = "http://172.17.0.1"
+    superset_host_header: str = "bi.v360.io"
+    superset_cookie_name: str = "session"  # Flask's default; Superset keeps it
+    superset_login_url: str = "https://bi.v360.io/login/"
+    superset_next_url: str = "https://bi.v360.io/report/"
+    superset_logout_url: str = "https://bi.v360.io/logout/"
+    superset_timeout: float = 8.0
 
     # ---- Keycloak / OIDC ----
     # Same realm Superset authenticates against, so a user already signed in to
@@ -73,6 +97,10 @@ class Settings(BaseSettings):
     db_driver: str = "postgresql+psycopg2"
 
     @property
+    def superset_auth_enabled(self) -> bool:
+        return self.auth_mode == "superset"
+
+    @property
     def sso_enabled(self) -> bool:
         """SSO is only live once a client id/secret is actually configured."""
         return self.auth_mode in ("sso", "both") and bool(
@@ -81,7 +109,7 @@ class Settings(BaseSettings):
 
     @property
     def password_login_enabled(self) -> bool:
-        return self.auth_mode in ("password", "both")
+        return self.auth_mode in ("password", "both") or self.enable_local_login
 
 
 @lru_cache

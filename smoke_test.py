@@ -146,6 +146,115 @@ def test_sso_flow():
     print("sso flow: OK")
 
 
+def test_superset_delegated_mode():
+    """AUTH_MODE=superset: identity comes from Superset's /api/v1/me/."""
+    import importlib
+
+    from app import config
+    from app import main as main_mod
+
+    os.environ["AUTH_MODE"] = "superset"
+    config.get_settings.cache_clear()
+    reloaded = importlib.reload(main_mod)
+
+    calls: list[str] = []
+
+    async def fake_identify(cookie_value):
+        calls.append(cookie_value)
+        if cookie_value == "valid-superset-cookie":
+            return {
+                "username": "marcelo.ferreira",
+                "email": "marcelo.ferreira@v360.io",
+                "first_name": "Marcelo",
+                "last_name": "Ferreira",
+                "is_anonymous": False,
+            }
+        return None
+
+    original = reloaded.superset_session.identify
+    reloaded.superset_session.identify = fake_identify
+    try:
+        assert reloaded.settings.superset_auth_enabled
+        with TestClient(reloaded.app, base_url="https://testserver") as client:
+            # No Superset cookie -> bounced to the Superset login, which owns
+            # the registered Keycloak redirect URI.
+            r = client.get("/", follow_redirects=False)
+            assert r.status_code == 303 and _redirect_path(r) == "/login"
+            r = client.get("/login", follow_redirects=False)
+            loc = r.headers["location"]
+            assert loc.startswith("https://bi.v360.io/login/"), loc
+            assert "next=" in loc, f"no next= param to bring the user back: {loc}"
+            assert calls == [], "identify() called without a cookie present"
+
+            # A cookie Superset rejects must not grant access either.
+            # Sent as a header: httpx's jar won't attach a cookie to the
+            # "testserver" host without a domain match.
+            r = client.get(
+                "/login",
+                headers={"Cookie": "session=stale-cookie"},
+                follow_redirects=False,
+            )
+            assert r.headers["location"].startswith("https://bi.v360.io/login/")
+            assert calls == ["stale-cookie"], calls
+
+            # A cookie Superset accepts logs the user straight in
+            r = client.get(
+                "/login",
+                headers={"Cookie": "session=valid-superset-cookie"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
+            r = client.get("/")
+            assert "Signed in as marcelo.ferreira" in r.text, "delegated login failed"
+
+            # Logout goes through Superset — clearing only our cookie would let
+            # the next request sign straight back in.
+            r = client.post("/logout", follow_redirects=False)
+            assert r.headers["location"] == "https://bi.v360.io/logout/", r.headers[
+                "location"
+            ]
+
+            # Direct OIDC endpoints are inert in this mode
+            assert client.get("/auth/sso", follow_redirects=False).status_code == 404
+            assert client.get("/login/local", follow_redirects=False).status_code == 404
+    finally:
+        reloaded.superset_session.identify = original
+        os.environ["AUTH_MODE"] = "both"
+        config.get_settings.cache_clear()
+        importlib.reload(main_mod)
+    print("superset delegated mode: OK")
+
+
+def test_superset_break_glass():
+    """ENABLE_LOCAL_LOGIN works alongside delegated auth, for when BI is down."""
+    import importlib
+
+    from app import config
+    from app import main as main_mod
+
+    os.environ["AUTH_MODE"] = "superset"
+    os.environ["ENABLE_LOCAL_LOGIN"] = "true"
+    config.get_settings.cache_clear()
+    reloaded = importlib.reload(main_mod)
+    try:
+        with TestClient(reloaded.app, base_url="https://testserver") as client:
+            r = client.get("/login/local")
+            assert r.status_code == 200, r.status_code
+            assert "Continue with BI 360" in r.text, "BI 360 button missing"
+            r = client.post(
+                "/login/local",
+                data={"username": "admin", "password": "s3cret-pass"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
+    finally:
+        os.environ["AUTH_MODE"] = "both"
+        os.environ.pop("ENABLE_LOCAL_LOGIN", None)
+        config.get_settings.cache_clear()
+        importlib.reload(main_mod)
+    print("superset break-glass: OK")
+
+
 def test_sso_only_mode():
     """Under AUTH_MODE=sso the password endpoints must not exist at all."""
     import importlib
@@ -262,6 +371,8 @@ if __name__ == "__main__":
     test_report_serialization()
     test_read_sql_pattern()
     test_query_picker_and_reports()
-    # Last: it reloads app.main, which rebinds this module's `app` reference.
+    # Last: these reload app.main, which rebinds this module's `app` reference.
+    test_superset_delegated_mode()
+    test_superset_break_glass()
     test_sso_only_mode()
     print("\nAll smoke tests passed.")

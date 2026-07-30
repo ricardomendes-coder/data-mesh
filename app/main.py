@@ -10,9 +10,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import db, oidc, reports, users
+from . import db, oidc, reports, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
+
+# uvicorn only configures its own loggers and leaves root at WARNING, so our
+# logger.info() calls were being dropped. Give root a handler at INFO.
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 
 logger = logging.getLogger("report_hub")
 settings = get_settings()
@@ -55,11 +61,20 @@ async def lifespan(app: FastAPI):
         users.add_user(settings.initial_admin_user, settings.initial_admin_password)
         logger.info("Created bootstrap admin user %r", settings.initial_admin_user)
 
+    if settings.superset_auth_enabled:
+        logger.info(
+            "Auth: delegated to Superset at %s (identity from /api/v1/me/)",
+            settings.superset_internal_url,
+        )
     if settings.sso_enabled:
         logger.info("Auth: SSO via %s", settings.sso_metadata_url)
     if settings.password_login_enabled:
         logger.info("Auth: local password login enabled (/login/local)")
-    if not settings.sso_enabled and not settings.password_login_enabled:
+    if not (
+        settings.superset_auth_enabled
+        or settings.sso_enabled
+        or settings.password_login_enabled
+    ):
         # Almost always AUTH_MODE=sso with the client id/secret missing. Log it
         # loudly rather than crash-looping, so /healthz stays reachable.
         logger.error(
@@ -76,6 +91,7 @@ app.add_middleware(
     secret_key=settings.session_secret,
     session_cookie=settings.session_cookie_name,
     path=settings.session_cookie_path,
+    max_age=settings.session_max_age,
     same_site="lax",  # must not be "strict": the SSO redirect back from
     # Keycloak is a cross-site navigation and would drop the cookie, losing
     # the OAuth state and failing every login.
@@ -96,6 +112,8 @@ def _login_page(request: Request, error: str | None = None, status_code: int = 2
             "error": error,
             "title": settings.app_title,
             "sso_enabled": settings.sso_enabled,
+            "superset_enabled": settings.superset_auth_enabled,
+            "superset_login_url": superset_session.login_url(),
             "password_login_enabled": settings.password_login_enabled,
         },
         status_code=status_code,
@@ -103,14 +121,37 @@ def _login_page(request: Request, error: str | None = None, status_code: int = 2
 
 
 @app.get("/login")
-def login_form(request: Request):
+async def login_form(request: Request):
     """Entry point for every unauthenticated request.
 
-    Under pure SSO there is nothing to choose, so this bounces straight to
-    Keycloak instead of showing an interstitial "Sign in with SSO" page.
+    There is never anything to choose between here, so this always redirects
+    rather than showing an interstitial "sign in with..." page.
     """
     if get_current_user(request):
         return RedirectResponse(request.url_for("dashboard"), status_code=303)
+
+    if settings.superset_auth_enabled:
+        # Same origin as Superset, so its cookie is already on this request.
+        cookie = request.cookies.get(settings.superset_cookie_name)
+        if cookie:
+            result = await superset_session.identify(cookie)
+            if result:
+                username = result["username"]
+                start_session(
+                    request,
+                    username,
+                    via="superset",
+                    claims=superset_session.claims_from_result(result),
+                )
+                logger.info("Superset-delegated login: %s", username)
+                return RedirectResponse(
+                    request.url_for("dashboard"), status_code=303
+                )
+        # Not signed in to BI 360 (or the cookie is stale). Superset owns the
+        # only Keycloak redirect URI that is actually registered, so send them
+        # there and let it run the OAuth flow on our behalf.
+        return RedirectResponse(superset_session.login_url(), status_code=303)
+
     if settings.sso_enabled:
         return RedirectResponse(request.url_for("sso_login"), status_code=303)
     if settings.password_login_enabled:
@@ -200,6 +241,13 @@ def login_local_submit(
 async def logout(request: Request):
     via = request.session.get("auth_via")
     end_session(request)
+
+    if via == "superset" and settings.superset_auth_enabled:
+        # Dropping only our cookie would be theatre: the very next request would
+        # find the Superset cookie still there and sign the user back in. Send
+        # them through Superset's logout so "log out" means what it says — which
+        # does also end their BI 360 session.
+        return RedirectResponse(settings.superset_logout_url, status_code=303)
 
     # Local-only logout by default. The Keycloak client is shared with Superset,
     # so ending the Keycloak session here would also sign the user out of BI 360

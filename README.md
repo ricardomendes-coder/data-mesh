@@ -62,55 +62,76 @@ back to `reports.toml` as a `connectivity` report if you want a quick check.)
 
 ## Authentication
 
-The hub signs users in through the **same Keycloak realm as Superset**
-(`sso.v360.io/realms/v360`), reusing the Superset OIDC client. Anyone who can
-log in to BI 360 can log in here, and because the realm session is shared they
-usually arrive already authenticated — no second prompt.
+Everyone reaches the hub through the **BI 360 login** — no separate account, no
+second password. `AUTH_MODE` picks how:
 
-`AUTH_MODE` picks the behaviour:
-
-| Value | `/login` | `/login/local` |
+| Value | How identity is established | `/login/local` |
 | --- | --- | --- |
-| `sso` (default) | redirects to Keycloak | `404` |
-| `both` | redirects to Keycloak | bcrypt form — break-glass |
-| `password` | redirects to `/login/local` | bcrypt form |
+| `superset` (in use) | asks Superset who the caller is | `404` unless `ENABLE_LOCAL_LOGIN` |
+| `sso` | talks to Keycloak directly | `404` unless `ENABLE_LOCAL_LOGIN` |
+| `password` | local bcrypt accounts only | bcrypt form |
 
-Usernames come from the `preferred_username` claim, the same mapping Superset's
-`CustomSsoSecurityManager` uses, so a person has one identity across both tools.
-Any authenticated realm user is allowed in — authentication *is* authorization
-here, matching how BI 360 itself behaves.
+`ENABLE_LOCAL_LOGIN=true` re-exposes the bcrypt form at `/report/login/local`
+alongside whichever mode is active — the break-glass path for when the IdP is
+unreachable. Keep one local account around for exactly that.
 
-### Keycloak setup
+Either way, **any user who can log in to BI 360 can use the hub**.
+Authentication *is* authorization here, matching how BI 360 itself behaves. See
+the security notes below.
 
-One admin change is needed on the existing Superset client in realm `v360`:
+### `AUTH_MODE=superset` — borrowing the BI 360 session
+
+This is what's deployed, and it needs **no Keycloak change at all**.
+
+`bi.v360.io/` is Superset and `bi.v360.io/report` is this app, so the browser
+already sends Superset's `session` cookie on our requests. At login we hand that
+cookie back to Superset's own `/api/v1/me/` and use whatever identity it
+reports. Superset stays the only authority on who is signed in — we never verify
+the cookie ourselves, so this app holds no copy of Superset's `SECRET_KEY`.
+
+If there's no valid Superset session, the user is redirected to
+`https://bi.v360.io/login/?next=…/report/`. Superset runs the normal Keycloak
+flow (using *its* callback, which is registered) and drops them back here.
+
+Why this rather than direct OIDC: the shared Keycloak client `V360-BI` permits
+**exact-match redirect URIs only** — no wildcards — and adding
+`https://bi.v360.io/report/auth/callback` needs realm-admin rights. Superset's
+callback is already registered, so the hub borrows its login instead.
+
+Two consequences worth knowing:
+
+- **Logout ends the BI 360 session too.** Clearing only our cookie would be
+  pointless — the next request would find Superset's cookie and sign the user
+  straight back in. So `/logout` redirects to Superset's logout.
+- **The Superset session is checked once, at login.** Afterwards the hub's own
+  cookie carries the session, so logging out of BI 360 elsewhere doesn't
+  immediately revoke hub access. `SESSION_MAX_AGE` (default 12h) bounds that
+  window.
+
+### `AUTH_MODE=sso` — direct Keycloak (preferred, needs one admin change)
+
+The code for this is in `app/oidc.py` and fully working; it only needs the
+redirect URI registered. When someone with realm access is available:
 
 ```
-Valid redirect URIs   +  https://bi.v360.io/report/auth/callback
+sso.v360.io → realm v360 → Clients → V360-BI → Valid redirect URIs
+  +  https://bi.v360.io/report/auth/callback
 ```
 
-Then copy `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET` from `bi360/web.env` on the BI
-host into this app's `.env`, and set:
+Add it as a **new entry** — don't replace Superset's existing
+`oauth-authorized/...` line or BI 360 login breaks. Then copy `SSO_CLIENT_ID` /
+`SSO_CLIENT_SECRET` from `bi360/web.env` into `.env`, set
+`SSO_REDIRECT_URI=https://bi.v360.io/report/auth/callback`, and switch
+`AUTH_MODE=sso`.
 
-```
-SSO_REDIRECT_URI=https://bi.v360.io/report/auth/callback
-```
-
-Set `SSO_REDIRECT_URI` explicitly rather than letting the app infer it — the
+Set `SSO_REDIRECT_URI` explicitly rather than letting the app infer it: the
 inferred value depends on `X-Forwarded-Proto` surviving the ALB → nginx →
-uvicorn chain, and it must match Keycloak's registered URI byte-for-byte.
+uvicorn chain, and it must match Keycloak's registered value byte-for-byte.
 
-### If SSO breaks
-
-`AUTH_MODE=both` + restart re-exposes the password form at
-`/report/login/local` without disturbing the SSO path. Keep one local account
-around for exactly this.
-
-### Logout
-
-Logout is **local only** by default: it clears this app's cookie and leaves the
-Keycloak session alone, so signing out of the hub does not sign you out of
-BI 360. Set `SSO_SINGLE_LOGOUT=true` for a full RP-initiated logout — that also
-needs the post-logout URI registered on the Keycloak client.
+In this mode usernames come from the `preferred_username` claim — the same
+mapping Superset's `CustomSsoSecurityManager` uses — so a person keeps one
+identity across both tools. Logout is local-only by default, since the Keycloak
+client is shared; `SSO_SINGLE_LOGOUT=true` opts into a full RP-initiated logout.
 
 ### Cookie naming
 
@@ -138,10 +159,9 @@ immediately — no rebuild or restart needed.
 
 ## Adding more users
 
-Under SSO there is nothing to do — access is granted in Keycloak, and any user
-in the `v360` realm can sign in.
+There is nothing to do — if someone can log in to BI 360, they can use the hub.
 
-Local accounts only matter for the break-glass path (`AUTH_MODE=both`):
+Local accounts only matter for the break-glass path (`ENABLE_LOCAL_LOGIN=true`):
 
 ```bash
 docker compose exec hub python manage.py create-user alice
@@ -188,7 +208,8 @@ engines would need that adjusted in `app/db.py`):
 app/
   main.py       FastAPI app: routes, sessions, query console + report export
   auth.py       login dependency + session start/end
-  oidc.py       Keycloak OIDC client and claim mapping
+  superset_session.py  delegated auth: identity from Superset's /api/v1/me/
+  oidc.py       Keycloak OIDC client and claim mapping (AUTH_MODE=sso)
   users.py      JSON-backed user store for the break-glass login
   db.py         direct SQLAlchemy connection: run_query / execute / list_databases
   reports.py    manifest-driven reports + CSV/Excel serialization
