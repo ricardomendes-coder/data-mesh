@@ -8,21 +8,45 @@ os.environ["SESSION_SECRET"] = "test-secret"
 os.environ["INITIAL_ADMIN_USER"] = "admin"
 os.environ["INITIAL_ADMIN_PASSWORD"] = "s3cret-pass"
 os.environ["REPORTS_FILE"] = os.path.join(_tmp, "reports.toml")
+# "both" so one process can exercise the SSO path and the break-glass password
+# path. test_sso_only_mode() reloads the app under AUTH_MODE=sso separately.
+os.environ["AUTH_MODE"] = "both"
+os.environ["SSO_CLIENT_ID"] = "report-hub-test"
+os.environ["SSO_CLIENT_SECRET"] = "test-client-secret"
+os.environ["SSO_REDIRECT_URI"] = "https://testserver/auth/callback"
 
 from urllib.parse import urlsplit
 
 import pandas as pd
+from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app import reports
 from app.main import app
 
+KEYCLOAK_AUTHZ = "https://sso.v360.io/realms/v360/protocol/openid-connect/auth"
+
 
 def _redirect_path(response) -> str:
     # Starlette's url_for() returns an absolute URL (e.g. http://testserver/login),
     # so compare the path, not the whole Location header.
     return urlsplit(response.headers["location"]).path
+
+
+class _FakeOIDCClient:
+    """Stands in for the authlib client so tests never call out to sso.v360.io."""
+
+    def __init__(self, claims: dict):
+        self.claims = claims
+        self.redirect_uris: list[str] = []
+
+    async def authorize_redirect(self, request, redirect_uri):
+        self.redirect_uris.append(redirect_uri)
+        return RedirectResponse(f"{KEYCLOAK_AUTHZ}?state=fake", status_code=302)
+
+    async def authorize_access_token(self, request):
+        return {"access_token": "fake-token", "userinfo": self.claims}
 
 
 def test_auth_flow():
@@ -36,13 +60,18 @@ def test_auth_flow():
         r = client.post("/query", data={"sql": "SELECT 1"}, follow_redirects=False)
         assert r.status_code == 303 and _redirect_path(r) == "/login", r.status_code
 
-        # Login page renders
-        r = client.get("/login")
+        # With SSO live, /login is not a page — it hands off to Keycloak
+        r = client.get("/login", follow_redirects=False)
+        assert r.status_code == 303 and _redirect_path(r) == "/auth/sso", r.status_code
+
+        # The break-glass form still renders, and offers both paths
+        r = client.get("/login/local")
         assert r.status_code == 200 and "Log in" in r.text
+        assert "Continue with V360 SSO" in r.text, "SSO button missing from login page"
 
         # Wrong password rejected
         r = client.post(
-            "/login",
+            "/login/local",
             data={"username": "admin", "password": "wrong"},
             follow_redirects=False,
         )
@@ -50,7 +79,7 @@ def test_auth_flow():
 
         # Correct password -> redirect to /
         r = client.post(
-            "/login",
+            "/login/local",
             data={"username": "admin", "password": "s3cret-pass"},
             follow_redirects=False,
         )
@@ -63,12 +92,88 @@ def test_auth_flow():
             "query/reports tabs missing from dashboard"
         )
 
-        # Logout clears the session
+        # Logout clears the session. Password sessions never touch Keycloak.
         r = client.post("/logout", follow_redirects=False)
         assert r.status_code == 303 and _redirect_path(r) == "/login"
         r = client.get("/", follow_redirects=False)
         assert r.status_code == 303
     print("auth flow: OK")
+
+
+def test_sso_flow():
+    from app import main as main_mod
+
+    fake = _FakeOIDCClient(
+        {
+            "preferred_username": "marcelo.ferreira",
+            "email": "marcelo.ferreira@v360.io",
+            "name": "Marcelo Ferreira",
+            "given_name": "Marcelo",
+            "family_name": "Ferreira",
+        }
+    )
+    original = main_mod.oidc.get_client
+    main_mod.oidc.get_client = lambda: fake
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            # /auth/sso redirects out to Keycloak, using the configured URI
+            r = client.get("/auth/sso", follow_redirects=False)
+            assert r.status_code == 302, r.status_code
+            assert r.headers["location"].startswith(KEYCLOAK_AUTHZ), r.headers["location"]
+            assert fake.redirect_uris == ["https://testserver/auth/callback"], (
+                f"wrong redirect_uri sent to Keycloak: {fake.redirect_uris}"
+            )
+
+            # The callback establishes the session under preferred_username,
+            # matching how Superset names the same person.
+            r = client.get("/auth/callback?code=fake&state=fake", follow_redirects=False)
+            assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
+
+            r = client.get("/")
+            assert r.status_code == 200, r.status_code
+            assert "Signed in as marcelo.ferreira" in r.text, "SSO user not on dashboard"
+
+            # Logout is local-only by default so BI 360 stays signed in
+            r = client.post("/logout", follow_redirects=False)
+            assert _redirect_path(r) == "/login", r.headers["location"]
+            assert "sso.v360.io" not in r.headers["location"], (
+                "default logout must not hit Keycloak's end_session endpoint"
+            )
+            r = client.get("/", follow_redirects=False)
+            assert r.status_code == 303, "session survived logout"
+    finally:
+        main_mod.oidc.get_client = original
+    print("sso flow: OK")
+
+
+def test_sso_only_mode():
+    """Under AUTH_MODE=sso the password endpoints must not exist at all."""
+    import importlib
+
+    from app import config
+    from app import main as main_mod
+
+    os.environ["AUTH_MODE"] = "sso"
+    config.get_settings.cache_clear()
+    reloaded = importlib.reload(main_mod)
+    try:
+        assert reloaded.settings.sso_enabled and not reloaded.settings.password_login_enabled
+        with TestClient(reloaded.app, base_url="https://testserver") as client:
+            r = client.get("/login/local", follow_redirects=False)
+            assert r.status_code == 404, r.status_code
+            r = client.post(
+                "/login/local",
+                data={"username": "admin", "password": "s3cret-pass"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 404, r.status_code
+            r = client.get("/login", follow_redirects=False)
+            assert _redirect_path(r) == "/auth/sso", r.headers["location"]
+    finally:
+        os.environ["AUTH_MODE"] = "both"
+        config.get_settings.cache_clear()
+        importlib.reload(main_mod)
+    print("sso-only mode: OK")
 
 
 def test_report_serialization():
@@ -125,7 +230,7 @@ def test_query_picker_and_reports():
         )
 
     with TestClient(app, base_url="https://testserver") as client:
-        client.post("/login", data={"username": "admin", "password": "s3cret-pass"})
+        client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
 
         # Dashboard shows the DB picker + the manifest report
         r = client.get("/")
@@ -153,7 +258,10 @@ def test_query_picker_and_reports():
 
 if __name__ == "__main__":
     test_auth_flow()
+    test_sso_flow()
     test_report_serialization()
     test_read_sql_pattern()
     test_query_picker_and_reports()
+    # Last: it reloads app.main, which rebinds this module's `app` reference.
+    test_sso_only_mode()
     print("\nAll smoke tests passed.")

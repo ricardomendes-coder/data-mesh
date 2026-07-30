@@ -2,14 +2,16 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI, Form, Request
+from authlib.integrations.starlette_client import OAuthError
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import db, reports, users
-from .auth import NotAuthenticated, require_login
+from . import db, oidc, reports, users
+from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
 logger = logging.getLogger("report_hub")
@@ -43,13 +45,28 @@ def _file_response(df, fmt: str, basename: str) -> Response:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create the bootstrap admin on first run (only if no users exist yet).
+    # Skipped under pure SSO, where the local user store is unused.
     if (
-        not users.any_users()
+        settings.password_login_enabled
+        and not users.any_users()
         and settings.initial_admin_user
         and settings.initial_admin_password
     ):
         users.add_user(settings.initial_admin_user, settings.initial_admin_password)
         logger.info("Created bootstrap admin user %r", settings.initial_admin_user)
+
+    if settings.sso_enabled:
+        logger.info("Auth: SSO via %s", settings.sso_metadata_url)
+    if settings.password_login_enabled:
+        logger.info("Auth: local password login enabled (/login/local)")
+    if not settings.sso_enabled and not settings.password_login_enabled:
+        # Almost always AUTH_MODE=sso with the client id/secret missing. Log it
+        # loudly rather than crash-looping, so /healthz stays reachable.
+        logger.error(
+            "No login method is usable: AUTH_MODE=%r but SSO_CLIENT_ID/"
+            "SSO_CLIENT_SECRET are not both set. Nobody can sign in.",
+            settings.auth_mode,
+        )
     yield
 
 
@@ -57,8 +74,12 @@ app = FastAPI(title=settings.app_title, lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret,
-    same_site="lax",
-    https_only=True,  # set True when served over HTTPS (recommended)
+    session_cookie=settings.session_cookie_name,
+    path=settings.session_cookie_path,
+    same_site="lax",  # must not be "strict": the SSO redirect back from
+    # Keycloak is a cross-site navigation and would drop the cookie, losing
+    # the OAuth state and failing every login.
+    https_only=True,
 )
 
 
@@ -67,35 +88,137 @@ async def _redirect_to_login(request: Request, exc: NotAuthenticated):
     return RedirectResponse(url=request.url_for("login_form"), status_code=303)
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
-    if request.session.get("user"):
-        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+def _login_page(request: Request, error: str | None = None, status_code: int = 200):
     return templates.TemplateResponse(
-        request, "login.html", {"error": None, "title": settings.app_title}
+        request,
+        "login.html",
+        {
+            "error": error,
+            "title": settings.app_title,
+            "sso_enabled": settings.sso_enabled,
+            "password_login_enabled": settings.password_login_enabled,
+        },
+        status_code=status_code,
     )
 
 
-@app.post("/login")
-def login_submit(
+@app.get("/login")
+def login_form(request: Request):
+    """Entry point for every unauthenticated request.
+
+    Under pure SSO there is nothing to choose, so this bounces straight to
+    Keycloak instead of showing an interstitial "Sign in with SSO" page.
+    """
+    if get_current_user(request):
+        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+    if settings.sso_enabled:
+        return RedirectResponse(request.url_for("sso_login"), status_code=303)
+    if settings.password_login_enabled:
+        return RedirectResponse(request.url_for("login_local_form"), status_code=303)
+    return _login_page(
+        request,
+        error="Login is not configured on this server. Check the server logs.",
+        status_code=503,
+    )
+
+
+@app.get("/auth/sso")
+async def sso_login(request: Request):
+    """Kick off the OIDC authorization-code flow."""
+    if not settings.sso_enabled:
+        raise HTTPException(status_code=404, detail="SSO is not enabled")
+    # An explicit redirect URI avoids depending on X-Forwarded-Proto being set
+    # correctly all the way through the ALB -> nginx -> uvicorn chain, and it
+    # has to match Keycloak's registered value exactly anyway.
+    redirect_uri = settings.sso_redirect_uri or str(request.url_for("sso_callback"))
+    return await oidc.get_client().authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def sso_callback(request: Request):
+    """Where Keycloak sends the user back with an authorization code."""
+    if not settings.sso_enabled:
+        raise HTTPException(status_code=404, detail="SSO is not enabled")
+
+    try:
+        token = await oidc.get_client().authorize_access_token(request)
+    except OAuthError as exc:
+        # Covers user-cancelled consent, a stale/replayed state, and clock skew
+        # on the id_token. None of it is actionable by the user beyond retrying.
+        logger.warning("SSO callback rejected: %s — %s", exc.error, exc.description)
+        return _login_page(
+            request, error="Single sign-on failed. Please try again.", status_code=401
+        )
+
+    claims = token.get("userinfo") or {}
+    if not claims:
+        # No id_token in the response (realm not returning one for this client);
+        # fall back to the userinfo endpoint, as Superset's manager does.
+        claims = await oidc.get_client().userinfo(token=token)
+
+    try:
+        username = oidc.username_from_claims(claims)
+    except ValueError:
+        logger.error("SSO token carried no identity claim: %s", sorted(claims))
+        return _login_page(
+            request,
+            error="Your SSO account is missing a username. Contact the data team.",
+            status_code=403,
+        )
+
+    start_session(request, username, via="sso", claims=claims)
+    logger.info("SSO login: %s", username)
+    return RedirectResponse(request.url_for("dashboard"), status_code=303)
+
+
+@app.get("/login/local", response_class=HTMLResponse)
+def login_local_form(request: Request):
+    """Break-glass password form. Only mounted when AUTH_MODE allows it."""
+    if not settings.password_login_enabled:
+        raise HTTPException(status_code=404, detail="Password login is disabled")
+    if get_current_user(request):
+        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+    return _login_page(request)
+
+
+@app.post("/login/local")
+def login_local_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
 ):
+    if not settings.password_login_enabled:
+        raise HTTPException(status_code=404, detail="Password login is disabled")
     if users.verify_user(username, password):
-        request.session["user"] = username
+        start_session(request, username, via="password")
         return RedirectResponse(request.url_for("dashboard"), status_code=303)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"error": "Invalid username or password.", "title": settings.app_title},
-        status_code=401,
-    )
+    logger.warning("Failed password login for %r", username)
+    return _login_page(request, error="Invalid username or password.", status_code=401)
 
 
 @app.post("/logout")
-def logout(request: Request):
-    request.session.clear()
+async def logout(request: Request):
+    via = request.session.get("auth_via")
+    end_session(request)
+
+    # Local-only logout by default. The Keycloak client is shared with Superset,
+    # so ending the Keycloak session here would also sign the user out of BI 360
+    # — set SSO_SINGLE_LOGOUT=true if that is what you want.
+    if via == "sso" and settings.sso_enabled and settings.sso_single_logout:
+        metadata = await oidc.get_client().load_server_metadata()
+        end_session_endpoint = metadata.get("end_session_endpoint")
+        if end_session_endpoint:
+            post_logout = settings.sso_logout_redirect_uri or str(
+                request.url_for("login_form")
+            )
+            params = {
+                "client_id": settings.sso_client_id,
+                "post_logout_redirect_uri": post_logout,
+            }
+            return RedirectResponse(
+                f"{end_session_endpoint}?{urlencode(params)}", status_code=303
+            )
+
     return RedirectResponse(request.url_for("login_form"), status_code=303)
 
 
