@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     # Manifest declaring the available reports (see reports.toml).
     reports_file: str = "reports.toml"
 
+    # ---- Datasets ----
+    # Curation layer over the live catalog: folders, descriptions, example
+    # queries, hide list. Everything works without it — see datasets.toml.
+    datasets_file: str = "datasets.toml"
+    # Database + schema the catalog is built from. Everything in analytics
+    # lives in `public`; there are no other schemas to walk.
+    datasets_database: str = "analytics"
+    datasets_schema: str = "public"
+    dataset_preview_rows: int = 50
+    # Ceiling on a preview/count so a scan of a huge table can't hang a page.
+    dataset_timeout_ms: int = 10_000
+
     # ---- Database (direct connection from wherever this app runs) ----
     db_host: str = "127.0.0.1"
     db_port: int = 5432

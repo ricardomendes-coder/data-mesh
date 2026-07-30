@@ -1,0 +1,141 @@
+{% extends "_shell.html" %}
+{% block page_title %}{{ dataset.display_title }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('datasets_index') }}">Datasets</a> /
+  <code>{{ datasets_schema }}.{{ dataset.name }}</code>
+{% endblock %}
+
+{% block content %}
+<div class="bi-ds-head">
+  <span class="bi-kind bi-kind-{{ dataset.kind }}">{{ dataset.kind }}</span>
+  <span class="bi-ds-stat">{{ dataset.column_count }} column{{ '' if dataset.column_count == 1 else 's' }}</span>
+  {% if dataset.approx_rows is not none %}
+  <span class="bi-ds-stat" title="Planner estimate from pg_class.reltuples, not an exact count">
+    ~{{ '{:,}'.format(dataset.approx_rows) }} rows
+  </span>
+  {% endif %}
+  <a class="bi-btn sm ghost" href="{{ url_for('dashboard') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ default_query|urlencode }}">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
+    Open in Query
+  </a>
+</div>
+
+{# ── Description ── #}
+{% if dataset.description %}
+<div class="bi-ds-desc">{{ dataset.description|inline_code }}</div>
+{% else %}
+<div class="bi-ds-desc bi-ds-desc-empty">
+  No description yet. Add one to <code>datasets.toml</code>:
+  <pre class="bi-snippet">[[dataset]]
+name        = "{{ dataset.name }}"
+description = "What this {{ dataset.kind }} holds, and its grain."</pre>
+</div>
+{% endif %}
+
+<div class="bi-panel-tabs">
+  <button class="bi-ptab active" data-tab="preview" type="button">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12v10H2z"/><path d="M2 6.5h12M6 6.5V13"/></svg>
+    Preview
+  </button>
+  <button class="bi-ptab" data-tab="catalog" type="button">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h10v11H3z"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"/></svg>
+    Data catalog
+  </button>
+  <button class="bi-ptab" data-tab="examples" type="button">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
+    Example queries
+    {% if dataset.examples %}<span class="bi-badge">{{ dataset.examples|length }}</span>{% endif %}
+  </button>
+</div>
+
+{# ── Preview ── #}
+<section class="pane active" data-pane="preview">
+  {% if preview_error %}
+  <div class="bi-err">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+    <span>{{ preview_error }}</span>
+  </div>
+  {% elif preview_rows %}
+  <div class="bi-result-meta">First {{ preview_rows|length }} row(s)</div>
+  <div class="bi-restbl-wrap">
+    <table class="bi-restbl">
+      <thead><tr>{% for c in preview_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="bi-empty-lg">This {{ dataset.kind }} is empty.</div>
+  {% endif %}
+</section>
+
+{# ── Data catalog ── #}
+<section class="pane" data-pane="catalog">
+  {% if columns %}
+  <div class="bi-restbl-wrap">
+    <table class="bi-restbl bi-catalog">
+      <thead>
+        <tr><th>#</th><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        {% for c in columns %}
+        <tr>
+          <td class="bi-colnum">{{ loop.index }}</td>
+          <td><b>{{ c.name }}</b></td>
+          <td><code>{{ c.type }}</code></td>
+          <td>{% if c.nullable %}<span class="bi-null">yes</span>{% else %}no{% endif %}</td>
+          <td>{% if c.default %}<code>{{ c.default }}</code>{% else %}<span class="bi-null">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="bi-empty-lg">Could not read the column list.</div>
+  {% endif %}
+</section>
+
+{# ── Example queries ── #}
+<section class="pane" data-pane="examples">
+  {% if dataset.examples %}
+  {% for ex in dataset.examples %}
+  <div class="bi-example">
+    <div class="bi-example-hd">
+      <span class="bi-example-tt">{{ ex.title }}</span>
+      <a class="bi-btn sm ghost" href="{{ url_for('dashboard') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ ex.sql|urlencode }}">Open in Query</a>
+    </div>
+    <pre class="bi-snippet">{{ ex.sql }}</pre>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="bi-empty-lg">
+    No example queries yet. Add them to <code>datasets.toml</code>:
+    <pre class="bi-snippet">[[dataset]]
+name = "{{ dataset.name }}"
+
+  [[dataset.example]]
+  title = "A useful starting point"
+  sql   = "SELECT * FROM {{ dataset.name }} LIMIT 100"</pre>
+  </div>
+  {% endif %}
+</section>
+
+<script>
+(function(){
+  document.querySelectorAll('button[data-tab]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var tab = el.getAttribute('data-tab');
+      document.querySelectorAll('button[data-tab]').forEach(function(b){
+        b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+      });
+      document.querySelectorAll('.pane').forEach(function(p){
+        p.classList.toggle('active', p.getAttribute('data-pane') === tab);
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

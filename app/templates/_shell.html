@@ -1,0 +1,77 @@
+{# App chrome: navy rail + topbar. Every signed-in page extends this and fills
+   the `content` block, so the nav lives in exactly one place. Pages set
+   `active_nav` ("query" | "reports" | "datasets") to light the right item. #}
+{% extends "base.html" %}
+{% from "_brand.html" import logomark %}
+{% block body %}
+<div class="bi-shell">
+  <aside class="bi-side">
+    <div class="bi-side-inner">
+      <div class="bi-brand">
+        <div class="bi-brand-mark">{{ logomark(size=30) }}</div>
+        <div class="bi-brand-tx"><b>{{ title }}</b><span>V360 · Data</span></div>
+      </div>
+      <nav class="bi-side-nav">
+        <a class="bi-nav-item {{ 'active' if active_nav == 'query' else '' }}"
+           data-tab="query" href="{{ url_for('dashboard') }}">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
+          <span>Query</span>
+        </a>
+        <a class="bi-nav-item {{ 'active' if active_nav == 'reports' else '' }}"
+           data-tab="reports" href="{{ url_for('dashboard') }}?tab=reports">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+          <span>Reports</span>
+        </a>
+        <a class="bi-nav-item {{ 'active' if active_nav == 'datasets' else '' }}"
+           href="{{ url_for('datasets_index') }}">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>
+          <span>Datasets</span>
+        </a>
+      </nav>
+      <div class="bi-conn-pill">
+        <span class="bi-conn-dot {{ 'on' if db_ok else 'warn' }}"></span>
+        <span class="bi-conn-tx">{{ db_host or 'not configured' }}</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="bi-main">
+    <div class="bi-topbar">
+      <div class="bi-topbar-tt">
+        <div class="bi-topbar-title">{% block page_title %}{{ title }}{% endblock %}</div>
+        <div class="bi-topbar-sub">{% block page_sub %}Signed in as {{ user }}{% endblock %}</div>
+      </div>
+      <div class="bi-topbar-actions">
+        {% block topbar_extra %}{% endblock %}
+        <div class="bi-avatar" title="{{ user }}">{{ user[:2] }}</div>
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="bi-btn ghost" type="submit">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6"/></svg>
+            Log out
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="bi-scroll">
+      <div class="bi-page">
+        {% if error %}
+        <div class="bi-err">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+          <span>{{ error }}</span>
+        </div>
+        {% endif %}
+        {% if message %}<div class="bi-ok">{{ message }}</div>{% endif %}
+        {% if db_error %}
+        <div class="bi-err">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+          <span>{{ db_error }}</span>
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}

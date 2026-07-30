@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Datasets — curation layer
+#
+# Every table, view and materialized view in analytics.public is discovered
+# automatically and appears in the Datasets tab. Nothing here is required.
+# This file only *adds* to what's discovered:
+#
+#   [settings].hide   objects to keep out of the list
+#   [[folder]]        groupings (start empty — add them as you go)
+#   [[dataset]]       description + example queries for a specific dataset
+#
+# Read fresh on every request, so edits show up on the next page load.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[settings]
+# Glob patterns matched against the object name. Anything matching never shows.
+hide = [
+  "*_20????????????",  # one-off dumps with a yyyymmddhhmmss suffix (3 today)
+  "temp_*",
+  "test_*",
+  "teste_*",
+]
+
+
+# ── Folders ──────────────────────────────────────────────────────────────────
+# None defined yet: with no folders, the tab renders one flat "All datasets"
+# list. Add a folder by uncommenting a block like the ones below.
+#
+# A dataset joins a folder by being named in `datasets`, or by matching one of
+# the `match` globs. The first folder in this file that claims a dataset wins,
+# so put narrower folders above broader ones. Anything unclaimed falls into
+# "Ungrouped" at the bottom.
+
+# [[folder]]
+# key         = "captura"
+# title       = "Captura"
+# description = "Certificate capture pipeline and its supporting tables."
+# match       = ["captura*"]
+
+# [[folder]]
+# key      = "customer-success"
+# title    = "Customer Success"
+# match    = ["cs_*", "csat_*"]
+# datasets = ["clients_bi_usage"]   # doesn't fit the prefix, added by name
+
+
+# ── Dataset documentation ────────────────────────────────────────────────────
+# analytics carries no COMMENT ON, so descriptions live here. A dataset with no
+# entry still appears — it just shows an empty description.
+#
+# `name` must match the object name in the database exactly.
+
+# [[dataset]]
+# name        = "companies"
+# title       = "Companies"
+# description = """
+# One row per company. `c_id` is the tenant identifier used across the
+# capture pipeline; `id` is the internal portal id — they are not the same key.
+# """
+#
+#   [[dataset.example]]
+#   title = "Companies created this month"
+#   sql   = """
+# SELECT id, legal_name, created_at
+# FROM companies
+# WHERE created_at >= date_trunc('month', now())
+# ORDER BY created_at DESC
+# """
+#
+#   [[dataset.example]]
+#   title = "Join to the capture status"
+#   sql   = """
+# SELECT co.legal_name, ca.*
+# FROM companies co
+# JOIN captura ca ON ca.c_id = co.c_id
+# LIMIT 100
+# """

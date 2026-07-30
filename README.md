@@ -140,6 +140,60 @@ Flask-based and its cookie is called `session`; since both apps live on
 `bi.v360.io`, sharing the name would make each one silently overwrite the
 other's login. Don't set `SESSION_COOKIE_NAME=session`.
 
+## Datasets
+
+The **Datasets** tab is a catalog over the analytics database. Every table,
+view and materialized view in `analytics.public` is discovered live from the
+Postgres catalog — a new table shows up on its own, with nothing to register.
+Each dataset gets a page with four things:
+
+| | |
+| --- | --- |
+| **Preview** | the first 50 rows, under a statement timeout |
+| **Data catalog** | every column: name, type, nullability, default |
+| **Description** | prose from `datasets.toml` (backticked names render as code) |
+| **Example queries** | curated SQL, each with an "Open in Query" button |
+
+`datasets.toml` is a pure curation layer — everything works without it:
+
+```toml
+[settings]
+hide = ["temp_*", "test_*", "*_20????????????"]   # globs on the object name
+
+[[folder]]
+key      = "captura"
+title    = "Captura"
+match    = ["captura*"]          # by pattern...
+datasets = ["clients_bi_usage"]  # ...and/or by name
+
+[[dataset]]
+name        = "companies"
+description = "One row per company. `c_id` is the tenant id."
+
+  [[dataset.example]]
+  title = "Created this month"
+  sql   = "SELECT * FROM companies WHERE created_at >= date_trunc('month', now())"
+```
+
+Folders ship empty: with none defined the tab renders one flat **All datasets**
+list. Add a `[[folder]]` and its members group up; anything unclaimed collects
+under **Ungrouped**. The first folder in the file that claims a dataset wins, so
+put narrow folders above broad ones.
+
+Like `reports.toml`, the manifest is read fresh on each request — edits take
+effect on the next page load, no restart.
+
+A few things worth knowing:
+
+- **Row counts are estimates** (`pg_class.reltuples`), shown as `~1,420`.
+  54 of the 267 objects have never been analyzed, and those show `—` rather
+  than a misleading zero. Counting 191 tables per page load isn't worth it.
+- **A dataset name only reaches SQL after the catalog vouches for it.** Routes
+  resolve the name through `get_dataset()` first, and the identifier is quoted
+  by the dialect, so a hidden or invented name 404s instead of running.
+- **Previews carry a statement timeout** (`DATASET_TIMEOUT_MS`, default 10s) so
+  a scan of a large table can't hang the page.
+
 ## Defining reports
 
 Reports live in `reports.toml`. Each `[[report]]` names a `database` and its SQL
@@ -210,12 +264,14 @@ app/
   auth.py       login dependency + session start/end
   superset_session.py  delegated auth: identity from Superset's /api/v1/me/
   oidc.py       Keycloak OIDC client and claim mapping (AUTH_MODE=sso)
+  datasets.py   live catalog + datasets.toml curation layer
   users.py      JSON-backed user store for the break-glass login
   db.py         direct SQLAlchemy connection: run_query / execute / list_databases
   reports.py    manifest-driven reports + CSV/Excel serialization
   config.py     settings from environment
   templates/    login + dashboard pages
 reports.toml    report definitions (database + SQL per report)
+datasets.toml   dataset folders, descriptions, example queries, hide list
 sql/            report SQL files (report.sql is the connectivity check)
 manage.py       CLI to add users
 smoke_test.py   quick self-test (needs `pip install httpx`)

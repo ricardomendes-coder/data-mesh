@@ -11,9 +11,10 @@ services:
       # Persisted user store (usernames + bcrypt hashes).
       - hub_data:/app/data
 
-      # Edit reports (manifest + SQL files) without rebuilding the image.
+      # Edit reports and dataset docs without rebuilding the image.
       # Comment these out if you'd rather bake them into the image.
       - ./reports.toml:/app/reports.toml:ro
+      - ./datasets.toml:/app/datasets.toml:ro
       - ./sql:/app/sql:ro
 
 volumes:

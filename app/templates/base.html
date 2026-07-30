@@ -189,6 +189,64 @@
     .bi-card-meta{display:flex;align-items:center;gap:.45rem;padding-top:.85rem;border-top:1px solid var(--border);margin-top:auto;}
     .bi-empty-lg{padding:3.2rem 1rem;text-align:center;color:var(--muted);font-size:.88rem;border:1px dashed var(--border-strong);border-radius:var(--r-lg);background:var(--surface);}
 
+    /* ── datasets ── */
+    .bi-toolbar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:1.5rem;}
+    .bi-search{position:relative;flex:1;min-width:220px;max-width:420px;}
+    .bi-search svg{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);color:var(--g-300);pointer-events:none;}
+    .bi-search input{width:100%;height:38px;border:1px solid var(--border-strong);border-radius:var(--r);padding:0 .7rem 0 2.1rem;font-family:inherit;font-size:.85rem;color:var(--title);background:var(--surface);outline:none;transition:border-color .13s,box-shadow .13s;}
+    .bi-search input:focus{border-color:var(--orange);box-shadow:var(--ring);}
+    .bi-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-left:auto;}
+    .bi-chip{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:var(--r-pill);border:1px solid var(--border-strong);background:var(--surface);color:var(--body);font-size:.78rem;font-weight:600;transition:all .13s;}
+    .bi-chip:hover{border-color:var(--g-300);color:var(--title);}
+    .bi-chip.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+
+    .bi-group{margin-bottom:2rem;}
+    .bi-group-hd{display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem;}
+    .bi-group-tt{font-size:.94rem;font-weight:700;color:var(--title);letter-spacing:-.01em;}
+    .bi-group-ct{font-size:.7rem;font-weight:700;color:var(--muted);background:var(--page);border:1px solid var(--border);padding:.1rem .45rem;border-radius:var(--r-pill);}
+    .bi-group-sub{font-size:.8rem;color:var(--muted);margin-bottom:.5rem;line-height:1.5;}
+
+    /* One row per dataset: a table would wrap badly at 267 items, and rows keep
+       the name column aligned for scanning. */
+    .bi-dslist{border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);box-shadow:var(--sh-1);margin-top:.6rem;}
+    /* Fixed track widths, not `auto`: each row is its own grid, so auto-sized
+       columns land at a different x on every row and nothing lines up. */
+    .bi-dsrow{display:grid;grid-template-columns:74px 296px 1fr 74px 124px 14px;align-items:center;gap:.85rem;padding:.62rem .9rem;border-bottom:1px solid #F1F2F4;color:var(--title);transition:background .1s;}
+    .bi-dsrow:last-child{border-bottom:none;}
+    .bi-dsrow:hover{background:var(--orange-50);color:var(--title);}
+    .bi-dsname{font-family:var(--mono);font-size:.81rem;font-weight:600;color:var(--title);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .bi-dsdesc{font-size:.79rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .bi-undoc{color:var(--g-300);font-style:italic;}
+    .bi-dsmeta{font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;}
+    .bi-dsarrow{color:var(--g-300);}
+    .bi-dsrow:hover .bi-dsarrow{color:var(--orange);}
+    @media(max-width:860px){
+      .bi-dsrow{grid-template-columns:70px 1fr auto;}
+      .bi-dsdesc,.bi-dsarrow{display:none;}
+    }
+
+    /* kind badges — table / view / matview read very differently, so colour them */
+    .bi-kind{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 .5rem;border-radius:var(--r-sm);font-size:.65rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-family:var(--mono);}
+    .bi-kind-table{background:var(--orange-50);color:var(--orange-600);}
+    .bi-kind-view{background:var(--purple-soft);color:var(--purple);}
+    .bi-kind-matview{background:#E7F2F5;color:#0F6674;}
+
+    /* dataset detail */
+    .bi-ds-head{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1.1rem;}
+    .bi-ds-stat{font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums;}
+    .bi-ds-head .bi-btn{margin-left:auto;}
+    .bi-ds-desc{font-size:.87rem;color:var(--body);line-height:1.65;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:var(--r);padding:.9rem 1.05rem;margin-bottom:1.5rem;white-space:pre-wrap;box-shadow:var(--sh-1);}
+    .bi-ds-desc-empty{border-left-color:var(--border-strong);color:var(--muted);white-space:normal;}
+    .bi-snippet{font-family:var(--mono);font-size:.78rem;line-height:1.6;background:#FAFBFB;border:1px solid var(--border);border-radius:var(--r);padding:.75rem .9rem;margin-top:.6rem;overflow-x:auto;color:var(--g-800);white-space:pre;}
+    .bi-catalog td{white-space:normal;}
+    .bi-colnum{color:var(--g-300);font-family:var(--mono);font-size:.72rem;width:1%;}
+    .bi-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 .28rem;border-radius:var(--r-pill);background:var(--orange-100);color:var(--orange-600);font-size:.64rem;font-weight:700;margin-left:.1rem;}
+    .bi-example{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:.95rem 1.05rem;margin-bottom:.85rem;box-shadow:var(--sh-1);}
+    .bi-example-hd{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;}
+    .bi-example-tt{font-size:.88rem;font-weight:700;color:var(--title);}
+    .bi-example-hd .bi-btn{margin-left:auto;}
+    .bi-example .bi-snippet{margin-top:.7rem;}
+
     /* ── login ──
        The low-poly artwork is the same login-background.png the main app uses,
        over a navy fallback in case the image can't be fetched. */

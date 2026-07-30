@@ -1,0 +1,55 @@
+{% extends "_shell.html" %}
+{% block page_title %}Datasets{% endblock %}
+{% block page_sub %}
+  {{ total }} in <code>{{ datasets_database }}.{{ datasets_schema }}</code>{% if q or kind %} — {{ shown }} matching{% endif %}
+{% endblock %}
+
+{% block content %}
+<form class="bi-toolbar" method="get" action="{{ url_for('datasets_index') }}">
+  <div class="bi-search">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+    <input type="search" name="q" value="{{ q }}" placeholder="Search datasets…" autofocus>
+  </div>
+  {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+  <button class="bi-btn sm" type="submit">Search</button>
+  <div class="bi-chips">
+    {% for k, label in [('', 'All'), ('table', 'Tables'), ('view', 'Views'), ('matview', 'Matviews')] %}
+    <a class="bi-chip {{ 'active' if kind == k else '' }}"
+       href="{{ url_for('datasets_index') }}?kind={{ k }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</form>
+
+{% if not groups %}
+<div class="bi-empty-lg">
+  {% if q or kind %}Nothing matches that filter.
+  {% else %}No datasets found in <code>{{ datasets_schema }}</code>.{% endif %}
+</div>
+{% endif %}
+
+{% for folder, items in groups %}
+<section class="bi-group">
+  <div class="bi-group-hd">
+    <h2 class="bi-group-tt">{{ folder.title }}</h2>
+    <span class="bi-group-ct">{{ items|length }}</span>
+  </div>
+  {% if folder.description %}<p class="bi-group-sub">{{ folder.description }}</p>{% endif %}
+
+  <div class="bi-dslist">
+    {% for d in items %}
+    <a class="bi-dsrow" href="{{ url_for('dataset_detail', name=d.name) }}">
+      <span class="bi-kind bi-kind-{{ d.kind }}">{{ d.kind }}</span>
+      <span class="bi-dsname">{{ d.name }}</span>
+      <span class="bi-dsdesc">
+        {% if d.description %}{{ d.description.splitlines()[0]|inline_code }}
+        {% else %}<em class="bi-undoc">No description yet</em>{% endif %}
+      </span>
+      <span class="bi-dsmeta">{{ d.column_count }} col{{ '' if d.column_count == 1 else 's' }}</span>
+      <span class="bi-dsmeta">{% if d.approx_rows is not none %}~{{ '{:,}'.format(d.approx_rows) }} rows{% else %}—{% endif %}</span>
+      <svg class="bi-dsarrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

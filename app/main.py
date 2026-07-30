@@ -1,8 +1,11 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
+
+from markupsafe import Markup, escape
 
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -11,20 +14,39 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import db, oidc, reports, superset_session, users
+from . import datasets, db, oidc, reports, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
-# uvicorn only configures its own loggers and leaves root at WARNING, so our
-# logger.info() calls were being dropped. Give root a handler at INFO.
+# uvicorn only configures its own loggers and leaves root without a handler, so
+# our logger.info() calls were being dropped. Give root a handler but keep it at
+# WARNING — raising the root level to INFO would also turn on httpx, sqlalchemy
+# and friends. Only this app's logger opts in to INFO.
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 
 logger = logging.getLogger("report_hub")
+logger.setLevel(logging.INFO)
 settings = get_settings()
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _inline_code(value: str) -> Markup:
+    """Render `backticked` spans from datasets.toml prose as <code>.
+
+    Descriptions constantly name columns, and raw backticks read as noise. The
+    text is HTML-escaped *first*, so manifest prose can never inject markup —
+    only the <code> tags added afterwards are live.
+    """
+    # str() is load-bearing: re.sub over a Markup concatenates through
+    # Markup.__add__, which would escape the <code> tags we're inserting.
+    escaped = str(escape(value or ""))
+    return Markup(re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped))
+
+
+templates.env.filters["inline_code"] = _inline_code
 
 # Cap how many result rows are rendered in the browser. The full result set is
 # still available via Export — this only bounds the HTML we build per request.
@@ -276,6 +298,24 @@ async def logout(request: Request):
     return RedirectResponse(request.url_for("login_form"), status_code=303)
 
 
+def _shell_context(user: str, active_nav: str, **extra) -> dict:
+    """Context every signed-in page needs — the bits _shell.html renders."""
+    context = {
+        "user": user,
+        "title": settings.app_title,
+        "active_nav": active_nav,
+        "error": None,
+        "message": None,
+        "db_host": settings.db_host,
+        "db_ok": True,
+        "db_error": None,
+        "datasets_database": settings.datasets_database,
+        "datasets_schema": settings.datasets_schema,
+    }
+    context.update(extra)
+    return context
+
+
 def _dashboard_context(user: str, **extra) -> dict:
     """Base template context: the DB picker list and the reports manifest.
 
@@ -299,28 +339,155 @@ def _dashboard_context(user: str, **extra) -> dict:
         report_list = []
         db_error = db_error or "Could not load the reports — check the server logs."
 
-    context = {
-        "user": user,
-        "title": settings.app_title,
-        "error": None,
-        "message": None,
-        "sql": None,
-        "database": settings.db_name,
-        "databases": databases,
-        "db_host": settings.db_host,
-        "db_ok": db_ok,
-        "db_error": db_error,
-        "reports": report_list,
-        "result": None,
-        "active_tab": "query",
-    }
+    active_tab = extra.pop("active_tab", "query")
+    context = _shell_context(
+        user,
+        "reports" if active_tab == "reports" else "query",
+        sql=None,
+        database=settings.db_name,
+        databases=databases,
+        db_ok=db_ok,
+        db_error=db_error,
+        reports=report_list,
+        result=None,
+        active_tab=active_tab,
+    )
     context.update(extra)
     return context
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, user: str = Depends(require_login)):
-    return templates.TemplateResponse(request, "dashboard.html", _dashboard_context(user))
+def dashboard(
+    request: Request,
+    tab: str = "query",
+    sql: str = "",
+    database: str = "",
+    user: str = Depends(require_login),
+):
+    """The query console and reports.
+
+    `tab`/`sql`/`database` make the console deep-linkable, which is what the
+    "Open in Query" buttons on a dataset page use to hand a query over.
+    """
+    context = _dashboard_context(
+        user, active_tab="reports" if tab == "reports" else "query"
+    )
+    if sql:
+        context["sql"] = sql
+    if database:
+        context["database"] = database
+    return templates.TemplateResponse(request, "dashboard.html", context)
+
+
+@app.get("/datasets", response_class=HTMLResponse)
+def datasets_index(
+    request: Request,
+    q: str = "",
+    kind: str = "",
+    user: str = Depends(require_login),
+):
+    """Everything in the analytics schema, grouped by the manifest's folders."""
+    context = _shell_context(
+        user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0
+    )
+    try:
+        all_datasets = datasets.list_datasets()
+    except Exception:
+        logger.exception("Could not read the dataset catalog")
+        context["db_ok"] = False
+        context["db_error"] = (
+            "Could not read the dataset catalog — check the server logs."
+        )
+        return templates.TemplateResponse(
+            request, "datasets.html", context, status_code=502
+        )
+
+    needle = q.strip().lower()
+    matched = [
+        d
+        for d in all_datasets
+        if (not kind or d.kind == kind)
+        and (
+            not needle
+            or needle in d.name.lower()
+            or needle in d.title.lower()
+            or needle in d.description.lower()
+        )
+    ]
+    context.update(
+        total=len(all_datasets), shown=len(matched), groups=datasets.group(matched)
+    )
+    return templates.TemplateResponse(request, "datasets.html", context)
+
+
+@app.get("/datasets/{name}", response_class=HTMLResponse)
+def dataset_detail(
+    request: Request,
+    name: str,
+    user: str = Depends(require_login),
+):
+    """Preview, catalog, description and example queries for one dataset."""
+
+    def _catalog_failure(message: str, status: int):
+        context = _shell_context(
+            user,
+            "datasets",
+            q="",
+            kind="",
+            groups=[],
+            total=0,
+            shown=0,
+            db_ok=False,
+            db_error=message,
+        )
+        return templates.TemplateResponse(
+            request, "datasets.html", context, status_code=status
+        )
+
+    try:
+        # Resolving through the catalog is also the guard that stops an
+        # arbitrary path segment from ever reaching a query.
+        dataset = datasets.get_dataset(name)
+    except Exception:
+        logger.exception("Could not read the dataset catalog for %r", name)
+        return _catalog_failure(
+            "Could not read the dataset catalog — check the server logs.", 502
+        )
+
+    if dataset is None:
+        return _catalog_failure(f"Unknown dataset: {name!r}.", 404)
+
+    context = _shell_context(
+        user,
+        "datasets",
+        dataset=dataset,
+        columns=[],
+        preview_columns=[],
+        preview_rows=[],
+        preview_error=None,
+        default_query=f"SELECT *\nFROM {dataset.name}\nLIMIT 100",
+    )
+
+    try:
+        context["columns"] = datasets.get_columns(dataset.name)
+    except Exception:
+        logger.exception("Could not read columns for %r", dataset.name)
+
+    try:
+        preview_columns, preview_rows = datasets.get_preview(dataset.name)
+        context["preview_columns"] = preview_columns
+        context["preview_rows"] = [
+            [None if v is None else str(v) for v in row] for row in preview_rows
+        ]
+    except Exception:
+        # Details to the log only — a preview failure must not leak the
+        # connection string, same rule as report export.
+        logger.exception("Preview failed for %r", dataset.name)
+        context["preview_error"] = (
+            "Could not load a preview. Check the server logs."
+        )
+
+    return templates.TemplateResponse(request, "dataset_detail.html", context)
 
 
 @app.post("/query", response_class=HTMLResponse)

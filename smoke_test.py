@@ -146,6 +146,191 @@ def test_sso_flow():
     print("sso flow: OK")
 
 
+CATALOG_FIXTURE = [
+    # (name, kind, reltuples, column_count)
+    ("companies", "table", 1420, 5),
+    ("captura", "matview", 98000, 12),
+    ("cs_healthscore", "view", -1, 7),
+    ("aux_task_classification", "table", 30, 3),
+    ("temp_scratch", "table", 5, 2),
+    ("teste_pagina1_20260716171556", "table", 9, 4),
+]
+
+
+def _install_catalog_stub(datasets_mod):
+    """Point the datasets module at fixtures so tests need no Postgres."""
+    datasets_mod._fetch_objects = lambda: list(CATALOG_FIXTURE)
+    datasets_mod._fetch_columns = lambda name: [
+        ("id", "integer", False, "nextval('x')"),
+        ("legal_name", "text", True, None),
+    ]
+    datasets_mod._fetch_preview = lambda name, limit: (
+        ["id", "legal_name"],
+        [(1, "Whirlpool"), (2, None)],
+    )
+
+
+def test_datasets_catalog():
+    """Discovery + manifest curation, with no database involved."""
+    import textwrap
+
+    from app import datasets as ds
+
+    manifest = os.path.join(_tmp, "datasets.toml")
+    os.environ["DATASETS_FILE"] = manifest
+    with open(manifest, "w") as f:
+        f.write(textwrap.dedent('''
+            [settings]
+            hide = ["temp_*", "teste_*"]
+
+            [[folder]]
+            key = "captura"
+            title = "Captura"
+            match = ["captura*"]
+
+            [[folder]]
+            key = "core"
+            title = "Core"
+            datasets = ["companies"]
+
+            [[dataset]]
+            name = "companies"
+            title = "Companies"
+            description = "One row per company."
+
+              [[dataset.example]]
+              title = "Recent"
+              sql = "SELECT * FROM companies LIMIT 10"
+        ''').strip())
+
+    from app import config
+
+    config.get_settings.cache_clear()
+    _install_catalog_stub(ds)
+    try:
+        found = ds.list_datasets()
+        names = [d.name for d in found]
+        assert "temp_scratch" not in names, "hide pattern temp_* not applied"
+        assert "teste_pagina1_20260716171556" not in names, "hide pattern teste_* not applied"
+        assert names == ["companies", "captura", "cs_healthscore", "aux_task_classification"], names
+
+        companies = ds.get_dataset("companies")
+        assert companies.title == "Companies" and companies.documented
+        assert companies.folder == "core" and len(companies.examples) == 1
+
+        # reltuples of -1 means "never analyzed" -> unknown, not zero
+        assert ds.get_dataset("cs_healthscore").approx_rows is None
+        assert ds.get_dataset("captura").approx_rows == 98000
+
+        # A hidden dataset must not be resolvable by name either
+        assert ds.get_dataset("temp_scratch") is None, "hidden dataset still reachable"
+
+        grouped = ds.group(found)
+        titles = [(f.title, [d.name for d in items]) for f, items in grouped]
+        assert titles[0] == ("Captura", ["captura"]), titles
+        assert titles[1] == ("Core", ["companies"]), titles
+        assert titles[2][0] == "Ungrouped", titles
+        assert set(titles[2][1]) == {"cs_healthscore", "aux_task_classification"}
+    finally:
+        os.environ.pop("DATASETS_FILE", None)
+        config.get_settings.cache_clear()
+    print("datasets catalog: OK")
+
+
+def _dataset_rows(response) -> list[str]:
+    """The dataset names actually rendered as rows.
+
+    Matching on the row markup, not `in response.text` — names also appear in
+    the stylesheet and empty-state snippets, which makes substring checks lie.
+    """
+    import re
+
+    return re.findall(r'class="bi-dsname">([^<]+)<', response.text)
+
+
+def test_datasets_pages():
+    from app import datasets as ds
+
+    _install_catalog_stub(ds)
+    with TestClient(app, base_url="https://testserver") as client:
+        client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+        r = client.get("/datasets")
+        assert r.status_code == 200, r.status_code
+        assert _dataset_rows(r) == [
+            "companies",
+            "captura",
+            "cs_healthscore",
+            "aux_task_classification",
+        ], _dataset_rows(r)
+        assert "matview" in r.text, "kind badge missing"
+
+        # search narrows the list
+        r = client.get("/datasets?q=captura")
+        assert _dataset_rows(r) == ["captura"], _dataset_rows(r)
+
+        # kind filter
+        r = client.get("/datasets?kind=view")
+        assert _dataset_rows(r) == ["cs_healthscore"], _dataset_rows(r)
+
+        # detail page carries all four sections
+        r = client.get("/datasets/companies")
+        assert r.status_code == 200, r.status_code
+        for needle in ("Preview", "Data catalog", "Example queries", "legal_name"):
+            assert needle in r.text, f"missing {needle!r} on the detail page"
+
+        # unknown dataset -> 404, not a crash
+        r = client.get("/datasets/does_not_exist", follow_redirects=False)
+        assert r.status_code == 404, r.status_code
+
+        # a hidden dataset must not be reachable by direct URL
+        r = client.get("/datasets/temp_scratch", follow_redirects=False)
+        assert r.status_code == 404, "hidden dataset served by direct URL"
+
+        # datasets require a login like every other page
+        client.post("/logout")
+        r = client.get("/datasets", follow_redirects=False)
+        assert r.status_code == 303, r.status_code
+    print("datasets pages: OK")
+
+
+def test_inline_code_filter():
+    """Backticks become <code>, but manifest prose can never inject markup."""
+    from app.main import _inline_code
+
+    assert str(_inline_code("grain is `c_id` per day")) == (
+        "grain is <code>c_id</code> per day"
+    ), str(_inline_code("grain is `c_id` per day"))
+
+    hostile = _inline_code("<script>alert(1)</script> and `x`")
+    assert "<script>" not in str(hostile), hostile
+    assert "&lt;script&gt;" in str(hostile) and "<code>x</code>" in str(hostile), hostile
+    assert str(_inline_code(None)) == ""
+    print("inline code filter: OK")
+
+
+def test_dataset_preview_is_not_injectable():
+    """A dataset name only reaches SQL after the catalog vouches for it."""
+    from app import datasets as ds
+
+    _install_catalog_stub(ds)
+    captured = {}
+
+    def _spy(name, limit):
+        captured["name"] = name
+        return (["a"], [(1,)])
+
+    ds._fetch_preview = _spy
+    # Names the catalog never returned must not reach _fetch_preview at all.
+    for hostile in ("companies; DROP TABLE x", '"; DELETE FROM y --', "temp_scratch"):
+        assert ds.get_dataset(hostile) is None, f"{hostile!r} resolved"
+    assert "name" not in captured, "a query ran for an unknown dataset"
+
+    ds.get_preview("companies")
+    assert captured["name"] == "companies"
+    print("dataset preview guard: OK")
+
+
 def test_superset_delegated_mode():
     """AUTH_MODE=superset: identity comes from Superset's /api/v1/me/."""
     import importlib
@@ -371,6 +556,10 @@ if __name__ == "__main__":
     test_report_serialization()
     test_read_sql_pattern()
     test_query_picker_and_reports()
+    test_datasets_catalog()
+    test_datasets_pages()
+    test_inline_code_filter()
+    test_dataset_preview_is_not_injectable()
     # Last: these reload app.main, which rebinds this module's `app` reference.
     test_superset_delegated_mode()
     test_superset_break_glass()
