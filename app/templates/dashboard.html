@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_brand.html" import logo, logomark %}
 {% block body %}
 <div class="bi-shell">
   <aside class="bi-side">
     <div class="bi-side-inner">
       <div class="bi-brand">
-        <div class="bi-brand-mark">V</div>
+        <div class="bi-brand-mark">{{ logomark(size=30) }}</div>
         <div class="bi-brand-tx"><b>{{ title }}</b><span>V360 · Data</span></div>
       </div>
       <nav class="bi-side-nav">
@@ -31,6 +32,7 @@
         <div class="bi-topbar-sub">Signed in as {{ user }}</div>
       </div>
       <div class="bi-topbar-actions">
+        <div class="bi-avatar" title="{{ user }}">{{ user[:2] }}</div>
         <form method="post" action="{{ url_for('logout') }}">
           <button class="bi-btn ghost" type="submit">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6"/></svg>

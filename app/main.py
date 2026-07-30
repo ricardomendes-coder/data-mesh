@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -97,6 +98,11 @@ app.add_middleware(
     # the OAuth state and failing every login.
     https_only=True,
 )
+
+# Brand assets (logo favicon, login artwork). Mounted before the routes so
+# `url_for('static', path=...)` resolves in the templates; behind nginx these
+# are served as /report/static/... via the app's root_path.
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 @app.exception_handler(NotAuthenticated)

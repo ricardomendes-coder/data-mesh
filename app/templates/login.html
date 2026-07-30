@@ -1,18 +1,16 @@
 {% extends "base.html" %}
+{% from "_brand.html" import logo %}
 {% block body %}
 <div class="bi-login">
   <div class="bi-login-card">
     <div class="bi-login-brand">
-      <div class="bi-brand-mark">V</div>
-      <div>
-        <b>{{ title }}</b>
-        <span>V360 · Data</span>
-      </div>
+      {{ logo(height=30) }}
+      <div class="bi-login-eyebrow">{{ title }}</div>
     </div>
 
     <div class="bi-login-h">Sign in</div>
     <div class="bi-login-p">
-      {% if superset_enabled %}Sign in through BI 360 to access the hub.
+      {% if superset_enabled %}Continue with the BI 360 account you already use.
       {% elif sso_enabled %}Use your V360 account to access the hub.
       {% else %}Enter your credentials to access the hub.{% endif %}
     </div>
@@ -26,12 +24,12 @@
 
     {% if superset_enabled %}
     <a class="bi-btn sso" href="{{ superset_login_url }}">
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
       Continue with BI 360
     </a>
     {% elif sso_enabled %}
     <a class="bi-btn sso" href="{{ url_for('sso_login') }}">
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
       Continue with V360 SSO
     </a>
     {% endif %}
