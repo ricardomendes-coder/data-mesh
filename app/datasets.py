@@ -179,7 +179,9 @@ def _fetch_objects() -> list[tuple]:
     engine = _engine()
     try:
         with engine.connect() as conn:
-            return [tuple(r) for r in conn.execute(text(_OBJECTS_SQL), {"schema": s.datasets_schema})]
+            return [
+                tuple(r) for r in conn.execute(text(_OBJECTS_SQL), {"schema": s.datasets_schema})
+            ]
     finally:
         engine.dispose()
 
@@ -189,9 +191,7 @@ def _fetch_columns(name: str) -> list[tuple]:
     engine = _engine()
     try:
         with engine.connect() as conn:
-            rows = conn.execute(
-                text(_COLUMNS_SQL), {"schema": s.datasets_schema, "name": name}
-            )
+            rows = conn.execute(text(_COLUMNS_SQL), {"schema": s.datasets_schema, "name": name})
             return [tuple(r) for r in rows]
     finally:
         engine.dispose()
@@ -262,8 +262,7 @@ def get_dataset(name: str) -> Dataset | None:
 
 def get_columns(name: str) -> list[Column]:
     return [
-        Column(name=c, type=t, nullable=bool(n), default=d)
-        for c, t, n, d in _fetch_columns(name)
+        Column(name=c, type=t, nullable=bool(n), default=d) for c, t, n, d in _fetch_columns(name)
     ]
 
 

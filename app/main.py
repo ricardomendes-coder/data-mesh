@@ -5,13 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
-from markupsafe import Markup, escape
-
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import charts, datasets, db, oidc, reports, store, superset_session, users
@@ -22,9 +21,7 @@ from .config import get_settings
 # our logger.info() calls were being dropped. Give root a handler but keep it at
 # WARNING — raising the root level to INFO would also turn on httpx, sqlalchemy
 # and friends. Only this app's logger opts in to INFO.
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 logger = logging.getLogger("report_hub")
 logger.setLevel(logging.INFO)
@@ -105,9 +102,7 @@ async def lifespan(app: FastAPI):
     if settings.password_login_enabled:
         logger.info("Auth: local password login enabled (/login/local)")
     if not (
-        settings.superset_auth_enabled
-        or settings.sso_enabled
-        or settings.password_login_enabled
+        settings.superset_auth_enabled or settings.sso_enabled or settings.password_login_enabled
     ):
         # Almost always AUTH_MODE=sso with the client id/secret missing. Log it
         # loudly rather than crash-looping, so /healthz stays reachable.
@@ -183,9 +178,7 @@ async def login_form(request: Request):
                     claims=superset_session.claims_from_result(result),
                 )
                 logger.info("Superset-delegated login: %s", username)
-                return RedirectResponse(
-                    request.url_for("dashboard"), status_code=303
-                )
+                return RedirectResponse(request.url_for("dashboard"), status_code=303)
         # Not signed in to BI 360 (or the cookie is stale). Superset owns the
         # only Keycloak redirect URI that is actually registered, so send them
         # there and let it run the OAuth flow on our behalf.
@@ -295,16 +288,12 @@ async def logout(request: Request):
         metadata = await oidc.get_client().load_server_metadata()
         end_session_endpoint = metadata.get("end_session_endpoint")
         if end_session_endpoint:
-            post_logout = settings.sso_logout_redirect_uri or str(
-                request.url_for("login_form")
-            )
+            post_logout = settings.sso_logout_redirect_uri or str(request.url_for("login_form"))
             params = {
                 "client_id": settings.sso_client_id,
                 "post_logout_redirect_uri": post_logout,
             }
-            return RedirectResponse(
-                f"{end_session_endpoint}?{urlencode(params)}", status_code=303
-            )
+            return RedirectResponse(f"{end_session_endpoint}?{urlencode(params)}", status_code=303)
 
     return RedirectResponse(request.url_for("login_form"), status_code=303)
 
@@ -380,9 +369,7 @@ def dashboard(
     `tab`/`sql`/`database` make the console deep-linkable, which is what the
     "Open in Query" buttons on a dataset page use to hand a query over.
     """
-    context = _dashboard_context(
-        user, active_tab="reports" if tab == "reports" else "query"
-    )
+    context = _dashboard_context(user, active_tab="reports" if tab == "reports" else "query")
     if sql:
         context["sql"] = sql
     if database:
@@ -398,20 +385,14 @@ def datasets_index(
     user: str = Depends(require_login),
 ):
     """Everything in the analytics schema, grouped by the manifest's folders."""
-    context = _shell_context(
-        user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0
-    )
+    context = _shell_context(user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0)
     try:
         all_datasets = datasets.list_datasets()
     except Exception:
         logger.exception("Could not read the dataset catalog")
         context["db_ok"] = False
-        context["db_error"] = (
-            "Could not read the dataset catalog — check the server logs."
-        )
-        return templates.TemplateResponse(
-            request, "datasets.html", context, status_code=502
-        )
+        context["db_error"] = "Could not read the dataset catalog — check the server logs."
+        return templates.TemplateResponse(request, "datasets.html", context, status_code=502)
 
     needle = q.strip().lower()
     matched = [
@@ -425,9 +406,7 @@ def datasets_index(
             or needle in d.description.lower()
         )
     ]
-    context.update(
-        total=len(all_datasets), shown=len(matched), groups=datasets.group(matched)
-    )
+    context.update(total=len(all_datasets), shown=len(matched), groups=datasets.group(matched))
     return templates.TemplateResponse(request, "datasets.html", context)
 
 
@@ -451,9 +430,7 @@ def dataset_detail(
             db_ok=False,
             db_error=message,
         )
-        return templates.TemplateResponse(
-            request, "datasets.html", context, status_code=status
-        )
+        return templates.TemplateResponse(request, "datasets.html", context, status_code=status)
 
     try:
         # Resolving through the catalog is also the guard that stops an
@@ -461,9 +438,7 @@ def dataset_detail(
         dataset = datasets.get_dataset(name)
     except Exception:
         logger.exception("Could not read the dataset catalog for %r", name)
-        return _catalog_failure(
-            "Could not read the dataset catalog — check the server logs.", 502
-        )
+        return _catalog_failure("Could not read the dataset catalog — check the server logs.", 502)
 
     if dataset is None:
         return _catalog_failure(f"Unknown dataset: {name!r}.", 404)
@@ -494,9 +469,7 @@ def dataset_detail(
         # Details to the log only — a preview failure must not leak the
         # connection string, same rule as report export.
         logger.exception("Preview failed for %r", dataset.name)
-        context["preview_error"] = (
-            "Could not load a preview. Check the server logs."
-        )
+        context["preview_error"] = "Could not load a preview. Check the server logs."
 
     return templates.TemplateResponse(request, "dataset_detail.html", context)
 
@@ -513,9 +486,7 @@ def run_query(
     # Only accept a database the server actually reported (when we have a list).
     if context["databases"] and database not in context["databases"]:
         context["error"] = f"Unknown database: {database!r}."
-        return templates.TemplateResponse(
-            request, "dashboard.html", context, status_code=400
-        )
+        return templates.TemplateResponse(request, "dashboard.html", context, status_code=400)
 
     try:
         result = db.execute(sql, database)
@@ -524,9 +495,7 @@ def run_query(
         # DB error is the useful behavior (unlike report export).
         logger.exception("Ad-hoc query failed")
         context["error"] = f"Query failed: {exc}"
-        return templates.TemplateResponse(
-            request, "dashboard.html", context, status_code=400
-        )
+        return templates.TemplateResponse(request, "dashboard.html", context, status_code=400)
 
     if result.returns_rows:
         shown = result.rows[:QUERY_DISPLAY_LIMIT]
@@ -552,9 +521,7 @@ def export_query(
 ):
     def _error(msg: str, status: int = 400):
         context = _dashboard_context(user, sql=sql, database=database, error=msg)
-        return templates.TemplateResponse(
-            request, "dashboard.html", context, status_code=status
-        )
+        return templates.TemplateResponse(request, "dashboard.html", context, status_code=status)
 
     try:
         databases = db.list_databases()
@@ -591,12 +558,8 @@ def export_report(
     try:
         df = reports.get_report_df(key)
     except KeyError:
-        context = _dashboard_context(
-            user, error=f"Unknown report: {key!r}.", active_tab="reports"
-        )
-        return templates.TemplateResponse(
-            request, "dashboard.html", context, status_code=404
-        )
+        context = _dashboard_context(user, error=f"Unknown report: {key!r}.", active_tab="reports")
+        return templates.TemplateResponse(request, "dashboard.html", context, status_code=404)
     except Exception:
         # Full details go to the server log; the user sees a generic message so
         # we never leak connection strings or credentials into the browser.
@@ -606,9 +569,7 @@ def export_report(
             error="Could not generate the report. Check the server logs.",
             active_tab="reports",
         )
-        return templates.TemplateResponse(
-            request, "dashboard.html", context, status_code=502
-        )
+        return templates.TemplateResponse(request, "dashboard.html", context, status_code=502)
 
     return _file_response(df, format, key)
 
@@ -624,9 +585,7 @@ def _charts_unavailable(request: Request, user: str, status: int = 503):
             "Set APP_DB_PASSWORD (see .env.example)."
         ),
     )
-    return templates.TemplateResponse(
-        request, "charts.html", context, status_code=status
-    )
+    return templates.TemplateResponse(request, "charts.html", context, status_code=status)
 
 
 @app.get("/charts", response_class=HTMLResponse)
@@ -682,9 +641,7 @@ def _builder_context(user: str, **extra) -> dict:
 def chart_new(request: Request, user: str = Depends(require_login)):
     if not store.available():
         return _charts_unavailable(request, user)
-    return templates.TemplateResponse(
-        request, "chart_builder.html", _builder_context(user)
-    )
+    return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user))
 
 
 @app.post("/charts/new", response_class=HTMLResponse)
@@ -720,15 +677,11 @@ def chart_run(
         # tool, so the real database error is the useful thing to show.
         logger.exception("Chart query failed")
         context["error"] = f"Query failed: {exc}"
-        return templates.TemplateResponse(
-            request, "chart_builder.html", context, status_code=400
-        )
+        return templates.TemplateResponse(request, "chart_builder.html", context, status_code=400)
 
     if not result.returns_rows:
         context["error"] = "That statement returned no rows to chart."
-        return templates.TemplateResponse(
-            request, "chart_builder.html", context, status_code=400
-        )
+        return templates.TemplateResponse(request, "chart_builder.html", context, status_code=400)
 
     context["columns"] = result.columns
     context["rows"] = result.rows[: charts.MAX_POINTS]
@@ -782,9 +735,7 @@ def chart_save(
     )
     saved = store.save_chart(chart)
     logger.info("Chart %r saved by %s", saved.slug, user)
-    return RedirectResponse(
-        request.url_for("chart_detail", slug=saved.slug), status_code=303
-    )
+    return RedirectResponse(request.url_for("chart_detail", slug=saved.slug), status_code=303)
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
@@ -798,12 +749,8 @@ def chart_detail(request: Request, slug: str, user: str = Depends(require_login)
         logger.exception("Could not load chart %r", slug)
         return _charts_unavailable(request, user)
     if chart is None:
-        context = _shell_context(
-            user, "charts", charts=[], error=f"Unknown chart: {slug!r}."
-        )
-        return templates.TemplateResponse(
-            request, "charts.html", context, status_code=404
-        )
+        context = _shell_context(user, "charts", charts=[], error=f"Unknown chart: {slug!r}.")
+        return templates.TemplateResponse(request, "charts.html", context, status_code=404)
 
     context = _shell_context(
         user, "charts", chart=chart, spec=None, columns=[], rows=[], chart_error=None
@@ -812,15 +759,12 @@ def chart_detail(request: Request, slug: str, user: str = Depends(require_login)
         result = db.execute(chart.sql, chart.source_db)
     except Exception:
         logger.exception("Chart %r failed to refresh", slug)
-        context["chart_error"] = (
-            "This chart's query failed. Edit it, or check the server logs."
-        )
+        context["chart_error"] = "This chart's query failed. Edit it, or check the server logs."
         return templates.TemplateResponse(request, "chart_detail.html", context)
 
     context["columns"] = result.columns
     context["rows"] = [
-        [None if v is None else str(v) for v in row]
-        for row in result.rows[: charts.MAX_POINTS]
+        [None if v is None else str(v) for v in row] for row in result.rows[: charts.MAX_POINTS]
     ]
     context["spec"] = charts.build_spec(
         result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns

@@ -55,9 +55,7 @@ async def identify(cookie_value: str) -> dict[str, Any] | None:
     if response.status_code == 401:
         return None  # the ordinary "not signed in to BI 360" case
     if response.status_code != 200:
-        logger.warning(
-            "Superset /api/v1/me/ answered %s (expected 200/401)", response.status_code
-        )
+        logger.warning("Superset /api/v1/me/ answered %s (expected 200/401)", response.status_code)
         return None
 
     try:
@@ -81,16 +79,10 @@ def login_url() -> str:
     if not settings.superset_next_url:
         return settings.superset_login_url
     separator = "&" if "?" in settings.superset_login_url else "?"
-    return (
-        settings.superset_login_url
-        + separator
-        + urlencode({"next": settings.superset_next_url})
-    )
+    return settings.superset_login_url + separator + urlencode({"next": settings.superset_next_url})
 
 
 def claims_from_result(result: dict[str, Any]) -> dict[str, Any]:
     """Shape Superset's /me/ payload like the OIDC claims start_session expects."""
-    name = " ".join(
-        part for part in (result.get("first_name"), result.get("last_name")) if part
-    )
+    name = " ".join(part for part in (result.get("first_name"), result.get("last_name")) if part)
     return {"email": result.get("email"), "name": name or result.get("username")}

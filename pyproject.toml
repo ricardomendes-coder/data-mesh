@@ -1,0 +1,41 @@
+# Tooling config only — this app is deployed as a container, not installed as a
+# package, so there is deliberately no [build-system] / [project] table.
+#
+# Its other job is to pin the rootdir: without a config file here, pytest walks
+# up the filesystem and adopts the first pyproject.toml it finds (in a home
+# directory, say), inheriting another project's addopts and failing before it
+# collects anything.
+
+[tool.pytest.ini_options]
+testpaths = ["smoke_test.py"]
+# Tests share process state on purpose (they reload app.main to exercise the
+# auth modes), so they must run in file order — no random ordering plugins.
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # The app's own deprecations should be loud; dependencies' are noise.
+    "default::DeprecationWarning:app",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["app/static/vendor"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not the linter
+    "B008",  # FastAPI's Depends()/Form() in defaults is the framework's idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests set environment variables before importing the app, so imports cannot
+# all sit at the top of the file.
+"smoke_test.py" = ["E402"]

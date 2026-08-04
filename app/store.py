@@ -97,16 +97,12 @@ def init_schema() -> None:
                 " applied_at timestamptz NOT NULL DEFAULT now())"
             )
         )
-        applied = {
-            r[0] for r in conn.execute(text("SELECT name FROM schema_migrations"))
-        }
+        applied = {r[0] for r in conn.execute(text("SELECT name FROM schema_migrations"))}
         for name, ddl in MIGRATIONS:
             if name in applied:
                 continue
             conn.execute(text(ddl))
-            conn.execute(
-                text("INSERT INTO schema_migrations (name) VALUES (:n)"), {"n": name}
-            )
+            conn.execute(text("INSERT INTO schema_migrations (name) VALUES (:n)"), {"n": name})
             logger.info("Applied migration %s", name)
 
 
@@ -173,9 +169,7 @@ def list_charts() -> list[Chart]:
 
 def get_chart(slug: str) -> Chart | None:
     with engine().connect() as conn:
-        row = conn.execute(
-            text(f"{_SELECT} WHERE slug = :slug"), {"slug": slug}
-        ).first()
+        row = conn.execute(text(f"{_SELECT} WHERE slug = :slug"), {"slug": slug}).first()
         return _row_to_chart(row) if row else None
 
 

@@ -11,7 +11,8 @@ The claim mapping below deliberately mirrors Superset's
 the same username in both tools.
 """
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 

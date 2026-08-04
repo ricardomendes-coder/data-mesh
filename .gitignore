@@ -6,6 +6,14 @@ data/
 __pycache__/
 *.pyc
 .venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Personal Claude Code permissions (per-developer, not shared)
+.claude/settings.local.json
 
 # Local reference material (V360 design assets), not part of the app
 datameshproject/

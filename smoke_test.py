@@ -51,7 +51,9 @@ class _FakeOIDCClient:
 
 def test_auth_flow():
     # https base_url so the Secure session cookie (https_only=True) is retained.
-    with TestClient(app, base_url="https://testserver") as client:  # `with` runs lifespan -> bootstrap admin
+    with TestClient(
+        app, base_url="https://testserver"
+    ) as client:  # `with` runs lifespan -> bootstrap admin
         # Unauthenticated dashboard redirects to /login
         r = client.get("/", follow_redirects=False)
         assert r.status_code == 303 and _redirect_path(r) == "/login", r.status_code
@@ -179,7 +181,8 @@ def test_datasets_catalog():
     manifest = os.path.join(_tmp, "datasets.toml")
     os.environ["DATASETS_FILE"] = manifest
     with open(manifest, "w") as f:
-        f.write(textwrap.dedent('''
+        f.write(
+            textwrap.dedent("""
             [settings]
             hide = ["temp_*", "teste_*"]
 
@@ -201,7 +204,8 @@ def test_datasets_catalog():
               [[dataset.example]]
               title = "Recent"
               sql = "SELECT * FROM companies LIMIT 10"
-        ''').strip())
+        """).strip()
+        )
 
     from app import config
 
@@ -298,9 +302,9 @@ def test_inline_code_filter():
     """Backticks become <code>, but manifest prose can never inject markup."""
     from app.main import _inline_code
 
-    assert str(_inline_code("grain is `c_id` per day")) == (
-        "grain is <code>c_id</code> per day"
-    ), str(_inline_code("grain is `c_id` per day"))
+    assert str(_inline_code("grain is `c_id` per day")) == ("grain is <code>c_id</code> per day"), (
+        str(_inline_code("grain is `c_id` per day"))
+    )
 
     hostile = _inline_code("<script>alert(1)</script> and `x`")
     assert "<script>" not in str(hostile), hostile
@@ -365,15 +369,15 @@ def test_chart_spec():
     assert any("ghost" in w for w in dropped.warnings)
 
     # series are capped rather than cycled — two series must never share a hue
-    wide_cols = ["x"] + ["m%d" % i for i in range(12)]
+    wide_cols = ["x"] + [f"m{i}" for i in range(12)]
     wide_rows = [tuple(["a"] + list(range(12)))]
     capped = ch.build_spec(wide_cols, wide_rows, "bar", "x", wide_cols[1:])
     assert len(capped.datasets) == ch.MAX_SERIES, len(capped.datasets)
     hues = [d["color"] for d in capped.datasets]
-    assert len(set(hues)) == len(hues), "hues were cycled: %r" % hues
+    assert len(set(hues)) == len(hues), f"hues were cycled: {hues!r}"
 
     # too many points is called out, not silently smeared
-    many = [("d%d" % i, i) for i in range(ch.MAX_POINTS + 25)]
+    many = [(f"d{i}", i) for i in range(ch.MAX_POINTS + 25)]
     big = ch.build_spec(["d", "v"], many, "line", "d", ["v"])
     assert len(big.labels) == ch.MAX_POINTS
     assert any("past what a chart can show" in w for w in big.warnings), big.warnings
@@ -387,9 +391,8 @@ def test_charts_disabled_without_app_db():
     """With no app database the Charts tab explains itself instead of 500ing."""
     import importlib
 
-    from app import config
+    from app import config, store
     from app import main as main_mod
-    from app import store
 
     saved = os.environ.get("APP_DB_PASSWORD")
     os.environ["APP_DB_PASSWORD"] = ""
@@ -480,9 +483,7 @@ def test_superset_delegated_mode():
             # Logout goes through Superset — clearing only our cookie would let
             # the next request sign straight back in.
             r = client.post("/logout", follow_redirects=False)
-            assert r.headers["location"] == "https://bi.v360.io/logout/", r.headers[
-                "location"
-            ]
+            assert r.headers["location"] == "https://bi.v360.io/logout/", r.headers["location"]
 
             # Direct OIDC endpoints are inert in this mode
             assert client.get("/auth/sso", follow_redirects=False).status_code == 404
@@ -601,7 +602,7 @@ def test_query_picker_and_reports():
 
     with open(os.environ["REPORTS_FILE"], "w") as f:
         f.write(
-            '[[report]]\n'
+            "[[report]]\n"
             'key = "t_report"\n'
             'title = "Temp report"\n'
             'database = "main"\n'

@@ -60,9 +60,7 @@ class Settings(BaseSettings):
     # existing Superset client (see bi360/web.env on the BI host).
     sso_client_id: str = ""
     sso_client_secret: str = ""
-    sso_metadata_url: str = (
-        "https://sso.v360.io/realms/v360/.well-known/openid-configuration"
-    )
+    sso_metadata_url: str = "https://sso.v360.io/realms/v360/.well-known/openid-configuration"
     sso_scope: str = "openid email profile"
     # Must byte-for-byte match a Valid Redirect URI on the Keycloak client. Leave
     # empty to derive it from the request — that only works if the ALB sends
