@@ -1,0 +1,30 @@
+# The Dockerfile does `COPY . .`, so anything not excluded here is baked into
+# the image layers. .env is the important one: it holds the Keycloak client
+# secret and both database passwords, and docker-compose already supplies those
+# at runtime via env_file — the copy inside the image is pure risk.
+.env
+.env.*
+!.env.example
+secrets/
+
+.git
+.github
+.gitignore
+.dockerignore
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Dev/CI-only files that have no business in a runtime image
+requirements-dev.txt
+pyproject.toml
+smoke_test.py
+scripts/
+
+*.swp
+*.swo
+*~

@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same PR cancels the first — no point paying for a run
+# whose result is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: lint + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Match the Dockerfile — a version skew here means CI passes on a
+          # runtime that production never uses.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: Tests
+        # The suite needs no database and no network: the dataset catalog is
+        # stubbed, Keycloak is faked, and the app-database path is exercised
+        # through its disabled branch. Keep it that way — a CI job that needs
+        # a VPC-private RDS can't run on a hosted runner.
+        run: pytest
+
+  assets:
+    name: static assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax-check the chart scripts
+        # These ship to browsers with no build step, so a syntax error would
+        # only show up as a silently blank chart in production.
+        run: |
+          node --check app/static/chart-render.js
+          node --check app/static/chart-builder.js
+
+      - name: Check the vendored library is intact
+        run: |
+          test -s app/static/vendor/chart.umd.min.js
+          node --check app/static/vendor/chart.umd.min.js
+          echo "chart.js: $(wc -c < app/static/vendor/chart.umd.min.js) bytes"
+
+  templates:
+    name: templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Compile every Jinja template
+        # Templates are only parsed when a route renders them, so a typo in a
+        # page no test covers would reach production. This parses all of them.
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
+
+          root = Path("app/templates")
+          env = Environment(loader=FileSystemLoader(str(root)))
+          env.filters["inline_code"] = lambda v: v   # provided by app.main at runtime
+          failed = []
+          names = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.html"))
+          for name in names:
+              try:
+                  env.get_template(name)
+                  print(f"  ok   {name}")
+              except TemplateSyntaxError as exc:
+                  failed.append(f"{name}:{exc.lineno}: {exc.message}")
+                  print(f"  FAIL {name}:{exc.lineno}: {exc.message}")
+          if failed:
+              sys.exit("template syntax errors:\n" + "\n".join(failed))
+          print(f"{len(names)} templates parsed")
+          PY

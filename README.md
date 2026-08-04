@@ -293,6 +293,61 @@ engines would need that adjusted in `app/db.py`):
 - Don't commit `.env` (already in `.gitignore`).
 - Restrict network access to the hub (VPN / internal network only).
 
+## Development & CI
+
+```bash
+pip install -r requirements-dev.txt
+pytest                  # 14 tests, ~4s, no database or network needed
+ruff check . && ruff format --check .
+```
+
+`pyproject.toml` holds the pytest and ruff config. It also pins the pytest
+rootdir — without a config file here, pytest walks up the filesystem and adopts
+the first `pyproject.toml` it finds, which can be a completely unrelated
+project's.
+
+**The suite needs no services.** The dataset catalog is stubbed, Keycloak is
+faked, and the app database is exercised through its disabled branch. That's a
+property worth protecting: the real database lives in a private VPC, so a test
+that needed it could never run on a hosted runner.
+
+Two tests (`test_superset_delegated_mode`, `test_sso_only_mode`) `importlib.reload`
+`app.main` to exercise the auth modes, so the suite shares process state and
+must run in file order. Don't add a random-ordering plugin.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
+
+| Job | What it checks |
+| --- | --- |
+| `python` | ruff lint, ruff format, pytest |
+| `assets` | `node --check` on the chart scripts and the vendored Chart.js |
+| `templates` | parses all 10 Jinja templates — they're only compiled when a route renders them, so a typo on a page no test covers would otherwise reach production |
+
+### Deploying
+
+```bash
+scripts/deploy.sh                # origin/main to the BI host
+scripts/deploy.sh --ref v1.2.0
+```
+
+The host-side steps are in `scripts/host-update.sh`, piped over SSH so it works
+even when the host's checkout is older than that script. It refuses to deploy
+when `.env` is missing required keys — including the `AUTH_MODE=sso` with no
+Keycloak client combination that once left the app crash-looping — waits for
+`/healthz`, and prints the rollback command on failure.
+
+Always `docker compose up -d --build`, never `docker restart`: Docker only
+re-reads `env_file` when the container is **recreated**, so a restart silently
+keeps the old environment.
+
+`.github/workflows/deploy.yml` does the same thing from Actions via AWS SSM, but
+it's manual-dispatch only and inert until two repo variables exist
+(`AWS_ROLE_ARN`, `SSM_INSTANCE_ID`) — the host has no public SSH port, so a
+hosted runner needs an IAM role to reach it. It fails with those instructions if
+they're absent. Both paths run the same `host-update.sh`, so they can't drift.
+
 ## Project layout
 
 ```
@@ -311,7 +366,9 @@ reports.toml    report definitions (database + SQL per report)
 datasets.toml   dataset folders, descriptions, example queries, hide list
 sql/            report SQL files (report.sql is the connectivity check)
 manage.py       CLI to add users
-smoke_test.py   quick self-test (needs `pip install httpx`)
+smoke_test.py   the test suite (run with `pytest`)
+scripts/        deploy.sh (SSH) + host-update.sh (runs on the host)
+.github/        CI on every PR; manual-dispatch deploy
 ```
 
 ## Where to go next

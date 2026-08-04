@@ -1,0 +1,90 @@
+name: Deploy
+
+# Manual only. The BI host has no public SSH port — it is reached through AWS
+# SSM — so a hosted runner needs AWS credentials to talk to it. Until the IAM
+# role below exists, deploy with `scripts/deploy.sh` from a machine that already
+# has SSM access; this workflow and that script run the identical host-side
+# script (scripts/host-update.sh), so they cannot drift.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy"
+        required: true
+        default: "origin/main"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # required for AWS OIDC
+
+jobs:
+  deploy:
+    name: deploy to BI host
+    runs-on: ubuntu-latest
+    environment: production   # add required reviewers here to gate deploys
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check prerequisites
+        # Fail with instructions rather than a confusing AWS error.
+        run: |
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ] || [ -z "${{ vars.SSM_INSTANCE_ID }}" ]; then
+            cat >&2 <<'MSG'
+          This workflow is not wired up yet. It needs two repository variables
+          (Settings -> Secrets and variables -> Actions -> Variables):
+
+            AWS_ROLE_ARN      an IAM role this repo may assume via OIDC
+            SSM_INSTANCE_ID   the BI host's instance id (i-0e0…)
+
+          The role needs a trust policy for token.actions.githubusercontent.com
+          restricted to this repository, and a permissions policy allowing
+          ssm:SendCommand + ssm:GetCommandInvocation on that instance only.
+
+          Until then: scripts/deploy.sh --ref <ref>
+          MSG
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Run the host update via SSM
+        env:
+          REF: ${{ inputs.ref }}
+          INSTANCE: ${{ vars.SSM_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          # The host checks out $REF first, so it runs that ref's own copy of
+          # host-update.sh — the deploy script travels with the code.
+          command_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy $REF from ${{ github.actor }}" \
+            --parameters commands="sudo -iu ec2-user bash -c 'cd ~/data-mesh && git fetch --all --tags --quiet && git checkout --quiet --detach $REF && bash scripts/host-update.sh $REF'" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $command_id"
+
+          for _ in $(seq 1 60); do
+            status=$(aws ssm get-command-invocation --command-id "$command_id" \
+              --instance-id "$INSTANCE" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut) break ;;
+            esac
+            sleep 5
+          done
+
+          aws ssm get-command-invocation --command-id "$command_id" \
+            --instance-id "$INSTANCE" --query StandardOutputContent --output text
+          err=$(aws ssm get-command-invocation --command-id "$command_id" \
+            --instance-id "$INSTANCE" --query StandardErrorContent --output text)
+          [ -n "$err" ] && { echo "--- stderr ---"; echo "$err"; } || true
+
+          echo "final status: $status"
+          [ "$status" = "Success" ]
