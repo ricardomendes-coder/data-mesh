@@ -265,6 +265,43 @@
     #chart-warnings:not(:empty){margin-top:1rem;}
     #chart-warnings .bi-err{margin-bottom:.6rem;}
 
+    /* ── dashboards ── */
+    .bi-card-ic-dash{background:#E7F2F5;color:#0F6674;}
+    .bi-search-plain input{padding-left:.7rem;}
+    .bi-fld-inline{margin-bottom:0;display:flex;align-items:center;gap:.55rem;max-width:none;}
+    .bi-fld-inline label{margin-bottom:0;white-space:nowrap;}
+    .bi-fld-inline select{width:auto;min-width:190px;}
+    .bi-fld-narrow select{min-width:104px;}
+
+    /* 6 columns so third (2), half (3) and full (6) all divide evenly */
+    .bi-tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:1rem;align-items:start;}
+    .bi-tile{grid-column:span 3;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-1);display:flex;flex-direction:column;min-width:0;}
+    .bi-tile-full{grid-column:span 6;}
+    .bi-tile-half{grid-column:span 3;}
+    .bi-tile-third{grid-column:span 2;}
+    @media(max-width:1100px){
+      .bi-tile-third{grid-column:span 3;}
+    }
+    @media(max-width:780px){
+      .bi-tile,.bi-tile-full,.bi-tile-half,.bi-tile-third{grid-column:span 6;}
+    }
+    .bi-tile-hd{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;border-bottom:1px solid var(--border);min-height:44px;}
+    .bi-tile-tt{font-size:.87rem;font-weight:700;color:var(--title);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .bi-tile-tt:hover{color:var(--orange);}
+    .bi-tile-hd .bi-kind{margin-left:auto;}
+    .bi-tile-ctl{margin-left:auto;display:flex;align-items:center;gap:.25rem;}
+    .bi-tile-ctl form{display:flex;}
+    .bi-tile-ctl select{height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--body);font-family:inherit;font-size:.72rem;padding:0 .3rem;outline:none;}
+    .bi-tile-canvas{padding:.85rem .9rem;height:248px;position:relative;}
+    .bi-tile-full .bi-tile-canvas{height:320px;}
+    .bi-tile-err{display:flex;align-items:center;gap:.5rem;padding:1.4rem .9rem;font-size:.8rem;color:#9A3412;}
+    .bi-tile-err svg{flex-shrink:0;color:#EA580C;}
+    .bi-tile-warn{padding:0 .9rem .7rem;font-size:.72rem;color:var(--muted);line-height:1.45;}
+
+    .bi-icobtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--body);cursor:pointer;transition:all .12s;}
+    .bi-icobtn:hover{border-color:var(--g-300);color:var(--title);background:#FCFCFD;}
+    .bi-icobtn.danger:hover{border-color:#FBD9C2;color:var(--danger);background:#FFF6F0;}
+
     /* ── login ──
        The low-poly artwork is the same login-background.png the main app uses,
        over a navy fallback in case the image can't be fetched. */

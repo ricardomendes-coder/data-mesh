@@ -1,0 +1,53 @@
+{# One dashboard tile. Shared by the view and the editor so the rendered chart
+   looks identical in both — the editor only adds the controls row.
+
+   `canvas_id` must match the key used in the page's dashboard-data payload. #}
+{% macro tile(t, canvas_id, editing=false, widths=(), dashboard=None) -%}
+<div class="bi-tile bi-tile-{{ t.item.width }}">
+  <div class="bi-tile-hd">
+    <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.slug) }}">{{ t.chart.title }}</a>
+    {% if editing %}
+    <div class="bi-tile-ctl">
+      <form method="post" action="{{ url_for('dashboard_move_item', slug=dashboard.slug, item_id=t.item.id) }}">
+        <input type="hidden" name="direction" value="up">
+        <button class="bi-icobtn" type="submit" title="Move earlier" aria-label="Move earlier">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('dashboard_move_item', slug=dashboard.slug, item_id=t.item.id) }}">
+        <input type="hidden" name="direction" value="down">
+        <button class="bi-icobtn" type="submit" title="Move later" aria-label="Move later">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('dashboard_set_width', slug=dashboard.slug, item_id=t.item.id) }}">
+        <select name="width" onchange="this.form.submit()" aria-label="Tile width">
+          {% for w in widths %}
+          <option value="{{ w }}" {% if w == t.item.width %}selected{% endif %}>{{ w }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=t.item.id) }}">
+        <button class="bi-icobtn danger" type="submit" title="Remove from dashboard" aria-label="Remove">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </form>
+    </div>
+    {% else %}
+    <span class="bi-kind bi-kind-view">{{ t.chart.chart_type }}</span>
+    {% endif %}
+  </div>
+
+  {% if t.error %}
+  <div class="bi-tile-err">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
+    <span>{{ t.error }}</span>
+  </div>
+  {% else %}
+  <div class="bi-tile-canvas"><canvas id="{{ canvas_id }}"></canvas></div>
+  {% if t.spec and t.spec.warnings %}
+  <div class="bi-tile-warn">{{ t.spec.warnings|join(' ') }}</div>
+  {% endif %}
+  {% endif %}
+</div>
+{%- endmacro %}

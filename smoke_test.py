@@ -387,6 +387,212 @@ def test_chart_spec():
     print("chart spec: OK")
 
 
+def test_dashboard_layout_ordering():
+    """move_item swaps neighbours and rewrites positions densely.
+
+    Exercised against a fake connection rather than Postgres: the ordering
+    logic is the part that breaks, and it shouldn't need a database to check.
+    """
+    from app import store
+
+    class _FakeResult:
+        def __init__(self, rows=(), scalar=None):
+            self._rows = list(rows)
+            self._scalar = scalar
+            self.rowcount = len(self._rows)
+
+        def __iter__(self):
+            return iter(self._rows)
+
+        def scalar(self):
+            return self._scalar
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def fetchall(self):
+            return self._rows
+
+    class _FakeConn:
+        """Answers the three queries move_item issues, and records updates."""
+
+        def __init__(self, item_ids):
+            self.item_ids = item_ids
+            self.writes = []
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "SELECT id FROM dashboards" in sql:
+                return _FakeResult(scalar=7)
+            if "SELECT id FROM dashboard_items" in sql:
+                return _FakeResult(rows=[(i,) for i in self.item_ids])
+            if "UPDATE dashboard_items SET position" in sql:
+                self.writes.append((params["i"], params["p"]))
+                return _FakeResult()
+            return _FakeResult()  # the updated_at touch
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _run(item_ids, item_id, delta):
+        conn = _FakeConn(item_ids)
+
+        class _Eng:
+            def begin(self_inner):
+                return conn
+
+        original_engine = store.engine
+        store.engine = lambda: _Eng()
+        try:
+            ok = store.move_item("dash", item_id, delta)
+        finally:
+            store.engine = original_engine
+        return ok, dict(conn.writes)
+
+    ok, positions = _run([10, 20, 30], 20, -1)
+    assert ok, "moving the middle tile up should succeed"
+    # 20 swaps with 10 -> order 20, 10, 30 written densely from zero
+    assert positions == {20: 0, 10: 1, 30: 2}, positions
+
+    ok, positions = _run([10, 20, 30], 20, 1)
+    assert ok
+    assert positions == {10: 0, 30: 1, 20: 2}, positions
+
+    # Edges refuse rather than wrapping around
+    ok, positions = _run([10, 20, 30], 10, -1)
+    assert not ok and positions == {}, positions
+    ok, positions = _run([10, 20, 30], 30, 1)
+    assert not ok and positions == {}, positions
+
+    # An unknown tile is rejected, not silently reordered
+    ok, _ = _run([10, 20], 99, -1)
+    assert not ok
+
+    # Duplicate/gapped positions still normalise to 0..n-1
+    ok, positions = _run([5, 6, 7, 8], 7, -1)
+    assert sorted(positions.values()) == [0, 1, 2, 3], positions
+    print("dashboard layout ordering: OK")
+
+
+def test_dashboard_widths_are_validated():
+    """Only known widths reach the database — the grid spans depend on it."""
+    from app import store
+
+    assert store.DEFAULT_WIDTH in store.WIDTHS
+    assert set(store.WIDTHS) == {"third", "half", "full"}
+    # set_item_width rejects anything else before touching a connection
+    assert store.set_item_width("d", 1, "enormous") is False
+    print("dashboard widths: OK")
+
+
+def test_dashboard_pages_render():
+    """Actually render the dashboard view and editor.
+
+    This is the test that catches template-level breakage. Parsing a template —
+    which is all the CI `templates` job does — never executes its macros, so a
+    macro imported without `with context` parses fine and then fails at render
+    time with KeyError: 'request'. That happened; this is the guard.
+    """
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=1,
+        slug="cap",
+        title="Capturas por dia",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="line",
+        x_column="dia",
+        y_columns=["total"],
+    )
+    dash = store.Dashboard(id=1, slug="ops", title="Operação diária", created_by="admin")
+    dash.items = [store.DashboardItem(id=11, chart=chart, position=0, width="full")]
+
+    saved = (
+        store.available,
+        store.get_dashboard,
+        store.list_charts,
+        store.list_dashboards,
+        db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda slug, with_items=True: dash if slug == "ops" else None
+    store.list_charts = lambda: [chart]
+    store.list_dashboards = lambda: [dash]
+    db_mod.execute = lambda sql, database=None: db_mod.QueryResult(
+        returns_rows=True,
+        columns=["dia", "total"],
+        rows=[("2026-07-01", 10), ("2026-07-02", 14)],
+        rowcount=2,
+    )
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.get("/dashboards")
+            assert r.status_code == 200, r.text[:300]
+            assert "Operação diária" in r.text
+
+            r = client.get("/dashboards/ops")
+            assert r.status_code == 200, r.text[:400]
+            assert "Capturas por dia" in r.text
+            assert 'id="tile-0"' in r.text, "tile canvas missing"
+            assert '"tile-0"' in r.text, "chart spec payload missing"
+            assert "bi-tile-full" in r.text, "tile width not applied to the grid"
+
+            r = client.get("/dashboards/ops/edit")
+            assert r.status_code == 200, r.text[:400]
+            assert "Move earlier" in r.text, "editor controls missing"
+            assert "/items/11/remove" in r.text, "remove action missing"
+
+            r = client.get("/dashboards/nope", follow_redirects=False)
+            assert r.status_code == 404, r.status_code
+    finally:
+        (
+            store.available,
+            store.get_dashboard,
+            store.list_charts,
+            store.list_dashboards,
+            db_mod.execute,
+        ) = saved
+    print("dashboard pages render: OK")
+
+
+def test_dashboards_disabled_without_app_db():
+    """No app database -> the tab explains itself instead of erroring."""
+    import importlib
+
+    from app import config, store
+    from app import main as main_mod
+
+    saved = os.environ.get("APP_DB_PASSWORD")
+    os.environ["APP_DB_PASSWORD"] = ""
+    config.get_settings.cache_clear()
+    store.reset_engine()
+    reloaded = importlib.reload(main_mod)
+    try:
+        with TestClient(reloaded.app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            r = client.get("/dashboards")
+            assert r.status_code == 503, r.status_code
+            assert "not configured" in r.text
+            r = client.get("/dashboards/anything")
+            assert r.status_code == 503, r.status_code
+    finally:
+        if saved is None:
+            os.environ.pop("APP_DB_PASSWORD", None)
+        else:
+            os.environ["APP_DB_PASSWORD"] = saved
+        config.get_settings.cache_clear()
+        store.reset_engine()
+        importlib.reload(main_mod)
+    print("dashboards disabled path: OK")
+
+
 def test_charts_disabled_without_app_db():
     """With no app database the Charts tab explains itself instead of 500ing."""
     import importlib
@@ -647,7 +853,11 @@ if __name__ == "__main__":
     test_inline_code_filter()
     test_dataset_preview_is_not_injectable()
     test_chart_spec()
+    test_dashboard_layout_ordering()
+    test_dashboard_widths_are_validated()
+    test_dashboard_pages_render()
     # Last: these reload app.main, which rebinds this module's `app` reference.
+    test_dashboards_disabled_without_app_db()
     test_charts_disabled_without_app_db()
     test_superset_delegated_mode()
     test_superset_break_glass()

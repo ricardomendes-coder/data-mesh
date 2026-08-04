@@ -1,0 +1,39 @@
+{% extends "_shell.html" %}
+{# `with context` is required: the macro calls url_for, which reads `request`
+   from the template context, and a plain import doesn't pass it through. #}
+{% from "_tile.html" import tile with context %}
+{% block page_title %}{{ dashboard.title }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('dashboards_index') }}">Dashboards</a> /
+  {{ tiles|length }} chart{{ '' if tiles|length == 1 else 's' }}
+{% endblock %}
+{% block topbar_extra %}
+<a class="bi-btn ghost" href="{{ url_for('dashboard_edit', slug=dashboard.slug) }}">
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>
+  Edit
+</a>
+{% endblock %}
+
+{% block content %}
+{% if dashboard.description %}
+<div class="bi-ds-desc">{{ dashboard.description|inline_code }}</div>
+{% endif %}
+
+{% if tiles %}
+<div class="bi-tiles">
+  {% for t in tiles %}
+  {{ tile(t, 'tile-' ~ loop.index0) }}
+  {% endfor %}
+</div>
+
+<script id="dashboard-data" type="application/json">{{ tile_specs|tojson }}</script>
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
+{% else %}
+<div class="bi-empty-lg">
+  This dashboard is empty.
+  <a href="{{ url_for('dashboard_edit', slug=dashboard.slug) }}">Add a chart</a>.
+</div>
+{% endif %}
+{% endblock %}

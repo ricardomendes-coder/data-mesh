@@ -14,7 +14,7 @@
     ~{{ '{:,}'.format(dataset.approx_rows) }} rows
   </span>
   {% endif %}
-  <a class="bi-btn sm ghost" href="{{ url_for('dashboard') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ default_query|urlencode }}">
+  <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ default_query|urlencode }}">
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
     Open in Query
   </a>
@@ -105,7 +105,7 @@ description = "What this {{ dataset.kind }} holds, and its grain."</pre>
   <div class="bi-example">
     <div class="bi-example-hd">
       <span class="bi-example-tt">{{ ex.title }}</span>
-      <a class="bi-btn sm ghost" href="{{ url_for('dashboard') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ ex.sql|urlencode }}">Open in Query</a>
+      <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ datasets_database|urlencode }}&amp;sql={{ ex.sql|urlencode }}">Open in Query</a>
     </div>
     <pre class="bi-snippet">{{ ex.sql }}</pre>
   </div>

@@ -1,0 +1,54 @@
+{% extends "_shell.html" %}
+{# `with context` is required — the macro uses url_for. See dashboard_show.html. #}
+{% from "_tile.html" import tile with context %}
+{% block page_title %}{{ dashboard.title }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('dashboards_index') }}">Dashboards</a> / editing
+{% endblock %}
+{% block topbar_extra %}
+<a class="bi-btn" href="{{ url_for('dashboard_show', slug=dashboard.slug) }}">Done</a>
+{% endblock %}
+
+{% block content %}
+<form class="bi-toolbar" method="post"
+      action="{{ url_for('dashboard_add_item', slug=dashboard.slug) }}">
+  {% if available_charts %}
+  <div class="bi-fld bi-fld-inline">
+    <label for="chart_slug">Add a chart</label>
+    <select id="chart_slug" name="chart_slug" required>
+      {% for c in available_charts %}
+      <option value="{{ c.slug }}">{{ c.title }} ({{ c.chart_type }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="bi-fld bi-fld-inline bi-fld-narrow">
+    <label for="width">Width</label>
+    <select id="width" name="width">
+      {% for w in widths %}
+      <option value="{{ w }}" {% if w == 'half' %}selected{% endif %}>{{ w }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="bi-btn" type="submit">Add</button>
+  {% else %}
+  <p class="bi-hint">
+    No charts to add yet — <a href="{{ url_for('chart_new') }}">build one</a> first.
+  </p>
+  {% endif %}
+</form>
+
+{% if tiles %}
+<div class="bi-tiles bi-tiles-editing">
+  {% for t in tiles %}
+  {{ tile(t, 'tile-' ~ loop.index0, editing=true, widths=widths, dashboard=dashboard) }}
+  {% endfor %}
+</div>
+
+<script id="dashboard-data" type="application/json">{{ tile_specs|tojson }}</script>
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
+{% else %}
+<div class="bi-empty-lg">Nothing on this dashboard yet. Add a chart above.</div>
+{% endif %}
+{% endblock %}

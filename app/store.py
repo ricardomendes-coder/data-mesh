@@ -51,6 +51,36 @@ MIGRATIONS: list[tuple[str, str]] = [
         )
         """,
     ),
+    (
+        "0002_dashboards",
+        """
+        CREATE TABLE IF NOT EXISTS dashboards (
+            id          bigserial   PRIMARY KEY,
+            slug        text        NOT NULL UNIQUE,
+            title       text        NOT NULL,
+            description text        NOT NULL DEFAULT '',
+            created_by  text        NOT NULL DEFAULT '',
+            created_at  timestamptz NOT NULL DEFAULT now(),
+            updated_at  timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS dashboard_items (
+            id           bigserial PRIMARY KEY,
+            -- CASCADE on both sides is deliberate. Deleting a dashboard drops
+            -- its layout; deleting a chart removes it from every dashboard
+            -- rather than leaving a tile that can never render.
+            dashboard_id bigint NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+            chart_id     bigint NOT NULL REFERENCES charts(id)     ON DELETE CASCADE,
+            position     integer NOT NULL DEFAULT 0,
+            -- Grid span: full | half | third. Text rather than an enum so a new
+            -- width is a code change, not a migration.
+            width        text    NOT NULL DEFAULT 'half'
+        );
+
+        CREATE INDEX IF NOT EXISTS dashboard_items_dashboard_position_idx
+            ON dashboard_items (dashboard_id, position);
+        """,
+    ),
 ]
 
 
@@ -173,11 +203,16 @@ def get_chart(slug: str) -> Chart | None:
         return _row_to_chart(row) if row else None
 
 
-def unique_slug(title: str) -> str:
-    """A slug not already taken, suffixing -2, -3 … as needed."""
+def unique_slug(title: str, exists=None) -> str:
+    """A slug not already taken, suffixing -2, -3 … as needed.
+
+    `exists` is the lookup to test against, so charts and dashboards each get a
+    slug unique within their own table rather than sharing a namespace.
+    """
+    exists = exists or get_chart
     base = slugify(title)
     candidate, n = base, 1
-    while get_chart(candidate) is not None:
+    while exists(candidate) is not None:
         n += 1
         candidate = f"{base}-{n}"
     return candidate
@@ -226,3 +261,278 @@ def delete_chart(slug: str) -> bool:
     with engine().begin() as conn:
         result = conn.execute(text("DELETE FROM charts WHERE slug = :s"), {"s": slug})
         return result.rowcount > 0
+
+
+# ── dashboards ─────────────────────────────────────────────────────────────
+
+# Grid spans a tile may occupy. Text in the database rather than an enum, so
+# adding one is a code change instead of a migration.
+WIDTHS = ("third", "half", "full")
+DEFAULT_WIDTH = "half"
+
+
+@dataclass
+class DashboardItem:
+    """One tile: a chart placed on a dashboard at a position and width."""
+
+    id: int
+    chart: Chart
+    position: int
+    width: str = DEFAULT_WIDTH
+
+
+@dataclass
+class Dashboard:
+    slug: str
+    title: str
+    description: str = ""
+    created_by: str = ""
+    id: int | None = None
+    items: list[DashboardItem] = field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+_DASH_SELECT = (
+    "SELECT id, slug, title, description, created_by, created_at, updated_at FROM dashboards"
+)
+
+
+def _row_to_dashboard(row: Any) -> Dashboard:
+    m = row._mapping
+    return Dashboard(
+        id=m["id"],
+        slug=m["slug"],
+        title=m["title"],
+        description=m["description"],
+        created_by=m["created_by"],
+        created_at=m["created_at"],
+        updated_at=m["updated_at"],
+    )
+
+
+def list_dashboards() -> list[Dashboard]:
+    """Dashboards with a tile count, most recently updated first.
+
+    Tiles are not loaded here — the index only needs the count, and loading
+    every chart for every dashboard would be a query per tile.
+    """
+    with engine().connect() as conn:
+        rows = conn.execute(text(f"{_DASH_SELECT} ORDER BY updated_at DESC")).fetchall()
+        dashboards = [_row_to_dashboard(r) for r in rows]
+        counts = dict(
+            conn.execute(
+                text("SELECT dashboard_id, count(*) FROM dashboard_items GROUP BY 1")
+            ).fetchall()
+        )
+    for d in dashboards:
+        d.items = [None] * counts.get(d.id, 0)  # placeholder: only len() is used
+    return dashboards
+
+
+def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
+    """A dashboard and, by default, its tiles joined to their charts."""
+    with engine().connect() as conn:
+        row = conn.execute(text(f"{_DASH_SELECT} WHERE slug = :s"), {"s": slug}).first()
+        if row is None:
+            return None
+        dash = _row_to_dashboard(row)
+        if not with_items:
+            return dash
+        # One join rather than a query per tile.
+        items = conn.execute(
+            text(
+                """
+                SELECT i.id, i.position, i.width,
+                       c.id AS c_id, c.slug, c.title, c.description, c.source_db,
+                       c.sql, c.chart_type, c.x_column, c.y_columns, c.created_by,
+                       c.created_at, c.updated_at
+                FROM dashboard_items i
+                JOIN charts c ON c.id = i.chart_id
+                WHERE i.dashboard_id = :id
+                ORDER BY i.position, i.id
+                """
+            ),
+            {"id": dash.id},
+        ).fetchall()
+
+    for r in items:
+        m = r._mapping
+        y = m["y_columns"]
+        if isinstance(y, str):
+            y = json.loads(y)
+        dash.items.append(
+            DashboardItem(
+                id=m["id"],
+                position=m["position"],
+                width=m["width"] if m["width"] in WIDTHS else DEFAULT_WIDTH,
+                chart=Chart(
+                    id=m["c_id"],
+                    slug=m["slug"],
+                    title=m["title"],
+                    description=m["description"],
+                    source_db=m["source_db"],
+                    sql=m["sql"],
+                    chart_type=m["chart_type"],
+                    x_column=m["x_column"],
+                    y_columns=list(y or []),
+                    created_by=m["created_by"],
+                    created_at=m["created_at"],
+                    updated_at=m["updated_at"],
+                ),
+            )
+        )
+    return dash
+
+
+def save_dashboard(dash: Dashboard) -> Dashboard:
+    """Insert, or update title/description in place when the slug exists."""
+    with engine().begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                INSERT INTO dashboards (slug, title, description, created_by)
+                VALUES (:slug, :title, :description, :created_by)
+                ON CONFLICT (slug) DO UPDATE SET
+                    title       = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    updated_at  = now()
+                RETURNING id, slug, title, description, created_by, created_at, updated_at
+                """
+            ),
+            {
+                "slug": dash.slug,
+                "title": dash.title,
+                "description": dash.description,
+                "created_by": dash.created_by,
+            },
+        ).first()
+    return _row_to_dashboard(row)
+
+
+def delete_dashboard(slug: str) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(text("DELETE FROM dashboards WHERE slug = :s"), {"s": slug})
+        return result.rowcount > 0
+
+
+def _touch(conn, dashboard_id: int) -> None:
+    """Bump updated_at so the index ordering reflects layout edits too."""
+    conn.execute(
+        text("UPDATE dashboards SET updated_at = now() WHERE id = :id"), {"id": dashboard_id}
+    )
+
+
+def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH) -> bool:
+    """Append a chart to a dashboard. False if either no longer exists.
+
+    A chart may appear more than once — the same series at two widths, or
+    alongside a variant — so there's no uniqueness constraint to trip over.
+    """
+    if width not in WIDTHS:
+        width = DEFAULT_WIDTH
+    with engine().begin() as conn:
+        ids = conn.execute(
+            text(
+                """
+                SELECT (SELECT id FROM dashboards WHERE slug = :d),
+                       (SELECT id FROM charts     WHERE slug = :c)
+                """
+            ),
+            {"d": dashboard_slug, "c": chart_slug},
+        ).first()
+        dash_id, chart_id = ids[0], ids[1]
+        if dash_id is None or chart_id is None:
+            return False
+        next_pos = conn.execute(
+            text(
+                "SELECT coalesce(max(position), -1) + 1 FROM dashboard_items "
+                "WHERE dashboard_id = :id"
+            ),
+            {"id": dash_id},
+        ).scalar()
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_items (dashboard_id, chart_id, position, width) "
+                "VALUES (:d, :c, :p, :w)"
+            ),
+            {"d": dash_id, "c": chart_id, "p": next_pos, "w": width},
+        )
+        _touch(conn, dash_id)
+    return True
+
+
+def remove_item(dashboard_slug: str, item_id: int) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                DELETE FROM dashboard_items
+                WHERE id = :i
+                  AND dashboard_id = (SELECT id FROM dashboards WHERE slug = :d)
+                """
+            ),
+            {"i": item_id, "d": dashboard_slug},
+        )
+        if result.rowcount:
+            conn.execute(
+                text("UPDATE dashboards SET updated_at = now() WHERE slug = :d"),
+                {"d": dashboard_slug},
+            )
+        return result.rowcount > 0
+
+
+def set_item_width(dashboard_slug: str, item_id: int, width: str) -> bool:
+    if width not in WIDTHS:
+        return False
+    with engine().begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                UPDATE dashboard_items SET width = :w
+                WHERE id = :i
+                  AND dashboard_id = (SELECT id FROM dashboards WHERE slug = :d)
+                """
+            ),
+            {"w": width, "i": item_id, "d": dashboard_slug},
+        )
+        return result.rowcount > 0
+
+
+def move_item(dashboard_slug: str, item_id: int, delta: int) -> bool:
+    """Shift a tile earlier (-1) or later (+1) by swapping with its neighbour.
+
+    Positions are rewritten densely from the current order first, so rows that
+    arrived with duplicate or gapped positions still reorder predictably.
+    """
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :d"), {"d": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+
+        ids = [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT id FROM dashboard_items WHERE dashboard_id = :d ORDER BY position, id"
+                ),
+                {"d": dash_id},
+            )
+        ]
+        if item_id not in ids:
+            return False
+        i = ids.index(item_id)
+        j = i + delta
+        if j < 0 or j >= len(ids):
+            return False  # already at the end it's being moved toward
+        ids[i], ids[j] = ids[j], ids[i]
+
+        for position, iid in enumerate(ids):
+            conn.execute(
+                text("UPDATE dashboard_items SET position = :p WHERE id = :i"),
+                {"p": position, "i": iid},
+            )
+        _touch(conn, dash_id)
+    return True

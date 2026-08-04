@@ -162,7 +162,7 @@ async def login_form(request: Request):
     rather than showing an interstitial "sign in with..." page.
     """
     if get_current_user(request):
-        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+        return RedirectResponse(request.url_for("console"), status_code=303)
 
     if settings.superset_auth_enabled:
         # Same origin as Superset, so its cookie is already on this request.
@@ -178,7 +178,7 @@ async def login_form(request: Request):
                     claims=superset_session.claims_from_result(result),
                 )
                 logger.info("Superset-delegated login: %s", username)
-                return RedirectResponse(request.url_for("dashboard"), status_code=303)
+                return RedirectResponse(request.url_for("console"), status_code=303)
         # Not signed in to BI 360 (or the cookie is stale). Superset owns the
         # only Keycloak redirect URI that is actually registered, so send them
         # there and let it run the OAuth flow on our behalf.
@@ -241,7 +241,7 @@ async def sso_callback(request: Request):
 
     start_session(request, username, via="sso", claims=claims)
     logger.info("SSO login: %s", username)
-    return RedirectResponse(request.url_for("dashboard"), status_code=303)
+    return RedirectResponse(request.url_for("console"), status_code=303)
 
 
 @app.get("/login/local", response_class=HTMLResponse)
@@ -250,7 +250,7 @@ def login_local_form(request: Request):
     if not settings.password_login_enabled:
         raise HTTPException(status_code=404, detail="Password login is disabled")
     if get_current_user(request):
-        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+        return RedirectResponse(request.url_for("console"), status_code=303)
     return _login_page(request)
 
 
@@ -264,7 +264,7 @@ def login_local_submit(
         raise HTTPException(status_code=404, detail="Password login is disabled")
     if users.verify_user(username, password):
         start_session(request, username, via="password")
-        return RedirectResponse(request.url_for("dashboard"), status_code=303)
+        return RedirectResponse(request.url_for("console"), status_code=303)
     logger.warning("Failed password login for %r", username)
     return _login_page(request, error="Invalid username or password.", status_code=401)
 
@@ -316,7 +316,7 @@ def _shell_context(user: str, active_nav: str, **extra) -> dict:
     return context
 
 
-def _dashboard_context(user: str, **extra) -> dict:
+def _console_context(user: str, **extra) -> dict:
     """Base template context: the DB picker list and the reports manifest.
 
     Both DB discovery and manifest parsing are best-effort — a failure degrades
@@ -357,7 +357,7 @@ def _dashboard_context(user: str, **extra) -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(
+def console(
     request: Request,
     tab: str = "query",
     sql: str = "",
@@ -369,12 +369,12 @@ def dashboard(
     `tab`/`sql`/`database` make the console deep-linkable, which is what the
     "Open in Query" buttons on a dataset page use to hand a query over.
     """
-    context = _dashboard_context(user, active_tab="reports" if tab == "reports" else "query")
+    context = _console_context(user, active_tab="reports" if tab == "reports" else "query")
     if sql:
         context["sql"] = sql
     if database:
         context["database"] = database
-    return templates.TemplateResponse(request, "dashboard.html", context)
+    return templates.TemplateResponse(request, "console.html", context)
 
 
 @app.get("/datasets", response_class=HTMLResponse)
@@ -481,12 +481,12 @@ def run_query(
     database: str = Form(...),
     user: str = Depends(require_login),
 ):
-    context = _dashboard_context(user, sql=sql, database=database)
+    context = _console_context(user, sql=sql, database=database)
 
     # Only accept a database the server actually reported (when we have a list).
     if context["databases"] and database not in context["databases"]:
         context["error"] = f"Unknown database: {database!r}."
-        return templates.TemplateResponse(request, "dashboard.html", context, status_code=400)
+        return templates.TemplateResponse(request, "console.html", context, status_code=400)
 
     try:
         result = db.execute(sql, database)
@@ -495,7 +495,7 @@ def run_query(
         # DB error is the useful behavior (unlike report export).
         logger.exception("Ad-hoc query failed")
         context["error"] = f"Query failed: {exc}"
-        return templates.TemplateResponse(request, "dashboard.html", context, status_code=400)
+        return templates.TemplateResponse(request, "console.html", context, status_code=400)
 
     if result.returns_rows:
         shown = result.rows[:QUERY_DISPLAY_LIMIT]
@@ -508,7 +508,7 @@ def run_query(
         }
     else:
         context["message"] = f"OK — {result.rowcount} row(s) affected."
-    return templates.TemplateResponse(request, "dashboard.html", context)
+    return templates.TemplateResponse(request, "console.html", context)
 
 
 @app.post("/query/export")
@@ -520,8 +520,8 @@ def export_query(
     user: str = Depends(require_login),
 ):
     def _error(msg: str, status: int = 400):
-        context = _dashboard_context(user, sql=sql, database=database, error=msg)
-        return templates.TemplateResponse(request, "dashboard.html", context, status_code=status)
+        context = _console_context(user, sql=sql, database=database, error=msg)
+        return templates.TemplateResponse(request, "console.html", context, status_code=status)
 
     try:
         databases = db.list_databases()
@@ -537,13 +537,13 @@ def export_query(
         return _error(f"Query failed: {exc}")
 
     if not result.returns_rows:
-        context = _dashboard_context(
+        context = _console_context(
             user,
             sql=sql,
             database=database,
             message=f"OK — {result.rowcount} row(s) affected. Nothing to export.",
         )
-        return templates.TemplateResponse(request, "dashboard.html", context)
+        return templates.TemplateResponse(request, "console.html", context)
 
     return _file_response(result.to_dataframe(), format, "query")
 
@@ -558,18 +558,18 @@ def export_report(
     try:
         df = reports.get_report_df(key)
     except KeyError:
-        context = _dashboard_context(user, error=f"Unknown report: {key!r}.", active_tab="reports")
-        return templates.TemplateResponse(request, "dashboard.html", context, status_code=404)
+        context = _console_context(user, error=f"Unknown report: {key!r}.", active_tab="reports")
+        return templates.TemplateResponse(request, "console.html", context, status_code=404)
     except Exception:
         # Full details go to the server log; the user sees a generic message so
         # we never leak connection strings or credentials into the browser.
         logger.exception("Report generation failed for %r", key)
-        context = _dashboard_context(
+        context = _console_context(
             user,
             error="Could not generate the report. Check the server logs.",
             active_tab="reports",
         )
-        return templates.TemplateResponse(request, "dashboard.html", context, status_code=502)
+        return templates.TemplateResponse(request, "console.html", context, status_code=502)
 
     return _file_response(df, format, key)
 
@@ -778,6 +778,210 @@ def chart_delete(request: Request, slug: str, user: str = Depends(require_login)
         store.delete_chart(slug)
         logger.info("Chart %r deleted by %s", slug, user)
     return RedirectResponse(request.url_for("charts_index"), status_code=303)
+
+
+# ── dashboards ─────────────────────────────────────────────────────────────
+
+
+def _dashboards_unavailable(request: Request, user: str, status: int = 503):
+    context = _shell_context(
+        user,
+        "dashboards",
+        dashboards=[],
+        db_ok=False,
+        db_error=(
+            "The app database is not configured, so dashboards can't be saved. "
+            "Set APP_DB_PASSWORD (see .env.example)."
+        ),
+    )
+    return templates.TemplateResponse(request, "dashboards.html", context, status_code=status)
+
+
+def _render_tiles(items: list) -> list[dict]:
+    """Run each tile's query and build its spec.
+
+    One query per tile, sequentially — fine for the handful of charts a
+    dashboard holds, and a failing tile becomes an error card rather than
+    taking down the whole page.
+    """
+    tiles = []
+    for item in items:
+        tile = {"item": item, "chart": item.chart, "spec": None, "error": None}
+        try:
+            result = db.execute(item.chart.sql, item.chart.source_db)
+            tile["spec"] = charts.build_spec(
+                result.columns,
+                result.rows,
+                item.chart.chart_type,
+                item.chart.x_column,
+                item.chart.y_columns,
+            )
+        except Exception:
+            logger.exception("Dashboard tile %r failed", item.chart.slug)
+            tile["error"] = "This chart's query failed."
+        tiles.append(tile)
+    return tiles
+
+
+def _tile_specs(tiles: list[dict]) -> dict:
+    """canvas id -> spec, for the page's single embedded payload.
+
+    Built here rather than in the template: Jinja has no zero-based enumerate,
+    and the ids must match what _tile.html renders.
+    """
+    return {f"tile-{i}": (t["spec"].to_dict() if t["spec"] else None) for i, t in enumerate(tiles)}
+
+
+@app.get("/dashboards", response_class=HTMLResponse)
+def dashboards_index(request: Request, user: str = Depends(require_login)):
+    if not store.available():
+        return _dashboards_unavailable(request, user)
+    context = _shell_context(user, "dashboards", dashboards=[])
+    try:
+        context["dashboards"] = store.list_dashboards()
+    except Exception:
+        logger.exception("Could not list dashboards")
+        context["db_ok"] = False
+        context["db_error"] = "Could not read dashboards — check the server logs."
+    return templates.TemplateResponse(request, "dashboards.html", context)
+
+
+@app.post("/dashboards")
+def dashboard_create(
+    request: Request,
+    title: str = Form(...),
+    user: str = Depends(require_login),
+):
+    if not store.available():
+        return _dashboards_unavailable(request, user)
+    title = title.strip() or "Untitled dashboard"
+    dash = store.save_dashboard(
+        store.Dashboard(
+            slug=store.unique_slug(
+                title, exists=lambda s: store.get_dashboard(s, with_items=False)
+            ),
+            title=title,
+            created_by=user,
+        )
+    )
+    logger.info("Dashboard %r created by %s", dash.slug, user)
+    # Straight into the editor: a new dashboard is empty and the next thing you
+    # want is to add a chart.
+    return RedirectResponse(request.url_for("dashboard_edit", slug=dash.slug), status_code=303)
+
+
+def _load_dashboard(request: Request, user: str, slug: str):
+    """Returns (dashboard, None) or (None, response) for the error path."""
+    try:
+        dash = store.get_dashboard(slug)
+    except Exception:
+        logger.exception("Could not load dashboard %r", slug)
+        return None, _dashboards_unavailable(request, user)
+    if dash is None:
+        context = _shell_context(
+            user, "dashboards", dashboards=[], error=f"Unknown dashboard: {slug!r}."
+        )
+        return None, templates.TemplateResponse(
+            request, "dashboards.html", context, status_code=404
+        )
+    return dash, None
+
+
+@app.get("/dashboards/{slug}", response_class=HTMLResponse)
+def dashboard_show(request: Request, slug: str, user: str = Depends(require_login)):
+    if not store.available():
+        return _dashboards_unavailable(request, user)
+    dash, failure = _load_dashboard(request, user, slug)
+    if failure is not None:
+        return failure
+    tiles = _render_tiles(dash.items)
+    context = _shell_context(
+        user, "dashboards", dashboard=dash, tiles=tiles, tile_specs=_tile_specs(tiles)
+    )
+    return templates.TemplateResponse(request, "dashboard_show.html", context)
+
+
+@app.get("/dashboards/{slug}/edit", response_class=HTMLResponse)
+def dashboard_edit(request: Request, slug: str, user: str = Depends(require_login)):
+    if not store.available():
+        return _dashboards_unavailable(request, user)
+    dash, failure = _load_dashboard(request, user, slug)
+    if failure is not None:
+        return failure
+
+    available_charts = []
+    try:
+        available_charts = store.list_charts()
+    except Exception:
+        logger.exception("Could not list charts for the dashboard editor")
+
+    tiles = _render_tiles(dash.items)
+    context = _shell_context(
+        user,
+        "dashboards",
+        dashboard=dash,
+        tiles=tiles,
+        tile_specs=_tile_specs(tiles),
+        available_charts=available_charts,
+        widths=store.WIDTHS,
+    )
+    return templates.TemplateResponse(request, "dashboard_edit.html", context)
+
+
+@app.post("/dashboards/{slug}/items")
+def dashboard_add_item(
+    request: Request,
+    slug: str,
+    chart_slug: str = Form(...),
+    width: str = Form(store.DEFAULT_WIDTH),
+    user: str = Depends(require_login),
+):
+    if store.available():
+        store.add_item(slug, chart_slug, width)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/items/{item_id}/remove")
+def dashboard_remove_item(
+    request: Request, slug: str, item_id: int, user: str = Depends(require_login)
+):
+    if store.available():
+        store.remove_item(slug, item_id)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/items/{item_id}/width")
+def dashboard_set_width(
+    request: Request,
+    slug: str,
+    item_id: int,
+    width: str = Form(...),
+    user: str = Depends(require_login),
+):
+    if store.available():
+        store.set_item_width(slug, item_id, width)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/items/{item_id}/move")
+def dashboard_move_item(
+    request: Request,
+    slug: str,
+    item_id: int,
+    direction: str = Form(...),
+    user: str = Depends(require_login),
+):
+    if store.available():
+        store.move_item(slug, item_id, -1 if direction == "up" else 1)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/delete")
+def dashboard_delete(request: Request, slug: str, user: str = Depends(require_login)):
+    if store.available():
+        store.delete_dashboard(slug)
+        logger.info("Dashboard %r deleted by %s", slug, user)
+    return RedirectResponse(request.url_for("dashboards_index"), status_code=303)
 
 
 @app.get("/healthz")

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x scripts/deploy.sh)",
+      "Bash(bash -n scripts/deploy.sh)",
+      "Bash(./scripts/deploy.sh --help)",
+      "Bash(gh run *)",
+      "Bash(gh api *)",
+      "Bash(git mv *)",
+      "Bash(sed -i \"s/url_for\\('dashboard'\\)/url_for\\('console'\\)/g\" app/templates/*.html)",
+      "Bash(sed -i 's/url_for\\(\"dashboard\"\\)/url_for\\(\"console\"\\)/g; s/\"dashboard\\\\.html\"/\"console.html\"/g; s/^def dashboard\\(/def console\\(/; s/_dashboard_context/_console_context/g' app/main.py)"
+    ]
+  }
+}

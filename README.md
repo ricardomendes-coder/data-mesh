@@ -140,6 +140,31 @@ Flask-based and its cookie is called `session`; since both apps live on
 `bi.v360.io`, sharing the name would make each one silently overwrite the
 other's login. Don't set `SESSION_COOKIE_NAME=session`.
 
+## Dashboards
+
+A dashboard is an ordered set of saved charts. Name one on the **Dashboards**
+tab, then add charts, set each tile's width (`third` / `half` / `full`) and
+reorder with the arrows. Every tile re-runs its chart's query when the page
+loads, so a dashboard is always live rather than a snapshot.
+
+The grid is 6 columns, so all three widths divide evenly and mixed rows line up;
+below 780px everything becomes full width.
+
+Notes on how it behaves:
+
+- **Deleting a chart removes it from every dashboard** (`ON DELETE CASCADE`),
+  rather than leaving a tile that can never render. Deleting a dashboard keeps
+  its charts.
+- **A chart may appear more than once** on the same dashboard — at two widths,
+  or beside a variant — so there's no uniqueness constraint to fight.
+- **A failing tile becomes an error card**, not a broken page. The other tiles
+  still render.
+- **Reordering rewrites positions densely** from the current visual order, so
+  rows that somehow arrive with duplicate or gapped positions still move
+  predictably.
+- Tiles are rendered one query at a time. That's fine for the handful of charts
+  a dashboard holds; if dashboards grow large, this is the thing to parallelise.
+
 ## Charts
 
 Write SQL, run it, map columns to axes, save. The chart re-runs its query each
