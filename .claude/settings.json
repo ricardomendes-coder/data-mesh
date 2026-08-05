@@ -11,7 +11,8 @@
       "Bash(sed -i 's/url_for\\(\"dashboard\"\\)/url_for\\(\"console\"\\)/g; s/\"dashboard\\\\.html\"/\"console.html\"/g; s/^def dashboard\\(/def console\\(/; s/_dashboard_context/_console_context/g' app/main.py)",
       "Bash(rm -f adm-*.png)",
       "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1440,760 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/adm-users.png http://127.0.0.1:8103/__adminusers)",
-      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1440,1000 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/adm-roles.png http://127.0.0.1:8103/__adminroles)"
+      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1440,1000 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/adm-roles.png http://127.0.0.1:8103/__adminroles)",
+      "Bash(python3 -)"
     ]
   }
 }

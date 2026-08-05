@@ -14,6 +14,13 @@ os.environ["AUTH_MODE"] = "both"
 os.environ["SSO_CLIENT_ID"] = "report-hub-test"
 os.environ["SSO_CLIENT_SECRET"] = "test-client-secret"
 os.environ["SSO_REDIRECT_URI"] = "https://testserver/auth/callback"
+# Blank the app database credentials so the suite can never reach a real one.
+# Without this, a developer with a populated .env (and an open tunnel) has their
+# tests register users into production: logging in calls _register_login, which
+# writes to whatever APP_DB_* points at. Tests that need the app database stub
+# `store` functions instead.
+os.environ["APP_DB_PASSWORD"] = ""
+os.environ["APP_DB_HOST"] = ""
 
 from urllib.parse import urlsplit
 
@@ -22,10 +29,23 @@ from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app import reports
+from app import reports, store
 from app.main import app
 
 KEYCLOAK_AUTHZ = "https://sso.v360.io/realms/v360/protocol/openid-connect/auth"
+
+# Guard rather than comment: if this ever becomes true, the suite is one login
+# away from writing rows into a real report_hub.
+assert not store.available(), (
+    "the test suite must not have a usable app database — APP_DB_* leaked in "
+    "from the environment or .env"
+)
+
+
+def _no_op_user(username: str, **kwargs):
+    """Stand-in for store.upsert_user, so a stubbed store.available() can't let
+    a login reach a real database."""
+    return store.User(id=1, username=username, is_admin=True, roles=["Analytics"])
 
 
 def _redirect_path(response) -> str:
@@ -595,8 +615,14 @@ def test_admin_panel_and_gate():
         store.set_user_roles,
         store.set_role_databases,
         db_mod.list_databases,
+        store.upsert_user,
+        store.set_user_admin,
     )
     store.available = lambda: True
+    # Logging in below runs _register_login. Without stubbing these, a stubbed
+    # available() would let the test write rows to a real report_hub.
+    store.upsert_user = _no_op_user
+    store.set_user_admin = lambda u, v: True
     store.is_admin = lambda u: admin_flag["value"] and u == "admin"
     store.list_users = lambda: list(people)
     store.list_roles = lambda: list(roles)
@@ -656,6 +682,8 @@ def test_admin_panel_and_gate():
             store.set_user_roles,
             store.set_role_databases,
             db_mod.list_databases,
+            store.upsert_user,
+            store.set_user_admin,
         ) = saved
     print("admin panel + gate: OK")
 
@@ -674,11 +702,13 @@ def test_last_admin_cannot_be_removed():
         store.list_users,
         store.list_roles,
         store.set_user_admin,
+        store.upsert_user,
     )
     store.available = lambda: True
     store.is_admin = lambda u: True
     store.list_users = lambda: list(state["users"])
     store.list_roles = lambda: []
+    store.upsert_user = _no_op_user  # keep the login off any real database
     store.set_user_admin = lambda u, v: state["set"].append((u, v)) or True
     try:
         with TestClient(app, base_url="https://testserver") as client:
@@ -705,6 +735,7 @@ def test_last_admin_cannot_be_removed():
             store.list_users,
             store.list_roles,
             store.set_user_admin,
+            store.upsert_user,
         ) = saved
     print("last admin protected: OK")
 

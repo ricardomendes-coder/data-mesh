@@ -175,6 +175,26 @@ def _register_login(request: Request, username: str, claims: dict | None, via: s
         logger.exception("Could not record the login for %r", username)
 
 
+def signed_in_user(request: Request, user: str = Depends(require_login)) -> str:
+    """require_login, plus a one-time admin-flag lookup for the sidebar.
+
+    The flag is normally set at login, but sessions created before this feature
+    existed have no flag at all — and an admin granted mid-session would
+    otherwise have to sign out and back in before the Admin link appeared. The
+    lookup runs once per session, then the cached value is used.
+
+    This only controls whether the link is *drawn*. Every admin route checks the
+    database itself, so a stale or forged flag grants nothing.
+    """
+    if "is_admin" not in request.session and store.available():
+        try:
+            request.session["is_admin"] = store.is_admin(user)
+        except Exception:
+            logger.exception("Could not resolve admin status for %r", user)
+            request.session["is_admin"] = False
+    return user
+
+
 def _login_page(request: Request, error: str | None = None, status_code: int = 200):
     return templates.TemplateResponse(
         request,
@@ -403,7 +423,7 @@ def console(
     tab: str = "query",
     sql: str = "",
     database: str = "",
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     """The query console and reports.
 
@@ -423,7 +443,7 @@ def datasets_index(
     request: Request,
     q: str = "",
     kind: str = "",
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     """Everything in the analytics schema, grouped by the manifest's folders."""
     context = _shell_context(user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0)
@@ -455,7 +475,7 @@ def datasets_index(
 def dataset_detail(
     request: Request,
     name: str,
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     """Preview, catalog, description and example queries for one dataset."""
 
@@ -520,7 +540,7 @@ def run_query(
     request: Request,
     sql: str = Form(...),
     database: str = Form(...),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     context = _console_context(user, sql=sql, database=database)
 
@@ -558,7 +578,7 @@ def export_query(
     format: str = "csv",
     sql: str = Form(...),
     database: str = Form(...),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     def _error(msg: str, status: int = 400):
         context = _console_context(user, sql=sql, database=database, error=msg)
@@ -594,7 +614,7 @@ def export_report(
     request: Request,
     key: str,
     format: str = "csv",
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     try:
         df = reports.get_report_df(key)
@@ -630,7 +650,7 @@ def _charts_unavailable(request: Request, user: str, status: int = 503):
 
 
 @app.get("/charts", response_class=HTMLResponse)
-def charts_index(request: Request, user: str = Depends(require_login)):
+def charts_index(request: Request, user: str = Depends(signed_in_user)):
     if not store.available():
         return _charts_unavailable(request, user)
     context = _shell_context(user, "charts", charts=[])
@@ -679,7 +699,7 @@ def _builder_context(user: str, **extra) -> dict:
 
 
 @app.get("/charts/new", response_class=HTMLResponse)
-def chart_new(request: Request, user: str = Depends(require_login)):
+def chart_new(request: Request, user: str = Depends(signed_in_user)):
     if not store.available():
         return _charts_unavailable(request, user)
     return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user))
@@ -694,7 +714,7 @@ def chart_run(
     chart_type: str = Form("bar"),
     x_column: str = Form(""),
     y_columns: list[str] = Form(default=[]),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     """Run the builder's SQL and re-render with the column pickers + preview."""
     if not store.available():
@@ -758,7 +778,7 @@ def chart_save(
     x_column: str = Form(...),
     y_columns: list[str] = Form(default=[]),
     slug: str = Form(""),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     if not store.available():
         return _charts_unavailable(request, user)
@@ -780,7 +800,7 @@ def chart_save(
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
-def chart_detail(request: Request, slug: str, user: str = Depends(require_login)):
+def chart_detail(request: Request, slug: str, user: str = Depends(signed_in_user)):
     if not store.available():
         return _charts_unavailable(request, user)
 
@@ -814,7 +834,7 @@ def chart_detail(request: Request, slug: str, user: str = Depends(require_login)
 
 
 @app.post("/charts/{slug}/delete")
-def chart_delete(request: Request, slug: str, user: str = Depends(require_login)):
+def chart_delete(request: Request, slug: str, user: str = Depends(signed_in_user)):
     if store.available():
         store.delete_chart(slug)
         logger.info("Chart %r deleted by %s", slug, user)
@@ -874,7 +894,7 @@ def _tile_specs(tiles: list[dict]) -> dict:
 
 
 @app.get("/dashboards", response_class=HTMLResponse)
-def dashboards_index(request: Request, user: str = Depends(require_login)):
+def dashboards_index(request: Request, user: str = Depends(signed_in_user)):
     if not store.available():
         return _dashboards_unavailable(request, user)
     context = _shell_context(user, "dashboards", dashboards=[])
@@ -891,7 +911,7 @@ def dashboards_index(request: Request, user: str = Depends(require_login)):
 def dashboard_create(
     request: Request,
     title: str = Form(...),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     if not store.available():
         return _dashboards_unavailable(request, user)
@@ -929,7 +949,7 @@ def _load_dashboard(request: Request, user: str, slug: str):
 
 
 @app.get("/dashboards/{slug}", response_class=HTMLResponse)
-def dashboard_show(request: Request, slug: str, user: str = Depends(require_login)):
+def dashboard_show(request: Request, slug: str, user: str = Depends(signed_in_user)):
     if not store.available():
         return _dashboards_unavailable(request, user)
     dash, failure = _load_dashboard(request, user, slug)
@@ -943,7 +963,7 @@ def dashboard_show(request: Request, slug: str, user: str = Depends(require_logi
 
 
 @app.get("/dashboards/{slug}/edit", response_class=HTMLResponse)
-def dashboard_edit(request: Request, slug: str, user: str = Depends(require_login)):
+def dashboard_edit(request: Request, slug: str, user: str = Depends(signed_in_user)):
     if not store.available():
         return _dashboards_unavailable(request, user)
     dash, failure = _load_dashboard(request, user, slug)
@@ -975,7 +995,7 @@ def dashboard_add_item(
     slug: str,
     chart_slug: str = Form(...),
     width: str = Form(store.DEFAULT_WIDTH),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     if store.available():
         store.add_item(slug, chart_slug, width)
@@ -984,7 +1004,7 @@ def dashboard_add_item(
 
 @app.post("/dashboards/{slug}/items/{item_id}/remove")
 def dashboard_remove_item(
-    request: Request, slug: str, item_id: int, user: str = Depends(require_login)
+    request: Request, slug: str, item_id: int, user: str = Depends(signed_in_user)
 ):
     if store.available():
         store.remove_item(slug, item_id)
@@ -997,7 +1017,7 @@ def dashboard_set_width(
     slug: str,
     item_id: int,
     width: str = Form(...),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     if store.available():
         store.set_item_width(slug, item_id, width)
@@ -1010,7 +1030,7 @@ def dashboard_move_item(
     slug: str,
     item_id: int,
     direction: str = Form(...),
-    user: str = Depends(require_login),
+    user: str = Depends(signed_in_user),
 ):
     if store.available():
         store.move_item(slug, item_id, -1 if direction == "up" else 1)
@@ -1018,7 +1038,7 @@ def dashboard_move_item(
 
 
 @app.post("/dashboards/{slug}/delete")
-def dashboard_delete(request: Request, slug: str, user: str = Depends(require_login)):
+def dashboard_delete(request: Request, slug: str, user: str = Depends(signed_in_user)):
     if store.available():
         store.delete_dashboard(slug)
         logger.info("Dashboard %r deleted by %s", slug, user)
