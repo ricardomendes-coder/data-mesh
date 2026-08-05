@@ -81,6 +81,65 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON dashboard_items (dashboard_id, position);
         """,
     ),
+    (
+        "0003_users_roles",
+        """
+        -- Users are created on first login, the way Superset's
+        -- AUTH_USER_REGISTRATION does it: the identity provider is the source
+        -- of truth for who exists, this table for what they may see.
+        CREATE TABLE IF NOT EXISTS users (
+            id           bigserial   PRIMARY KEY,
+            username     text        NOT NULL UNIQUE,
+            email        text        NOT NULL DEFAULT '',
+            display_name text        NOT NULL DEFAULT '',
+            is_admin     boolean     NOT NULL DEFAULT false,
+            is_active    boolean     NOT NULL DEFAULT true,
+            auth_via     text        NOT NULL DEFAULT '',
+            created_at   timestamptz NOT NULL DEFAULT now(),
+            last_seen_at timestamptz
+        );
+
+        -- Grants hang off roles rather than users: at a few hundred people,
+        -- per-user rows stop being manageable, and moving to roles later would
+        -- mean migrating every grant.
+        CREATE TABLE IF NOT EXISTS roles (
+            id          bigserial   PRIMARY KEY,
+            name        text        NOT NULL UNIQUE,
+            description text        NOT NULL DEFAULT '',
+            -- Roles handed to every newly self-registered user.
+            is_default  boolean     NOT NULL DEFAULT false,
+            created_at  timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS user_roles (
+            user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            role_id bigint NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+            PRIMARY KEY (user_id, role_id)
+        );
+
+        -- One row per database a role may reach. Deliberately just a name: the
+        -- server and credentials stay in env, because a single login already
+        -- reaches every database on the instance. The boundary is who may see
+        -- which name, not how we connect.
+        CREATE TABLE IF NOT EXISTS role_databases (
+            role_id       bigint NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+            database_name text   NOT NULL,
+            PRIMARY KEY (role_id, database_name)
+        );
+
+        -- Seed the current behaviour so enabling this changes nothing for
+        -- `analytics` while the other ~49 databases stop being on offer.
+        INSERT INTO roles (name, description, is_default)
+        VALUES ('Analytics',
+                'Default role for new users: read the analytics warehouse.',
+                true)
+        ON CONFLICT (name) DO NOTHING;
+
+        INSERT INTO role_databases (role_id, database_name)
+        SELECT id, 'analytics' FROM roles WHERE name = 'Analytics'
+        ON CONFLICT DO NOTHING;
+        """,
+    ),
 ]
 
 
@@ -536,3 +595,313 @@ def move_item(dashboard_slug: str, item_id: int, delta: int) -> bool:
             )
         _touch(conn, dash_id)
     return True
+
+
+# ── users, roles, grants ───────────────────────────────────────────────────
+
+# Returned by granted_databases() for an admin: every database, no filtering.
+ALL_DATABASES = object()
+
+
+@dataclass
+class Role:
+    name: str
+    description: str = ""
+    is_default: bool = False
+    id: int | None = None
+    databases: list[str] = field(default_factory=list)
+    member_count: int = 0
+
+
+@dataclass
+class User:
+    username: str
+    email: str = ""
+    display_name: str = ""
+    is_admin: bool = False
+    is_active: bool = True
+    auth_via: str = ""
+    id: int | None = None
+    roles: list[str] = field(default_factory=list)
+    created_at: datetime | None = None
+    last_seen_at: datetime | None = None
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.username
+
+
+def _row_to_user(row: Any) -> User:
+    m = row._mapping
+    return User(
+        id=m["id"],
+        username=m["username"],
+        email=m["email"],
+        display_name=m["display_name"],
+        is_admin=m["is_admin"],
+        is_active=m["is_active"],
+        auth_via=m["auth_via"],
+        created_at=m["created_at"],
+        last_seen_at=m["last_seen_at"],
+    )
+
+
+_USER_SELECT = (
+    "SELECT id, username, email, display_name, is_admin, is_active, auth_via, "
+    "created_at, last_seen_at FROM users"
+)
+
+
+def upsert_user(username: str, email: str = "", display_name: str = "", auth_via: str = "") -> User:
+    """Record a login, creating the user on first sight.
+
+    Self-registration, as Superset does it. A brand-new user is given every
+    role marked `is_default`; an existing user's roles are never touched here,
+    so an admin's changes are not undone by the next login.
+    """
+    with engine().begin() as conn:
+        existing = conn.execute(
+            text("SELECT id FROM users WHERE username = :u"), {"u": username}
+        ).scalar()
+
+        row = conn.execute(
+            text(
+                """
+                INSERT INTO users (username, email, display_name, auth_via, last_seen_at)
+                VALUES (:u, :e, :d, :a, now())
+                ON CONFLICT (username) DO UPDATE SET
+                    -- Only overwrite from the IdP when it actually told us
+                    -- something; a password login supplies neither.
+                    email        = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
+                    display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), users.display_name),
+                    auth_via     = EXCLUDED.auth_via,
+                    last_seen_at = now()
+                RETURNING id, username, email, display_name, is_admin, is_active,
+                          auth_via, created_at, last_seen_at
+                """
+            ),
+            {"u": username, "e": email, "d": display_name, "a": auth_via},
+        ).first()
+
+        if existing is None:
+            conn.execute(
+                text(
+                    "INSERT INTO user_roles (user_id, role_id) "
+                    "SELECT :uid, id FROM roles WHERE is_default "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"uid": row._mapping["id"]},
+            )
+            logger.info("Registered new user %r via %s", username, auth_via)
+
+    user = _row_to_user(row)
+    user.roles = _roles_for(user.id)
+    return user
+
+
+def _roles_for(user_id: int) -> list[str]:
+    with engine().connect() as conn:
+        return [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id "
+                    "WHERE ur.user_id = :id ORDER BY r.name"
+                ),
+                {"id": user_id},
+            )
+        ]
+
+
+def get_user(username: str) -> User | None:
+    with engine().connect() as conn:
+        row = conn.execute(text(f"{_USER_SELECT} WHERE username = :u"), {"u": username}).first()
+    if row is None:
+        return None
+    user = _row_to_user(row)
+    user.roles = _roles_for(user.id)
+    return user
+
+
+def is_admin(username: str) -> bool:
+    """Checked live rather than trusted from the session, so revoking admin
+    takes effect immediately instead of at the user's next login."""
+    with engine().connect() as conn:
+        return bool(
+            conn.execute(
+                text("SELECT is_admin FROM users WHERE username = :u AND is_active"),
+                {"u": username},
+            ).scalar()
+        )
+
+
+def list_users() -> list[User]:
+    with engine().connect() as conn:
+        rows = conn.execute(text(f"{_USER_SELECT} ORDER BY username")).fetchall()
+        grants = conn.execute(
+            text(
+                "SELECT ur.user_id, r.name FROM user_roles ur "
+                "JOIN roles r ON r.id = ur.role_id ORDER BY r.name"
+            )
+        ).fetchall()
+    by_user: dict[int, list[str]] = {}
+    for uid, name in grants:
+        by_user.setdefault(uid, []).append(name)
+    users_out = []
+    for row in rows:
+        u = _row_to_user(row)
+        u.roles = by_user.get(u.id, [])
+        users_out.append(u)
+    return users_out
+
+
+def set_user_admin(username: str, value: bool) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(
+            text("UPDATE users SET is_admin = :v WHERE username = :u"),
+            {"v": value, "u": username},
+        )
+        return result.rowcount > 0
+
+
+def set_user_active(username: str, value: bool) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(
+            text("UPDATE users SET is_active = :v WHERE username = :u"),
+            {"v": value, "u": username},
+        )
+        return result.rowcount > 0
+
+
+def set_user_roles(username: str, role_names: list[str]) -> bool:
+    """Replace a user's roles wholesale — the admin form posts the full set."""
+    with engine().begin() as conn:
+        uid = conn.execute(
+            text("SELECT id FROM users WHERE username = :u"), {"u": username}
+        ).scalar()
+        if uid is None:
+            return False
+        conn.execute(text("DELETE FROM user_roles WHERE user_id = :id"), {"id": uid})
+        if role_names:
+            conn.execute(
+                text(
+                    "INSERT INTO user_roles (user_id, role_id) "
+                    "SELECT :id, id FROM roles WHERE name = ANY(:names) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"id": uid, "names": list(role_names)},
+            )
+    return True
+
+
+def list_roles() -> list[Role]:
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, name, description, is_default FROM roles ORDER BY name")
+        ).fetchall()
+        dbs = conn.execute(
+            text("SELECT role_id, database_name FROM role_databases ORDER BY database_name")
+        ).fetchall()
+        counts = dict(
+            conn.execute(text("SELECT role_id, count(*) FROM user_roles GROUP BY 1")).fetchall()
+        )
+    by_role: dict[int, list[str]] = {}
+    for rid, name in dbs:
+        by_role.setdefault(rid, []).append(name)
+    out = []
+    for r in rows:
+        m = r._mapping
+        out.append(
+            Role(
+                id=m["id"],
+                name=m["name"],
+                description=m["description"],
+                is_default=m["is_default"],
+                databases=by_role.get(m["id"], []),
+                member_count=counts.get(m["id"], 0),
+            )
+        )
+    return out
+
+
+def create_role(name: str, description: str = "", is_default: bool = False) -> Role | None:
+    name = name.strip()
+    if not name:
+        return None
+    with engine().begin() as conn:
+        row = conn.execute(
+            text(
+                "INSERT INTO roles (name, description, is_default) "
+                "VALUES (:n, :d, :f) ON CONFLICT (name) DO NOTHING "
+                "RETURNING id, name, description, is_default"
+            ),
+            {"n": name, "d": description, "f": is_default},
+        ).first()
+    if row is None:
+        return None
+    m = row._mapping
+    return Role(
+        id=m["id"], name=m["name"], description=m["description"], is_default=m["is_default"]
+    )
+
+
+def delete_role(role_id: int) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(text("DELETE FROM roles WHERE id = :id"), {"id": role_id})
+        return result.rowcount > 0
+
+
+def set_role_default(role_id: int, value: bool) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(
+            text("UPDATE roles SET is_default = :v WHERE id = :id"),
+            {"v": value, "id": role_id},
+        )
+        return result.rowcount > 0
+
+
+def set_role_databases(role_id: int, database_names: list[str]) -> bool:
+    """Replace a role's database grants — the admin form posts the full set."""
+    cleaned = sorted({n.strip() for n in database_names if n and n.strip()})
+    with engine().begin() as conn:
+        exists = conn.execute(text("SELECT 1 FROM roles WHERE id = :id"), {"id": role_id}).scalar()
+        if not exists:
+            return False
+        conn.execute(text("DELETE FROM role_databases WHERE role_id = :id"), {"id": role_id})
+        for name in cleaned:
+            conn.execute(
+                text(
+                    "INSERT INTO role_databases (role_id, database_name) "
+                    "VALUES (:id, :n) ON CONFLICT DO NOTHING"
+                ),
+                {"id": role_id, "n": name},
+            )
+    return True
+
+
+def granted_databases(username: str):
+    """Database names this user may reach — the union of their roles' grants.
+
+    Returns the ALL_DATABASES sentinel for an admin. An inactive or unknown
+    user gets an empty set: fail closed.
+    """
+    with engine().connect() as conn:
+        row = conn.execute(
+            text("SELECT id, is_admin, is_active FROM users WHERE username = :u"),
+            {"u": username},
+        ).first()
+        if row is None or not row._mapping["is_active"]:
+            return set()
+        if row._mapping["is_admin"]:
+            return ALL_DATABASES
+        return {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT DISTINCT rd.database_name FROM role_databases rd "
+                    "JOIN user_roles ur ON ur.role_id = rd.role_id "
+                    "WHERE ur.user_id = :id"
+                ),
+                {"id": row._mapping["id"]},
+            )
+        }

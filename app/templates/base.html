@@ -302,6 +302,24 @@
     .bi-icobtn:hover{border-color:var(--g-300);color:var(--title);background:#FCFCFD;}
     .bi-icobtn.danger:hover{border-color:#FBD9C2;color:var(--danger);background:#FFF6F0;}
 
+    /* ── admin ── */
+    .bi-admintbl td{white-space:normal;vertical-align:middle;padding:.6rem .75rem;}
+    .bi-admintbl .bi-nowrap{white-space:nowrap;}
+    .bi-sub{font-size:.72rem;color:var(--muted);margin-top:.1rem;}
+    .bi-row-off{opacity:.5;}
+    .bi-rolepick{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;}
+    .bi-chip-check{display:inline-flex;align-items:center;gap:.35rem;padding:.22rem .5rem;border:1px solid var(--border-strong);border-radius:var(--r-pill);font-size:.74rem;color:var(--body);cursor:pointer;background:var(--surface);}
+    .bi-chip-check:hover{border-color:var(--g-300);color:var(--title);}
+    .bi-chip-check input{width:13px;height:13px;accent-color:var(--orange);margin:0;}
+    .bi-chip-check:has(input:checked){background:var(--orange-50);border-color:var(--orange-100);color:var(--orange-600);font-weight:600;}
+    .bi-chip-missing span{text-decoration:line-through;color:var(--muted);}
+    .bi-rolecard{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);margin-bottom:1rem;}
+    .bi-rolecard-hd{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.35rem;}
+    .bi-rolecard-nm{font-size:.95rem;font-weight:700;color:var(--title);letter-spacing:-.01em;}
+    .bi-rolecard-ctl{margin-left:auto;display:flex;align-items:center;gap:.35rem;}
+    /* Nearly 50 databases: a scrolling grid of checkboxes beats a long column */
+    .bi-dbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:.3rem;max-height:250px;overflow-y:auto;padding:.6rem;border:1px solid var(--border);border-radius:var(--r);background:#FAFBFB;margin:.6rem 0 .8rem;}
+
     /* ── login ──
        The low-poly artwork is the same login-background.png the main app uses,
        over a navy fallback in case the image can't be fetched. */

@@ -562,6 +562,209 @@ def test_dashboard_pages_render():
     print("dashboard pages render: OK")
 
 
+def test_admin_panel_and_gate():
+    """The admin screens, and the guarantee that the gate is checked live."""
+    from app import db as db_mod
+    from app import store
+
+    people = [
+        store.User(
+            id=1,
+            username="marcelo.ferreira",
+            email="m@v360.io",
+            is_admin=True,
+            auth_via="superset",
+            roles=["Analytics"],
+        ),
+        store.User(id=2, username="ana.silva", email="a@v360.io", auth_via="superset", roles=[]),
+    ]
+    roles = [
+        store.Role(
+            id=1, name="Analytics", is_default=True, databases=["analytics"], member_count=1
+        ),
+        store.Role(id=2, name="Finance", databases=["analytics", "dw_v360"], member_count=0),
+    ]
+    admin_flag = {"value": True}
+    calls = {"set_roles": None, "set_dbs": None}
+
+    saved = (
+        store.available,
+        store.is_admin,
+        store.list_users,
+        store.list_roles,
+        store.set_user_roles,
+        store.set_role_databases,
+        db_mod.list_databases,
+    )
+    store.available = lambda: True
+    store.is_admin = lambda u: admin_flag["value"] and u == "admin"
+    store.list_users = lambda: list(people)
+    store.list_roles = lambda: list(roles)
+    store.set_user_roles = lambda u, r: calls.__setitem__("set_roles", (u, list(r))) or True
+    store.set_role_databases = lambda i, d: calls.__setitem__("set_dbs", (i, list(d))) or True
+    db_mod.list_databases = lambda: ["analytics", "dw_v360", "keycloak"]
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.get("/admin/users")
+            assert r.status_code == 200, r.text[:300]
+            assert "marcelo.ferreira" in r.text and "ana.silva" in r.text
+            assert "Analytics" in r.text and "Finance" in r.text
+
+            r = client.get("/admin/roles")
+            assert r.status_code == 200, r.text[:300]
+            # grants are picked from the real instance list, not typed
+            assert 'value="keycloak"' in r.text, "database checkboxes missing"
+            assert "default" in r.text
+
+            # posting the full set replaces a user's roles
+            r = client.post(
+                "/admin/users/ana.silva/roles", data={"roles": ["Finance"]}, follow_redirects=False
+            )
+            assert r.status_code == 303
+            assert calls["set_roles"] == ("ana.silva", ["Finance"]), calls["set_roles"]
+
+            r = client.post(
+                "/admin/roles/2/databases",
+                data={"databases": ["analytics", "dw_v360"]},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert calls["set_dbs"] == (2, ["analytics", "dw_v360"]), calls["set_dbs"]
+
+            # /admin redirects into the users tab
+            r = client.get("/admin", follow_redirects=False)
+            assert r.status_code == 303 and "/admin/users" in r.headers["location"]
+
+            # Revoking admin mid-session must take effect at once — the gate
+            # reads the database, it does not trust session['is_admin'].
+            admin_flag["value"] = False
+            for path in ("/admin/users", "/admin/roles", "/admin"):
+                r = client.get(path, follow_redirects=False)
+                assert r.status_code == 403, f"{path} -> {r.status_code}, stale session honoured"
+            r = client.post(
+                "/admin/roles/2/databases", data={"databases": []}, follow_redirects=False
+            )
+            assert r.status_code == 403, "write route not gated"
+    finally:
+        (
+            store.available,
+            store.is_admin,
+            store.list_users,
+            store.list_roles,
+            store.set_user_roles,
+            store.set_role_databases,
+            db_mod.list_databases,
+        ) = saved
+    print("admin panel + gate: OK")
+
+
+def test_last_admin_cannot_be_removed():
+    """Removing the only administrator would make the panel unreachable."""
+    from app import store
+
+    only = [store.User(id=1, username="admin", is_admin=True)]
+    two = only + [store.User(id=2, username="other", is_admin=True)]
+    state = {"users": only, "set": []}
+
+    saved = (
+        store.available,
+        store.is_admin,
+        store.list_users,
+        store.list_roles,
+        store.set_user_admin,
+    )
+    store.available = lambda: True
+    store.is_admin = lambda u: True
+    store.list_users = lambda: list(state["users"])
+    store.list_roles = lambda: []
+    store.set_user_admin = lambda u, v: state["set"].append((u, v)) or True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.post(
+                "/admin/users/admin/admin", data={"value": "false"}, follow_redirects=False
+            )
+            assert r.status_code == 400, r.status_code
+            assert "only administrator" in r.text
+            assert state["set"] == [], "the last admin was removed anyway"
+
+            # With a second admin present it goes through
+            state["users"] = two
+            r = client.post(
+                "/admin/users/admin/admin", data={"value": "false"}, follow_redirects=False
+            )
+            assert r.status_code == 303, r.status_code
+            assert state["set"] == [("admin", False)], state["set"]
+    finally:
+        (
+            store.available,
+            store.is_admin,
+            store.list_users,
+            store.list_roles,
+            store.set_user_admin,
+        ) = saved
+    print("last admin protected: OK")
+
+
+def test_granted_databases_fails_closed():
+    """Unknown or deactivated users get nothing; admins get the sentinel."""
+    from app import store
+
+    rows = {
+        "admin": {"id": 1, "is_admin": True, "is_active": True},
+        "ana": {"id": 2, "is_admin": False, "is_active": True},
+        "gone": {"id": 3, "is_admin": False, "is_active": False},
+    }
+
+    class _R:
+        def __init__(self, mapping=None, rows=()):
+            self._mapping = mapping
+            self._rows = list(rows)
+
+        def first(self):
+            return self if self._mapping is not None else None
+
+        def __iter__(self):
+            return iter(self._rows)
+
+    class _Conn:
+        def __init__(self, username):
+            self.username = username
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "is_admin, is_active FROM users" in sql:
+                row = rows.get(params["u"])
+                return _R(mapping=row) if row else _R()
+            if "role_databases" in sql:
+                return _R(rows=[("analytics",), ("dw_v360",)])
+            return _R()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _run(username):
+        original = store.engine
+        conn = _Conn(username)
+        store.engine = lambda: type("E", (), {"connect": staticmethod(lambda: conn)})()
+        try:
+            return store.granted_databases(username)
+        finally:
+            store.engine = original
+
+    assert _run("admin") is store.ALL_DATABASES, "admin should reach everything"
+    assert _run("ana") == {"analytics", "dw_v360"}
+    assert _run("gone") == set(), "a deactivated user must get nothing"
+    assert _run("nobody") == set(), "an unknown user must get nothing"
+    print("granted databases fail closed: OK")
+
+
 def test_dashboards_disabled_without_app_db():
     """No app database -> the tab explains itself instead of erroring."""
     import importlib
@@ -856,6 +1059,9 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_admin_panel_and_gate()
+    test_last_admin_cannot_be_removed()
+    test_granted_databases_fails_closed()
     # Last: these reload app.main, which rebinds this module's `app` reference.
     test_dashboards_disabled_without_app_db()
     test_charts_disabled_without_app_db()

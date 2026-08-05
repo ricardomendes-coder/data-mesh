@@ -140,6 +140,64 @@ Flask-based and its cookie is called `session`; since both apps live on
 `bi.v360.io`, sharing the name would make each one silently overwrite the
 other's login. Don't set `SESSION_COOKIE_NAME=session`.
 
+## Users, roles and the admin panel
+
+**Users are created on first sign-in.** There is nothing to provision — the
+identity provider decides who exists, this app decides what they may see. That's
+the same model as Superset's `AUTH_USER_REGISTRATION`.
+
+A new user receives every role marked **default**. Ships seeded with one:
+`Analytics`, default, granting the `analytics` database — so enabling this
+changes nothing for `analytics` while the other ~49 databases on the instance
+stop being on offer.
+
+`/admin` (administrators only) has two screens:
+
+| | |
+| --- | --- |
+**Users** | roles per user, grant/revoke admin, deactivate. Read-only otherwise — you can't create a user here, because logins do that. |
+**Roles & databases** | create roles, tick which databases each grants, mark one default |
+
+Access is the **union of a user's roles' databases**. Administrators reach every
+database regardless of role.
+
+Design notes worth knowing:
+
+- **Grants hang off roles, not users.** At a few hundred people per-user rows
+  stop being manageable, and moving to roles later would mean migrating every
+  grant.
+- **A grant is just a database name.** The server and credentials stay in env,
+  because one login already reaches every database on the instance — so the
+  boundary is *who may see which name*, not how we connect. That's why there's
+  no credential storage anywhere in this feature.
+- **Admin is re-checked on every admin request**, not trusted from the session.
+  `session['is_admin']` exists only so the nav doesn't cost a query per page;
+  revoking admin takes effect immediately.
+- **The last administrator can't be removed** — via the panel or `manage.py`.
+  Otherwise the panel becomes unreachable.
+- **Login never depends on the app database.** If `report_hub` is down, sign-in
+  still works and the registration is skipped; an outage there must not lock
+  everyone out.
+- **A deactivated user gets nothing, even if flagged admin** — `granted_databases`
+  fails closed for unknown, inactive, and un-roled users alike.
+- **Stale grants are preserved.** If a role grants a database that's no longer on
+  the instance, it still appears (struck through) rather than vanishing — the
+  form posts the full set, so an invisible grant would be silently dropped.
+
+Break-glass from a shell, so the panel can never lock you out entirely:
+
+```bash
+docker compose exec hub python manage.py list-users
+docker compose exec hub python manage.py grant-admin marcelo.ferreira
+```
+
+`INITIAL_ADMIN_USER` is also promoted to admin automatically on login.
+
+> **Not enforced yet.** This PR builds the structure and the panel; the query
+> console, datasets, charts and reports still ignore the grants. Enforcement is
+> the next change — doing it before the panel existed would have locked everyone
+> out with no way to grant anything.
+
 ## Dashboards
 
 A dashboard is an ordered set of saved charts. Name one on the **Dashboards**

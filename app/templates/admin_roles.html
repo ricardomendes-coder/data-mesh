@@ -1,0 +1,80 @@
+{% extends "_shell.html" %}
+{% from "_admin_tabs.html" import admin_tabs with context %}
+{% block page_title %}Administration{% endblock %}
+{% block page_sub %}{{ roles|length }} role{{ '' if roles|length == 1 else 's' }} · {{ all_databases|length }} databases on the instance{% endblock %}
+
+{% block content %}
+{{ admin_tabs('roles') }}
+
+<form class="bi-toolbar" method="post" action="{{ url_for('admin_create_role') }}">
+  <div class="bi-search bi-search-plain">
+    <input name="name" placeholder="New role name…" required>
+  </div>
+  <div class="bi-search bi-search-plain">
+    <input name="description" placeholder="What it's for (optional)">
+  </div>
+  <button class="bi-btn" type="submit">Create role</button>
+</form>
+
+{% for r in roles %}
+<section class="bi-rolecard">
+  <div class="bi-rolecard-hd">
+    <span class="bi-rolecard-nm">{{ r.name }}</span>
+    {% if r.is_default %}<span class="bi-kind bi-kind-table">default</span>{% endif %}
+    <span class="bi-ds-stat">{{ r.member_count }} member{{ '' if r.member_count == 1 else 's' }}</span>
+    <span class="bi-ds-stat">{{ r.databases|length }} database{{ '' if r.databases|length == 1 else 's' }}</span>
+    <div class="bi-rolecard-ctl">
+      <form method="post" action="{{ url_for('admin_set_role_default', role_id=r.id) }}">
+        <input type="hidden" name="value" value="{{ 'false' if r.is_default else 'true' }}">
+        <button class="bi-btn sm ghost" type="submit">
+          {{ 'Unset default' if r.is_default else 'Make default' }}
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('admin_delete_role', role_id=r.id) }}"
+            onsubmit="return confirm('Delete the {{ r.name }} role? {{ r.member_count }} user(s) lose the access it grants.')">
+        <button class="bi-icobtn danger" type="submit" title="Delete role">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </form>
+    </div>
+  </div>
+  {% if r.description %}<p class="bi-group-sub">{{ r.description }}</p>{% endif %}
+
+  {# Grants are picked from the real instance list rather than typed, so a
+     typo can't silently create a grant that matches nothing. #}
+  <form method="post" action="{{ url_for('admin_set_role_databases', role_id=r.id) }}">
+    <div class="bi-dbgrid">
+      {% for name in all_databases %}
+      <label class="bi-chip-check {{ 'bi-chip-missing' if name in missing_databases else '' }}"
+             {% if name in missing_databases %}title="Not currently on the instance"{% endif %}>
+        <input type="checkbox" name="databases" value="{{ name }}"
+               {% if name in r.databases %}checked{% endif %}>
+        <span>{{ name }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if not all_databases %}
+    <p class="bi-hint">Could not read the database list — check the server logs.</p>
+    {% endif %}
+    {% if missing_databases %}
+    <p class="bi-hint">
+      Struck through: granted but not currently on the instance
+      (<code>{{ missing_databases|join('</code>, <code>')|safe }}</code>). Kept so
+      saving this role can't quietly drop the grant.
+    </p>
+    {% endif %}
+    <button class="bi-btn sm" type="submit">Save databases</button>
+  </form>
+</section>
+{% endfor %}
+
+{% if not roles %}
+<div class="bi-empty-lg">No roles yet. Create one above.</div>
+{% endif %}
+
+<p class="bi-hint">
+  A user's access is the union of their roles' databases. Administrators reach
+  every database regardless of role. Nothing is enforced on the query console
+  yet — that lands next; until then this screen only records intent.
+</p>
+{% endblock %}

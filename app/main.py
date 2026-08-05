@@ -138,6 +138,43 @@ async def _redirect_to_login(request: Request, exc: NotAuthenticated):
     return RedirectResponse(url=request.url_for("login_form"), status_code=303)
 
 
+def _register_login(request: Request, username: str, claims: dict | None, via: str) -> None:
+    """Record the login in the app database, creating the user on first sight.
+
+    Self-registration, the way Superset's AUTH_USER_REGISTRATION works: the
+    identity provider decides who exists, this app decides what they may see.
+
+    Deliberately best-effort. If the app database is down, people must still be
+    able to log in and use the query console — losing the audit of last_seen_at
+    is a far smaller problem than an outage locking everyone out.
+    """
+    if not store.available():
+        return
+    claims = claims or {}
+    try:
+        user = store.upsert_user(
+            username,
+            email=str(claims.get("email") or ""),
+            display_name=str(claims.get("name") or ""),
+            auth_via=via,
+        )
+        # Bootstrap: whoever INITIAL_ADMIN_USER names becomes admin on login, so
+        # a fresh install always has someone who can reach the admin screens.
+        if (
+            settings.initial_admin_user
+            and username == settings.initial_admin_user
+            and not user.is_admin
+        ):
+            store.set_user_admin(username, True)
+            user.is_admin = True
+            logger.info("Granted admin to the bootstrap user %r", username)
+        # Cached for the nav only; every admin action re-checks against the
+        # database, so a revoked admin can't act on a stale session.
+        request.session["is_admin"] = bool(user.is_admin)
+    except Exception:
+        logger.exception("Could not record the login for %r", username)
+
+
 def _login_page(request: Request, error: str | None = None, status_code: int = 200):
     return templates.TemplateResponse(
         request,
@@ -171,12 +208,14 @@ async def login_form(request: Request):
             result = await superset_session.identify(cookie)
             if result:
                 username = result["username"]
+                claims = superset_session.claims_from_result(result)
                 start_session(
                     request,
                     username,
                     via="superset",
-                    claims=superset_session.claims_from_result(result),
+                    claims=claims,
                 )
+                _register_login(request, username, claims, "superset")
                 logger.info("Superset-delegated login: %s", username)
                 return RedirectResponse(request.url_for("console"), status_code=303)
         # Not signed in to BI 360 (or the cookie is stale). Superset owns the
@@ -240,6 +279,7 @@ async def sso_callback(request: Request):
         )
 
     start_session(request, username, via="sso", claims=claims)
+    _register_login(request, username, dict(claims), "sso")
     logger.info("SSO login: %s", username)
     return RedirectResponse(request.url_for("console"), status_code=303)
 
@@ -264,6 +304,7 @@ def login_local_submit(
         raise HTTPException(status_code=404, detail="Password login is disabled")
     if users.verify_user(username, password):
         start_session(request, username, via="password")
+        _register_login(request, username, None, "password")
         return RedirectResponse(request.url_for("console"), status_code=303)
     logger.warning("Failed password login for %r", username)
     return _login_page(request, error="Invalid username or password.", status_code=401)
@@ -982,6 +1023,172 @@ def dashboard_delete(request: Request, slug: str, user: str = Depends(require_lo
         store.delete_dashboard(slug)
         logger.info("Dashboard %r deleted by %s", slug, user)
     return RedirectResponse(request.url_for("dashboards_index"), status_code=303)
+
+
+# ── admin panel ────────────────────────────────────────────────────────────
+
+
+def require_admin(request: Request, user: str = Depends(require_login)) -> str:
+    """Gate the admin screens.
+
+    Checked against the database on every request rather than read from the
+    session, so removing someone's admin takes effect at once instead of
+    whenever they next log in.
+    """
+    if not store.available():
+        raise HTTPException(status_code=503, detail="The app database is not configured")
+    try:
+        admin = store.is_admin(user)
+    except Exception:
+        logger.exception("Could not verify admin rights for %r", user)
+        raise HTTPException(status_code=503, detail="Could not verify permissions") from None
+    if not admin:
+        raise HTTPException(status_code=403, detail="Administrators only")
+    return user
+
+
+@app.get("/admin")
+def admin_index(request: Request, user: str = Depends(require_admin)):
+    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users(request: Request, user: str = Depends(require_admin)):
+    context = _shell_context(
+        user,
+        "admin",
+        admin_tab="users",
+        users=store.list_users(),
+        roles=store.list_roles(),
+        is_admin=True,
+    )
+    return templates.TemplateResponse(request, "admin_users.html", context)
+
+
+@app.post("/admin/users/{username}/roles")
+def admin_set_user_roles(
+    request: Request,
+    username: str,
+    roles: list[str] = Form(default=[]),
+    user: str = Depends(require_admin),
+):
+    store.set_user_roles(username, roles)
+    logger.info("Roles for %r set to %r by %s", username, roles, user)
+    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+
+
+@app.post("/admin/users/{username}/admin")
+def admin_toggle_admin(
+    request: Request,
+    username: str,
+    value: str = Form(...),
+    user: str = Depends(require_admin),
+):
+    grant = value == "true"
+    # Refuse to remove the last administrator — otherwise the panel becomes
+    # unreachable and only a shell on the host can fix it.
+    if not grant:
+        admins = [u.username for u in store.list_users() if u.is_admin]
+        if admins == [username]:
+            context = _shell_context(
+                user,
+                "admin",
+                admin_tab="users",
+                users=store.list_users(),
+                roles=store.list_roles(),
+                is_admin=True,
+                error=(
+                    f"{username} is the only administrator — grant admin to "
+                    "someone else before removing it."
+                ),
+            )
+            return templates.TemplateResponse(request, "admin_users.html", context, status_code=400)
+    store.set_user_admin(username, grant)
+    logger.info("Admin for %r set to %s by %s", username, grant, user)
+    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+
+
+@app.post("/admin/users/{username}/active")
+def admin_toggle_active(
+    request: Request,
+    username: str,
+    value: str = Form(...),
+    user: str = Depends(require_admin),
+):
+    store.set_user_active(username, value == "true")
+    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+
+
+@app.get("/admin/roles", response_class=HTMLResponse)
+def admin_roles(request: Request, user: str = Depends(require_admin)):
+    # Every database on the instance, so grants are picked from a list rather
+    # than typed. This is the one place the full list is still shown, and it is
+    # admin-only by construction.
+    live: list[str] = []
+    try:
+        live = db.list_databases()
+    except Exception:
+        logger.exception("Could not list databases for the roles screen")
+
+    roles = store.list_roles()
+    # Union in every existing grant. A grant naming a database that is no
+    # longer on the instance would otherwise have no checkbox — and since the
+    # form posts the full set, saving that role would silently drop it.
+    granted = {name for r in roles for name in r.databases}
+    all_databases = sorted(set(live) | granted)
+    context = _shell_context(
+        user,
+        "admin",
+        admin_tab="roles",
+        roles=roles,
+        all_databases=all_databases,
+        # Flagged in the UI so a stale grant is visible rather than mysterious.
+        missing_databases=sorted(granted - set(live)) if live else [],
+        is_admin=True,
+    )
+    return templates.TemplateResponse(request, "admin_roles.html", context)
+
+
+@app.post("/admin/roles")
+def admin_create_role(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    user: str = Depends(require_admin),
+):
+    if store.create_role(name, description) is None:
+        logger.info("Role %r already exists (requested by %s)", name, user)
+    return RedirectResponse(request.url_for("admin_roles"), status_code=303)
+
+
+@app.post("/admin/roles/{role_id}/databases")
+def admin_set_role_databases(
+    request: Request,
+    role_id: int,
+    databases: list[str] = Form(default=[]),
+    user: str = Depends(require_admin),
+):
+    store.set_role_databases(role_id, databases)
+    logger.info("Databases for role %s set to %r by %s", role_id, databases, user)
+    return RedirectResponse(request.url_for("admin_roles"), status_code=303)
+
+
+@app.post("/admin/roles/{role_id}/default")
+def admin_set_role_default(
+    request: Request,
+    role_id: int,
+    value: str = Form(...),
+    user: str = Depends(require_admin),
+):
+    store.set_role_default(role_id, value == "true")
+    return RedirectResponse(request.url_for("admin_roles"), status_code=303)
+
+
+@app.post("/admin/roles/{role_id}/delete")
+def admin_delete_role(request: Request, role_id: int, user: str = Depends(require_admin)):
+    store.delete_role(role_id)
+    logger.info("Role %s deleted by %s", role_id, user)
+    return RedirectResponse(request.url_for("admin_roles"), status_code=303)
 
 
 @app.get("/healthz")
