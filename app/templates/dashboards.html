@@ -3,7 +3,7 @@
 {% block page_sub %}{{ dashboards|length }} saved{% endblock %}
 
 {% block content %}
-<form class="bi-toolbar" method="post" action="{{ url_for('dashboard_create') }}">
+{% if can_build %}<form class="bi-toolbar" method="post" action="{{ url_for('dashboard_create') }}">
   <div class="bi-search bi-search-plain">
     <input name="title" placeholder="Name a new dashboard…" required>
   </div>
@@ -11,7 +11,7 @@
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
     Create
   </button>
-</form>
+</form>{% endif %}
 
 {% if dashboards %}
 <div class="bi-cards">

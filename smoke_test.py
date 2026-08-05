@@ -600,12 +600,21 @@ def test_admin_panel_and_gate():
     ]
     roles = [
         store.Role(
-            id=1, name="Analytics", is_default=True, databases=["analytics"], member_count=1
+            id=1,
+            name="Analytics",
+            is_default=True,
+            permissions={store.DATABASE: ["analytics"]},
+            member_count=1,
         ),
-        store.Role(id=2, name="Finance", databases=["analytics", "dw_v360"], member_count=0),
+        store.Role(
+            id=2,
+            name="Finance",
+            permissions={store.DATABASE: ["analytics", "dw_v360"]},
+            member_count=0,
+        ),
     ]
     admin_flag = {"value": True}
-    calls = {"set_roles": None, "set_dbs": None}
+    calls = {"set_roles": None, "set_perms": None}
 
     saved = (
         store.available,
@@ -613,7 +622,7 @@ def test_admin_panel_and_gate():
         store.list_users,
         store.list_roles,
         store.set_user_roles,
-        store.set_role_databases,
+        store.set_role_permissions,
         db_mod.list_databases,
         store.upsert_user,
         store.set_user_admin,
@@ -627,7 +636,9 @@ def test_admin_panel_and_gate():
     store.list_users = lambda: list(people)
     store.list_roles = lambda: list(roles)
     store.set_user_roles = lambda u, r: calls.__setitem__("set_roles", (u, list(r))) or True
-    store.set_role_databases = lambda i, d: calls.__setitem__("set_dbs", (i, list(d))) or True
+    store.set_role_permissions = lambda i, t, k: (
+        calls.__setitem__("set_perms", (i, t, list(k))) or True
+    )
     db_mod.list_databases = lambda: ["analytics", "dw_v360", "keycloak"]
     try:
         with TestClient(app, base_url="https://testserver") as client:
@@ -652,12 +663,14 @@ def test_admin_panel_and_gate():
             assert calls["set_roles"] == ("ana.silva", ["Finance"]), calls["set_roles"]
 
             r = client.post(
-                "/admin/roles/2/databases",
-                data={"databases": ["analytics", "dw_v360"]},
+                "/admin/roles/2/permissions",
+                data={"resource_type": "database", "keys": ["analytics", "dw_v360"]},
                 follow_redirects=False,
             )
             assert r.status_code == 303
-            assert calls["set_dbs"] == (2, ["analytics", "dw_v360"]), calls["set_dbs"]
+            assert calls["set_perms"] == (2, "database", ["analytics", "dw_v360"]), calls[
+                "set_perms"
+            ]
 
             # /admin redirects into the users tab
             r = client.get("/admin", follow_redirects=False)
@@ -670,7 +683,9 @@ def test_admin_panel_and_gate():
                 r = client.get(path, follow_redirects=False)
                 assert r.status_code == 403, f"{path} -> {r.status_code}, stale session honoured"
             r = client.post(
-                "/admin/roles/2/databases", data={"databases": []}, follow_redirects=False
+                "/admin/roles/2/permissions",
+                data={"resource_type": "database", "keys": []},
+                follow_redirects=False,
             )
             assert r.status_code == 403, "write route not gated"
     finally:
@@ -680,7 +695,7 @@ def test_admin_panel_and_gate():
             store.list_users,
             store.list_roles,
             store.set_user_roles,
-            store.set_role_databases,
+            store.set_role_permissions,
             db_mod.list_databases,
             store.upsert_user,
             store.set_user_admin,
@@ -740,14 +755,20 @@ def test_last_admin_cannot_be_removed():
     print("last admin protected: OK")
 
 
-def test_granted_databases_fails_closed():
-    """Unknown or deactivated users get nothing; admins get the sentinel."""
+def test_access_resolution_fails_closed():
+    """access_for(): admins and ('*','*') roles get everything; nobody else
+    gets anything they weren't granted."""
     from app import store
 
-    rows = {
-        "admin": {"id": 1, "is_admin": True, "is_active": True},
+    users = {
+        "boss": {"id": 1, "is_admin": True, "is_active": True},
         "ana": {"id": 2, "is_admin": False, "is_active": True},
-        "gone": {"id": 3, "is_admin": False, "is_active": False},
+        "root_role": {"id": 3, "is_admin": False, "is_active": True},
+        "gone": {"id": 4, "is_admin": False, "is_active": False},
+    }
+    perms = {
+        2: [("database", "analytics"), ("feature", "sql_console"), ("chart", "cap")],
+        3: [("*", "*")],
     }
 
     class _R:
@@ -762,16 +783,13 @@ def test_granted_databases_fails_closed():
             return iter(self._rows)
 
     class _Conn:
-        def __init__(self, username):
-            self.username = username
-
         def execute(self, statement, params=None):
             sql = str(statement)
             if "is_admin, is_active FROM users" in sql:
-                row = rows.get(params["u"])
+                row = users.get(params["u"])
                 return _R(mapping=row) if row else _R()
-            if "role_databases" in sql:
-                return _R(rows=[("analytics",), ("dw_v360",)])
+            if "role_permissions" in sql:
+                return _R(rows=perms.get(params["id"], []))
             return _R()
 
         def __enter__(self):
@@ -782,18 +800,231 @@ def test_granted_databases_fails_closed():
 
     def _run(username):
         original = store.engine
-        conn = _Conn(username)
+        conn = _Conn()
         store.engine = lambda: type("E", (), {"connect": staticmethod(lambda: conn)})()
         try:
-            return store.granted_databases(username)
+            return store.access_for(username)
         finally:
             store.engine = original
 
-    assert _run("admin") is store.ALL_DATABASES, "admin should reach everything"
-    assert _run("ana") == {"analytics", "dw_v360"}
-    assert _run("gone") == set(), "a deactivated user must get nothing"
-    assert _run("nobody") == set(), "an unknown user must get nothing"
-    print("granted databases fail closed: OK")
+    boss = _run("boss")
+    assert boss.everything, "an admin must reach everything"
+    assert boss.allows(store.DATABASE, "dw_whirlpool")
+
+    # A role holding ('*','*') is equivalent to the admin flag for access
+    assert _run("root_role").everything, "the ('*','*') grant must mean everything"
+
+    ana = _run("ana")
+    assert not ana.everything
+    assert ana.allows(store.DATABASE, "analytics")
+    assert not ana.allows(store.DATABASE, "dw_whirlpool"), "ungranted database allowed"
+    assert ana.allows(store.FEATURE, "sql_console")
+    assert not ana.allows(store.FEATURE, "chart_builder")
+    assert ana.allows(store.CHART, "cap") and not ana.allows(store.CHART, "other")
+    # filter() narrows a real list rather than trusting the caller
+    assert ana.filter(store.DATABASE, ["analytics", "dw_vale", "keycloak"]) == ["analytics"]
+
+    for who in ("gone", "nobody"):
+        a = _run(who)
+        assert not a.everything
+        assert a.granted == {}, who
+        assert not a.allows(store.DATABASE, "analytics"), f"{who} was allowed in"
+
+    # NO_ACCESS is the safe default a context builder falls back to
+    assert not store.NO_ACCESS.allows(store.DATABASE, "analytics")
+    assert store.NO_ACCESS.filter(store.DATABASE, ["analytics"]) == []
+    print("access resolution fails closed: OK")
+
+
+def test_enforcement_at_every_route():
+    """The point of the whole feature: an ungranted resource is refused by the
+    server, not merely hidden in the UI.
+
+    Every case here posts or requests something the user has no grant for, the
+    way someone editing a form field or pasting a URL would.
+    """
+    from app import charts as charts_mod
+    from app import datasets as ds
+    from app import db as db_mod
+    from app import main as main_mod
+    from app import store
+
+    _install_catalog_stub(ds)
+
+    # Granted: the analytics database, the sql_console feature, one chart, one
+    # dashboard. Everything else must be refused.
+    limited = store.Access(
+        username="ana",
+        granted={
+            store.DATABASE: {"analytics"},
+            store.FEATURE: {"sql_console"},
+            store.CHART: {"mine"},
+            store.DASHBOARD: {"ops"},
+        },
+    )
+
+    mine = store.Chart(
+        id=1,
+        slug="mine",
+        title="Mine",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="a",
+        y_columns=["b"],
+    )
+    theirs = store.Chart(
+        id=2,
+        slug="theirs",
+        title="Theirs",
+        source_db="dw_whirlpool",
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="a",
+        y_columns=["b"],
+    )
+    ops = store.Dashboard(id=1, slug="ops", title="Ops")
+    ops.items = [
+        store.DashboardItem(id=1, chart=mine, position=0, width="full"),
+        store.DashboardItem(id=2, chart=theirs, position=1, width="half"),
+    ]
+    secret = store.Dashboard(id=2, slug="secret", title="Secret")
+
+    saved = (
+        main_mod.access_for,
+        store.available,
+        store.list_charts,
+        store.get_chart,
+        store.list_dashboards,
+        store.get_dashboard,
+        db_mod.list_databases,
+        db_mod.execute,
+        store.upsert_user,
+    )
+    main_mod.app.dependency_overrides[main_mod.access_for] = lambda: limited
+    store.available = lambda: True
+    store.upsert_user = _no_op_user
+    store.list_charts = lambda: [mine, theirs]
+    store.get_chart = lambda s: {"mine": mine, "theirs": theirs}.get(s)
+    store.list_dashboards = lambda: [ops, secret]
+    store.get_dashboard = lambda s, with_items=True: {"ops": ops, "secret": secret}.get(s)
+    db_mod.list_databases = lambda: ["analytics", "dw_whirlpool", "keycloak"]
+    db_mod.execute = lambda sql, database=None: db_mod.QueryResult(
+        returns_rows=True, columns=["a", "b"], rows=[(1, 2)], rowcount=1
+    )
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            # `admin` is the only local account; the identity is irrelevant here
+            # because access_for is overridden to return `limited`.
+            r = client.post(
+                "/login/local",
+                data={"username": "admin", "password": "s3cret-pass"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303, f"login failed: {r.status_code}"
+
+            # ── the reported hole: querying an ungranted database ──
+            r = client.post(
+                "/query",
+                data={"sql": "SELECT 1", "database": "dw_whirlpool"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 403, f"ungranted database queried! {r.status_code}"
+            r = client.post(
+                "/query/export",
+                data={"sql": "SELECT 1", "database": "keycloak"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 403, "export bypassed the database gate"
+            # the granted one still works
+            r = client.post("/query", data={"sql": "SELECT 1", "database": "analytics"})
+            assert r.status_code == 200, r.status_code
+
+            # ── the picker never names what you can't reach ──
+            r = client.get("/")
+            assert "dw_whirlpool" not in r.text and "keycloak" not in r.text, (
+                "ungranted database names leaked into the console page"
+            )
+
+            # ── charts ──
+            body = client.get("/charts").text
+            assert "Mine" in body and "Theirs" not in body, "ungranted chart listed"
+            assert client.get("/charts/theirs", follow_redirects=False).status_code == 403
+            assert client.get("/charts/mine").status_code == 200
+            # no chart_builder feature -> builder refused entirely
+            assert client.get("/charts/new", follow_redirects=False).status_code == 403
+            r = client.post(
+                "/charts/new",
+                data={"sql": "SELECT 1", "source_db": "analytics"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 403, "builder ran without the feature grant"
+            r = client.post(
+                "/charts/save",
+                data={
+                    "sql": "SELECT 1",
+                    "source_db": "dw_whirlpool",
+                    "title": "x",
+                    "chart_type": "bar",
+                    "x_column": "a",
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 403, "save bypassed the gate"
+
+            # ── dashboards ──
+            body = client.get("/dashboards").text
+            assert "Ops" in body and "Secret" not in body, "ungranted dashboard listed"
+            assert client.get("/dashboards/secret", follow_redirects=False).status_code == 403
+            r = client.get("/dashboards/ops")
+            assert r.status_code == 200
+            # the tile built on an ungranted chart is dropped from a dashboard
+            # the user *can* see
+            assert "Mine" in r.text and "Theirs" not in r.text, (
+                "a dashboard leaked a chart the user has no grant for"
+            )
+            # no dashboard_builder feature
+            assert client.get("/dashboards/ops/edit", follow_redirects=False).status_code == 403
+            r = client.post("/dashboards", data={"title": "x"}, follow_redirects=False)
+            assert r.status_code == 403
+            r = client.post(
+                "/dashboards/ops/items", data={"chart_slug": "mine"}, follow_redirects=False
+            )
+            assert r.status_code == 403, "layout mutation not gated"
+
+            # ── datasets: needs the feature as well as the database ──
+            assert client.get("/datasets", follow_redirects=False).status_code == 403
+            assert client.get("/datasets/companies", follow_redirects=False).status_code == 403
+
+            # ── reports ──
+            assert client.get("/report/anything/export", follow_redirects=False).status_code == 403
+    finally:
+        main_mod.app.dependency_overrides.pop(main_mod.access_for, None)
+        (
+            main_mod.access_for,
+            store.available,
+            store.list_charts,
+            store.get_chart,
+            store.list_dashboards,
+            store.get_dashboard,
+            db_mod.list_databases,
+            db_mod.execute,
+            store.upsert_user,
+        ) = saved
+    assert charts_mod.MAX_SERIES  # keeps the import meaningful
+    print("enforcement at every route: OK")
+
+
+def test_wildcard_grant_covers_a_whole_type():
+    """key='*' grants every resource of that type, including future ones."""
+    from app import store
+
+    a = store.Access(username="x", granted={store.CHART: {store.ANY}})
+    assert a.allows(store.CHART, "anything-at-all")
+    assert a.filter(store.CHART, ["a", "b"]) == ["a", "b"]
+    assert not a.allows(store.DASHBOARD, "a"), "'*' must not leak across types"
+    assert a.has_any(store.CHART) and not a.has_any(store.DASHBOARD)
+    print("wildcard grant: OK")
 
 
 def test_dashboards_disabled_without_app_db():
@@ -1092,7 +1323,9 @@ if __name__ == "__main__":
     test_dashboard_pages_render()
     test_admin_panel_and_gate()
     test_last_admin_cannot_be_removed()
-    test_granted_databases_fails_closed()
+    test_access_resolution_fails_closed()
+    test_wildcard_grant_covers_a_whole_type()
+    test_enforcement_at_every_route()
     # Last: these reload app.main, which rebinds this module's `app` reference.
     test_dashboards_disabled_without_app_db()
     test_charts_disabled_without_app_db()

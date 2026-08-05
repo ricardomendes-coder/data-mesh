@@ -140,6 +140,46 @@ MIGRATIONS: list[tuple[str, str]] = [
         ON CONFLICT DO NOTHING;
         """,
     ),
+    (
+        "0004_role_permissions",
+        """
+        -- Generalises role_databases. A permission is (type, key), so the same
+        -- table covers databases, reports, charts, dashboards and whatever gets
+        -- added later — a new resource type is a constant, not a migration.
+        -- key = '*' means "every resource of this type".
+        CREATE TABLE IF NOT EXISTS role_permissions (
+            role_id       bigint NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+            resource_type text   NOT NULL,
+            resource_key  text   NOT NULL,
+            PRIMARY KEY (role_id, resource_type, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS role_permissions_role_type_idx
+            ON role_permissions (role_id, resource_type);
+
+        -- Carry over anything already granted, then retire the old table.
+        INSERT INTO role_permissions (role_id, resource_type, resource_key)
+        SELECT role_id, 'database', database_name FROM role_databases
+        ON CONFLICT DO NOTHING;
+
+        DROP TABLE IF EXISTS role_databases;
+
+        -- An Admin role that grants everything, so "sees everything" is visible
+        -- and manageable in the UI rather than implied by a hidden flag.
+        INSERT INTO roles (name, description, is_default)
+        VALUES ('Admin', 'Full access to every database and object.', false)
+        ON CONFLICT (name) DO NOTHING;
+
+        INSERT INTO role_permissions (role_id, resource_type, resource_key)
+        SELECT id, '*', '*' FROM roles WHERE name = 'Admin'
+        ON CONFLICT DO NOTHING;
+
+        -- Drop the seeded Analytics role. Its whole purpose was to preserve the
+        -- pre-enforcement behaviour during the previous step; keeping it would
+        -- silently grant `analytics` to every new user.
+        DELETE FROM roles WHERE name = 'Analytics';
+        """,
+    ),
 ]
 
 
@@ -597,10 +637,38 @@ def move_item(dashboard_slug: str, item_id: int, delta: int) -> bool:
     return True
 
 
-# ── users, roles, grants ───────────────────────────────────────────────────
+# ── users, roles, permissions ──────────────────────────────────────────────
 
-# Returned by granted_databases() for an admin: every database, no filtering.
-ALL_DATABASES = object()
+# A permission is (resource_type, resource_key). ANY as the key means "every
+# resource of this type"; ANY as the type as well means "everything", which is
+# what the seeded Admin role holds.
+ANY = "*"
+
+DATABASE = "database"
+REPORT = "report"
+CHART = "chart"
+DASHBOARD = "dashboard"
+FEATURE = "feature"
+
+RESOURCE_TYPES = (DATABASE, REPORT, CHART, DASHBOARD, FEATURE)
+
+# Capabilities that aren't a stored object. Adding one here is all it takes to
+# make it grantable — no migration, since permissions are just (type, key).
+FEATURES: tuple[tuple[str, str], ...] = (
+    ("sql_console", "Run ad-hoc SQL in the query console"),
+    ("chart_builder", "Create and edit charts"),
+    ("dashboard_builder", "Create and edit dashboards"),
+    ("dataset_catalog", "Browse the dataset catalog"),
+)
+FEATURE_KEYS = tuple(k for k, _ in FEATURES)
+
+RESOURCE_LABELS = {
+    DATABASE: "Databases",
+    REPORT: "Reports",
+    CHART: "Charts",
+    DASHBOARD: "Dashboards",
+    FEATURE: "Features",
+}
 
 
 @dataclass
@@ -609,8 +677,15 @@ class Role:
     description: str = ""
     is_default: bool = False
     id: int | None = None
-    databases: list[str] = field(default_factory=list)
+    # resource_type -> keys granted (may contain ANY)
+    permissions: dict[str, list[str]] = field(default_factory=dict)
     member_count: int = 0
+
+    def keys(self, resource_type: str) -> list[str]:
+        return self.permissions.get(resource_type, [])
+
+    def grants_everything(self) -> bool:
+        return ANY in self.permissions.get(ANY, [])
 
 
 @dataclass
@@ -799,15 +874,18 @@ def list_roles() -> list[Role]:
         rows = conn.execute(
             text("SELECT id, name, description, is_default FROM roles ORDER BY name")
         ).fetchall()
-        dbs = conn.execute(
-            text("SELECT role_id, database_name FROM role_databases ORDER BY database_name")
+        perms = conn.execute(
+            text(
+                "SELECT role_id, resource_type, resource_key FROM role_permissions "
+                "ORDER BY resource_type, resource_key"
+            )
         ).fetchall()
         counts = dict(
             conn.execute(text("SELECT role_id, count(*) FROM user_roles GROUP BY 1")).fetchall()
         )
-    by_role: dict[int, list[str]] = {}
-    for rid, name in dbs:
-        by_role.setdefault(rid, []).append(name)
+    by_role: dict[int, dict[str, list[str]]] = {}
+    for rid, rtype, rkey in perms:
+        by_role.setdefault(rid, {}).setdefault(rtype, []).append(rkey)
     out = []
     for r in rows:
         m = r._mapping
@@ -817,7 +895,7 @@ def list_roles() -> list[Role]:
                 name=m["name"],
                 description=m["description"],
                 is_default=m["is_default"],
-                databases=by_role.get(m["id"], []),
+                permissions=by_role.get(m["id"], {}),
                 member_count=counts.get(m["id"], 0),
             )
         )
@@ -860,30 +938,77 @@ def set_role_default(role_id: int, value: bool) -> bool:
         return result.rowcount > 0
 
 
-def set_role_databases(role_id: int, database_names: list[str]) -> bool:
-    """Replace a role's database grants — the admin form posts the full set."""
-    cleaned = sorted({n.strip() for n in database_names if n and n.strip()})
+def set_role_permissions(role_id: int, resource_type: str, keys: list[str]) -> bool:
+    """Replace one resource type's grants for a role.
+
+    Scoped to a single type on purpose: the admin form posts one section at a
+    time, so saving the Databases section can never wipe the Charts section.
+    """
+    if resource_type not in RESOURCE_TYPES:
+        return False
+    cleaned = sorted({k.strip() for k in keys if k and k.strip()})
     with engine().begin() as conn:
         exists = conn.execute(text("SELECT 1 FROM roles WHERE id = :id"), {"id": role_id}).scalar()
         if not exists:
             return False
-        conn.execute(text("DELETE FROM role_databases WHERE role_id = :id"), {"id": role_id})
-        for name in cleaned:
+        conn.execute(
+            text("DELETE FROM role_permissions WHERE role_id = :id AND resource_type = :t"),
+            {"id": role_id, "t": resource_type},
+        )
+        for key in cleaned:
             conn.execute(
                 text(
-                    "INSERT INTO role_databases (role_id, database_name) "
-                    "VALUES (:id, :n) ON CONFLICT DO NOTHING"
+                    "INSERT INTO role_permissions (role_id, resource_type, resource_key) "
+                    "VALUES (:id, :t, :k) ON CONFLICT DO NOTHING"
                 ),
-                {"id": role_id, "n": name},
+                {"id": role_id, "t": resource_type, "k": key},
             )
     return True
 
 
-def granted_databases(username: str):
-    """Database names this user may reach — the union of their roles' grants.
+@dataclass
+class Access:
+    """What one user may reach — resolved once per request, then asked.
 
-    Returns the ALL_DATABASES sentinel for an admin. An inactive or unknown
-    user gets an empty set: fail closed.
+    `everything` short-circuits every check: it's true for a user flagged admin
+    and for anyone holding a role with the ('*','*') grant.
+    """
+
+    username: str
+    everything: bool = False
+    granted: dict[str, set[str]] = field(default_factory=dict)
+
+    def allows(self, resource_type: str, key: str) -> bool:
+        if self.everything:
+            return True
+        keys = self.granted.get(resource_type, set())
+        return ANY in keys or key in keys
+
+    def keys(self, resource_type: str) -> set[str]:
+        """Explicit keys for a type. Meaningless when `everything` is set or the
+        type is granted with ANY — callers filter a known list instead."""
+        return self.granted.get(resource_type, set())
+
+    def has_any(self, resource_type: str) -> bool:
+        return self.everything or bool(self.granted.get(resource_type))
+
+    def filter(self, resource_type: str, candidates):
+        """Narrow a list of real resources to the ones this user may see."""
+        if self.everything or ANY in self.granted.get(resource_type, set()):
+            return list(candidates)
+        keys = self.granted.get(resource_type, set())
+        return [c for c in candidates if c in keys]
+
+
+# Nobody: what an unknown, inactive or un-roled user gets. Fail closed.
+NO_ACCESS = Access(username="", everything=False, granted={})
+
+
+def access_for(username: str) -> Access:
+    """Resolve a user's effective permissions: the union of their roles'.
+
+    One query. Callers hold the result for the request rather than asking per
+    check, so a page with several checks doesn't mean several round trips.
     """
     with engine().connect() as conn:
         row = conn.execute(
@@ -891,17 +1016,23 @@ def granted_databases(username: str):
             {"u": username},
         ).first()
         if row is None or not row._mapping["is_active"]:
-            return set()
+            return Access(username=username)
         if row._mapping["is_admin"]:
-            return ALL_DATABASES
-        return {
-            r[0]
-            for r in conn.execute(
-                text(
-                    "SELECT DISTINCT rd.database_name FROM role_databases rd "
-                    "JOIN user_roles ur ON ur.role_id = rd.role_id "
-                    "WHERE ur.user_id = :id"
-                ),
-                {"id": row._mapping["id"]},
-            )
-        }
+            return Access(username=username, everything=True)
+
+        granted: dict[str, set[str]] = {}
+        rows = conn.execute(
+            text(
+                "SELECT DISTINCT rp.resource_type, rp.resource_key FROM role_permissions rp "
+                "JOIN user_roles ur ON ur.role_id = rp.role_id "
+                "WHERE ur.user_id = :id"
+            ),
+            {"id": row._mapping["id"]},
+        )
+        for rtype, rkey in rows:
+            granted.setdefault(rtype, set()).add(rkey)
+
+    # A role holding ('*','*') grants everything, same as the admin flag.
+    if ANY in granted.get(ANY, set()):
+        return Access(username=username, everything=True)
+    return Access(username=username, granted=granted)

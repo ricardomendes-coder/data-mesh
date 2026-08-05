@@ -195,6 +195,43 @@ def signed_in_user(request: Request, user: str = Depends(require_login)) -> str:
     return user
 
 
+def access_for(request: Request, user: str = Depends(signed_in_user)) -> store.Access:
+    """The caller's effective permissions, resolved once for this request.
+
+    When the app database isn't configured there are no roles to consult, so
+    everything is permitted — otherwise losing `report_hub` would take the whole
+    app down rather than just its own features. That trade is deliberate: the
+    app database is where permissions live, and a permission system that fails
+    *open* on its own outage is the lesser evil for an internal tool. Revisit if
+    this is ever exposed beyond the VPN.
+    """
+    if not store.available():
+        return store.Access(username=user, everything=True)
+    try:
+        return store.access_for(user)
+    except Exception:
+        logger.exception("Could not resolve permissions for %r", user)
+        return store.Access(username=user, everything=True)
+
+
+def _may_browse_datasets(access: store.Access) -> bool:
+    """The catalog needs both the feature and a grant on the database it reads.
+
+    Two checks because they answer different questions: may you use the catalog
+    at all, and may you see *this* warehouse. Granting the feature without the
+    database would otherwise list every table in `analytics`.
+    """
+    return access.allows(store.FEATURE, "dataset_catalog") and access.allows(
+        store.DATABASE, settings.datasets_database
+    )
+
+
+def _forbidden(request: Request, user: str, message: str, status: int = 403):
+    """A refusal that looks like the rest of the app rather than a bare 403."""
+    context = _shell_context(user, "", error=message)
+    return templates.TemplateResponse(request, "forbidden.html", context, status_code=status)
+
+
 def _login_page(request: Request, error: str | None = None, status_code: int = 200):
     return templates.TemplateResponse(
         request,
@@ -377,41 +414,52 @@ def _shell_context(user: str, active_nav: str, **extra) -> dict:
     return context
 
 
-def _console_context(user: str, **extra) -> dict:
+def _console_context(user: str, access: store.Access | None = None, **extra) -> dict:
     """Base template context: the DB picker list and the reports manifest.
 
     Both DB discovery and manifest parsing are best-effort — a failure degrades
     the page (banner + empty list) instead of 500ing the whole dashboard.
+
+    Everything the picker and the report list show is filtered through `access`,
+    so a database or report the caller has no grant for is never even named.
     """
+    access = access or store.NO_ACCESS
     databases: list[str] = []
     db_ok = False
     db_error = None
     try:
-        databases = db.list_databases()
+        # Filtered, not merely un-selectable: the full list of ~50 databases is
+        # itself information (client names), so an ungranted one is not shown.
+        databases = access.filter(store.DATABASE, db.list_databases())
         db_ok = True
     except Exception:
         logger.exception("Could not list databases")
         db_error = "Could not load the database list — check the server logs."
 
     try:
-        report_list = reports.load_reports()
+        report_list = [r for r in reports.load_reports() if access.allows(store.REPORT, r.key)]
     except Exception:
         logger.exception("Could not load the reports manifest")
         report_list = []
         db_error = db_error or "Could not load the reports — check the server logs."
 
     active_tab = extra.pop("active_tab", "query")
+    # Preselect something the user can actually use.
+    default_db = (
+        settings.db_name if settings.db_name in databases else (databases[0] if databases else "")
+    )
     context = _shell_context(
         user,
         "reports" if active_tab == "reports" else "query",
         sql=None,
-        database=settings.db_name,
+        database=default_db,
         databases=databases,
         db_ok=db_ok,
         db_error=db_error,
         reports=report_list,
         result=None,
         active_tab=active_tab,
+        can_query=access.allows(store.FEATURE, "sql_console"),
     )
     context.update(extra)
     return context
@@ -424,16 +472,18 @@ def console(
     sql: str = "",
     database: str = "",
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     """The query console and reports.
 
     `tab`/`sql`/`database` make the console deep-linkable, which is what the
     "Open in Query" buttons on a dataset page use to hand a query over.
     """
-    context = _console_context(user, active_tab="reports" if tab == "reports" else "query")
+    context = _console_context(user, access, active_tab="reports" if tab == "reports" else "query")
     if sql:
         context["sql"] = sql
-    if database:
+    # A deep link can name any database; only honour it if it's actually granted.
+    if database and access.allows(store.DATABASE, database):
         context["database"] = database
     return templates.TemplateResponse(request, "console.html", context)
 
@@ -444,8 +494,11 @@ def datasets_index(
     q: str = "",
     kind: str = "",
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     """Everything in the analytics schema, grouped by the manifest's folders."""
+    if not _may_browse_datasets(access):
+        return _forbidden(request, user, "You don't have access to the dataset catalog.")
     context = _shell_context(user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0)
     try:
         all_datasets = datasets.list_datasets()
@@ -476,8 +529,11 @@ def dataset_detail(
     request: Request,
     name: str,
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     """Preview, catalog, description and example queries for one dataset."""
+    if not _may_browse_datasets(access):
+        return _forbidden(request, user, "You don't have access to the dataset catalog.")
 
     def _catalog_failure(message: str, status: int):
         context = _shell_context(
@@ -541,8 +597,17 @@ def run_query(
     sql: str = Form(...),
     database: str = Form(...),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
-    context = _console_context(user, sql=sql, database=database)
+    # Checked server-side, not just hidden in the UI: the dropdown being
+    # filtered means nothing when the target is a posted form field.
+    if not access.allows(store.FEATURE, "sql_console"):
+        return _forbidden(request, user, "You don't have access to the query console.")
+    if not access.allows(store.DATABASE, database):
+        logger.warning("%s attempted a query against ungranted database %r", user, database)
+        return _forbidden(request, user, f"You don't have access to {database!r}.")
+
+    context = _console_context(user, access, sql=sql, database=database)
 
     # Only accept a database the server actually reported (when we have a list).
     if context["databases"] and database not in context["databases"]:
@@ -579,9 +644,18 @@ def export_query(
     sql: str = Form(...),
     database: str = Form(...),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    # Export is a second way to run the same SQL, so it needs the same gate —
+    # enforcing only on /query would leave the door open here.
+    if not access.allows(store.FEATURE, "sql_console"):
+        return _forbidden(request, user, "You don't have access to the query console.")
+    if not access.allows(store.DATABASE, database):
+        logger.warning("%s attempted an export from ungranted database %r", user, database)
+        return _forbidden(request, user, f"You don't have access to {database!r}.")
+
     def _error(msg: str, status: int = 400):
-        context = _console_context(user, sql=sql, database=database, error=msg)
+        context = _console_context(user, access, sql=sql, database=database, error=msg)
         return templates.TemplateResponse(request, "console.html", context, status_code=status)
 
     try:
@@ -600,6 +674,7 @@ def export_query(
     if not result.returns_rows:
         context = _console_context(
             user,
+            access,
             sql=sql,
             database=database,
             message=f"OK — {result.rowcount} row(s) affected. Nothing to export.",
@@ -615,11 +690,19 @@ def export_report(
     key: str,
     format: str = "csv",
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    # A report is a stored query against a named database, so it needs its own
+    # grant — being able to run it is not implied by console access.
+    if not access.allows(store.REPORT, key):
+        logger.warning("%s attempted ungranted report %r", user, key)
+        return _forbidden(request, user, "You don't have access to that report.")
     try:
         df = reports.get_report_df(key)
     except KeyError:
-        context = _console_context(user, error=f"Unknown report: {key!r}.", active_tab="reports")
+        context = _console_context(
+            user, access, error=f"Unknown report: {key!r}.", active_tab="reports"
+        )
         return templates.TemplateResponse(request, "console.html", context, status_code=404)
     except Exception:
         # Full details go to the server log; the user sees a generic message so
@@ -627,6 +710,7 @@ def export_report(
         logger.exception("Report generation failed for %r", key)
         context = _console_context(
             user,
+            access,
             error="Could not generate the report. Check the server logs.",
             active_tab="reports",
         )
@@ -650,12 +734,19 @@ def _charts_unavailable(request: Request, user: str, status: int = 503):
 
 
 @app.get("/charts", response_class=HTMLResponse)
-def charts_index(request: Request, user: str = Depends(signed_in_user)):
+def charts_index(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _charts_unavailable(request, user)
-    context = _shell_context(user, "charts", charts=[])
+    context = _shell_context(
+        user, "charts", charts=[], can_build=access.allows(store.FEATURE, "chart_builder")
+    )
     try:
-        context["charts"] = store.list_charts()
+        # Filtered by slug: a chart you can't open shouldn't be listed either.
+        context["charts"] = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
     except Exception:
         logger.exception("Could not list charts")
         context["db_ok"] = False
@@ -663,12 +754,13 @@ def charts_index(request: Request, user: str = Depends(signed_in_user)):
     return templates.TemplateResponse(request, "charts.html", context)
 
 
-def _builder_context(user: str, **extra) -> dict:
+def _builder_context(user: str, access: store.Access | None = None, **extra) -> dict:
     """Context for the chart builder, including everything needed to re-render
     the form after a run so nothing the user typed is lost."""
+    access = access or store.NO_ACCESS
     databases: list[str] = []
     try:
-        databases = db.list_databases()
+        databases = access.filter(store.DATABASE, db.list_databases())
     except Exception:
         logger.exception("Could not list databases for the chart builder")
     context = _shell_context(
@@ -678,7 +770,11 @@ def _builder_context(user: str, **extra) -> dict:
         chart_types=charts.CHART_TYPES,
         chart=None,
         sql="",
-        source_db=settings.datasets_database,
+        source_db=(
+            settings.datasets_database
+            if settings.datasets_database in databases
+            else (databases[0] if databases else "")
+        ),
         title="",
         chart_type="bar",
         x_column="",
@@ -699,10 +795,16 @@ def _builder_context(user: str, **extra) -> dict:
 
 
 @app.get("/charts/new", response_class=HTMLResponse)
-def chart_new(request: Request, user: str = Depends(signed_in_user)):
+def chart_new(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _charts_unavailable(request, user)
-    return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user))
+    if not access.allows(store.FEATURE, "chart_builder"):
+        return _forbidden(request, user, "You don't have access to the chart builder.")
+    return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user, access))
 
 
 @app.post("/charts/new", response_class=HTMLResponse)
@@ -715,13 +817,22 @@ def chart_run(
     x_column: str = Form(""),
     y_columns: list[str] = Form(default=[]),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     """Run the builder's SQL and re-render with the column pickers + preview."""
     if not store.available():
         return _charts_unavailable(request, user)
+    if not access.allows(store.FEATURE, "chart_builder"):
+        return _forbidden(request, user, "You don't have access to the chart builder.")
+    # The builder runs arbitrary SQL, so it needs the same database gate as the
+    # console — otherwise it is a way around it.
+    if not access.allows(store.DATABASE, source_db):
+        logger.warning("%s attempted a chart query against ungranted %r", user, source_db)
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
 
     context = _builder_context(
         user,
+        access,
         sql=sql,
         source_db=source_db,
         title=title,
@@ -779,9 +890,14 @@ def chart_save(
     y_columns: list[str] = Form(default=[]),
     slug: str = Form(""),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     if not store.available():
         return _charts_unavailable(request, user)
+    if not access.allows(store.FEATURE, "chart_builder"):
+        return _forbidden(request, user, "You don't have access to the chart builder.")
+    if not access.allows(store.DATABASE, source_db):
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
 
     title = title.strip() or "Untitled chart"
     chart = store.Chart(
@@ -800,9 +916,17 @@ def chart_save(
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
-def chart_detail(request: Request, slug: str, user: str = Depends(signed_in_user)):
+def chart_detail(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _charts_unavailable(request, user)
+    # 403 before the lookup, so an ungranted slug can't be probed for existence.
+    if not access.allows(store.CHART, slug):
+        return _forbidden(request, user, "You don't have access to that chart.")
 
     try:
         chart = store.get_chart(slug)
@@ -834,7 +958,14 @@ def chart_detail(request: Request, slug: str, user: str = Depends(signed_in_user
 
 
 @app.post("/charts/{slug}/delete")
-def chart_delete(request: Request, slug: str, user: str = Depends(signed_in_user)):
+def chart_delete(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not (access.allows(store.CHART, slug) and access.allows(store.FEATURE, "chart_builder")):
+        return _forbidden(request, user, "You don't have access to that chart.")
     if store.available():
         store.delete_chart(slug)
         logger.info("Chart %r deleted by %s", slug, user)
@@ -894,12 +1025,23 @@ def _tile_specs(tiles: list[dict]) -> dict:
 
 
 @app.get("/dashboards", response_class=HTMLResponse)
-def dashboards_index(request: Request, user: str = Depends(signed_in_user)):
+def dashboards_index(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _dashboards_unavailable(request, user)
-    context = _shell_context(user, "dashboards", dashboards=[])
+    context = _shell_context(
+        user,
+        "dashboards",
+        dashboards=[],
+        can_build=access.allows(store.FEATURE, "dashboard_builder"),
+    )
     try:
-        context["dashboards"] = store.list_dashboards()
+        context["dashboards"] = [
+            d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)
+        ]
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False
@@ -912,9 +1054,12 @@ def dashboard_create(
     request: Request,
     title: str = Form(...),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
     if not store.available():
         return _dashboards_unavailable(request, user)
+    if not access.allows(store.FEATURE, "dashboard_builder"):
+        return _forbidden(request, user, "You don't have access to the dashboard builder.")
     title = title.strip() or "Untitled dashboard"
     dash = store.save_dashboard(
         store.Dashboard(
@@ -949,12 +1094,22 @@ def _load_dashboard(request: Request, user: str, slug: str):
 
 
 @app.get("/dashboards/{slug}", response_class=HTMLResponse)
-def dashboard_show(request: Request, slug: str, user: str = Depends(signed_in_user)):
+def dashboard_show(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _dashboards_unavailable(request, user)
+    if not access.allows(store.DASHBOARD, slug):
+        return _forbidden(request, user, "You don't have access to that dashboard.")
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
+    # Tiles are filtered by chart grant: holding a dashboard must not become a
+    # way to see a chart — or the database behind it — you were never granted.
+    dash.items = [i for i in dash.items if access.allows(store.CHART, i.chart.slug)]
     tiles = _render_tiles(dash.items)
     context = _shell_context(
         user, "dashboards", dashboard=dash, tiles=tiles, tile_specs=_tile_specs(tiles)
@@ -963,16 +1118,26 @@ def dashboard_show(request: Request, slug: str, user: str = Depends(signed_in_us
 
 
 @app.get("/dashboards/{slug}/edit", response_class=HTMLResponse)
-def dashboard_edit(request: Request, slug: str, user: str = Depends(signed_in_user)):
+def dashboard_edit(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
     if not store.available():
         return _dashboards_unavailable(request, user)
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
+    dash.items = [i for i in dash.items if access.allows(store.CHART, i.chart.slug)]
 
     available_charts = []
     try:
-        available_charts = store.list_charts()
+        available_charts = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
     except Exception:
         logger.exception("Could not list charts for the dashboard editor")
 
@@ -996,7 +1161,12 @@ def dashboard_add_item(
     chart_slug: str = Form(...),
     width: str = Form(store.DEFAULT_WIDTH),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     if store.available():
         store.add_item(slug, chart_slug, width)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1004,8 +1174,16 @@ def dashboard_add_item(
 
 @app.post("/dashboards/{slug}/items/{item_id}/remove")
 def dashboard_remove_item(
-    request: Request, slug: str, item_id: int, user: str = Depends(signed_in_user)
+    request: Request,
+    slug: str,
+    item_id: int,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     if store.available():
         store.remove_item(slug, item_id)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1018,7 +1196,12 @@ def dashboard_set_width(
     item_id: int,
     width: str = Form(...),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     if store.available():
         store.set_item_width(slug, item_id, width)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1031,14 +1214,28 @@ def dashboard_move_item(
     item_id: int,
     direction: str = Form(...),
     user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
 ):
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     if store.available():
         store.move_item(slug, item_id, -1 if direction == "up" else 1)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
 
 
 @app.post("/dashboards/{slug}/delete")
-def dashboard_delete(request: Request, slug: str, user: str = Depends(signed_in_user)):
+def dashboard_delete(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not (
+        access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
+    ):
+        return _forbidden(request, user, "You don't have access to edit that dashboard.")
     if store.available():
         store.delete_dashboard(slug)
         logger.info("Dashboard %r deleted by %s", slug, user)
@@ -1144,26 +1341,58 @@ def admin_roles(request: Request, user: str = Depends(require_admin)):
     # Every database on the instance, so grants are picked from a list rather
     # than typed. This is the one place the full list is still shown, and it is
     # admin-only by construction.
-    live: list[str] = []
+    roles = store.list_roles()
+
+    # Every grantable resource, gathered per type. Admin-only by construction,
+    # so this is the one screen that still sees the full instance.
+    live_databases: list[str] = []
     try:
-        live = db.list_databases()
+        live_databases = db.list_databases()
     except Exception:
         logger.exception("Could not list databases for the roles screen")
 
-    roles = store.list_roles()
-    # Union in every existing grant. A grant naming a database that is no
-    # longer on the instance would otherwise have no checkbox — and since the
-    # form posts the full set, saving that role would silently drop it.
-    granted = {name for r in roles for name in r.databases}
-    all_databases = sorted(set(live) | granted)
+    try:
+        report_keys = [r.key for r in reports.load_reports()]
+    except Exception:
+        logger.exception("Could not load reports for the roles screen")
+        report_keys = []
+
+    try:
+        chart_slugs = [c.slug for c in store.list_charts()]
+        dashboard_slugs = [d.slug for d in store.list_dashboards()]
+    except Exception:
+        logger.exception("Could not load charts/dashboards for the roles screen")
+        chart_slugs, dashboard_slugs = [], []
+
+    live = {
+        store.DATABASE: live_databases,
+        store.REPORT: report_keys,
+        store.CHART: chart_slugs,
+        store.DASHBOARD: dashboard_slugs,
+        store.FEATURE: list(store.FEATURE_KEYS),
+    }
+
+    # Union in whatever is already granted. A grant naming something that no
+    # longer exists would otherwise have no checkbox, and since each section
+    # posts its full set, saving would silently drop it.
+    options: dict[str, list[str]] = {}
+    stale: dict[str, list[str]] = {}
+    for rtype, names in live.items():
+        granted = {k for r in roles for k in r.keys(rtype) if k != store.ANY}
+        options[rtype] = sorted(set(names) | granted)
+        stale[rtype] = sorted(granted - set(names)) if names else []
+
     context = _shell_context(
         user,
         "admin",
         admin_tab="roles",
         roles=roles,
-        all_databases=all_databases,
-        # Flagged in the UI so a stale grant is visible rather than mysterious.
-        missing_databases=sorted(granted - set(live)) if live else [],
+        options=options,
+        stale=stale,
+        resource_types=store.RESOURCE_TYPES,
+        resource_labels=store.RESOURCE_LABELS,
+        feature_labels=dict(store.FEATURES),
+        ANY=store.ANY,
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_roles.html", context)
@@ -1181,15 +1410,25 @@ def admin_create_role(
     return RedirectResponse(request.url_for("admin_roles"), status_code=303)
 
 
-@app.post("/admin/roles/{role_id}/databases")
-def admin_set_role_databases(
+@app.post("/admin/roles/{role_id}/permissions")
+def admin_set_role_permissions(
     request: Request,
     role_id: int,
-    databases: list[str] = Form(default=[]),
+    resource_type: str = Form(...),
+    keys: list[str] = Form(default=[]),
     user: str = Depends(require_admin),
 ):
-    store.set_role_databases(role_id, databases)
-    logger.info("Databases for role %s set to %r by %s", role_id, databases, user)
+    """Replace one resource type's grants for a role.
+
+    One type per submit, so saving the Databases section can't clear the Charts
+    section — each `<form>` on the page owns exactly one type.
+    """
+    if not store.set_role_permissions(role_id, resource_type, keys):
+        logger.warning(
+            "Rejected permission update for role %s type %r by %s", role_id, resource_type, user
+        )
+    else:
+        logger.info("Role %s %s grants set to %r by %s", role_id, resource_type, keys, user)
     return RedirectResponse(request.url_for("admin_roles"), status_code=303)
 
 

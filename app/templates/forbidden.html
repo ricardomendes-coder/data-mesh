@@ -1,0 +1,10 @@
+{% extends "_shell.html" %}
+{% block page_title %}Not available{% endblock %}
+{% block page_sub %}Signed in as {{ user }}{% endblock %}
+
+{% block content %}
+{# The shell already renders `error`, so this only adds what to do next. #}
+<div class="bi-empty-lg">
+  If you need this, ask an administrator to grant it to one of your roles.
+</div>
+{% endblock %}

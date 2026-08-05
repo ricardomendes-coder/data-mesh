@@ -1,7 +1,7 @@
 {% extends "_shell.html" %}
 {% from "_admin_tabs.html" import admin_tabs with context %}
 {% block page_title %}Administration{% endblock %}
-{% block page_sub %}{{ roles|length }} role{{ '' if roles|length == 1 else 's' }} · {{ all_databases|length }} databases on the instance{% endblock %}
+{% block page_sub %}{{ roles|length }} role{{ '' if roles|length == 1 else 's' }}{% endblock %}
 
 {% block content %}
 {{ admin_tabs('roles') }}
@@ -21,8 +21,8 @@
   <div class="bi-rolecard-hd">
     <span class="bi-rolecard-nm">{{ r.name }}</span>
     {% if r.is_default %}<span class="bi-kind bi-kind-table">default</span>{% endif %}
+    {% if r.grants_everything() %}<span class="bi-kind bi-kind-matview">everything</span>{% endif %}
     <span class="bi-ds-stat">{{ r.member_count }} member{{ '' if r.member_count == 1 else 's' }}</span>
-    <span class="bi-ds-stat">{{ r.databases|length }} database{{ '' if r.databases|length == 1 else 's' }}</span>
     <div class="bi-rolecard-ctl">
       <form method="post" action="{{ url_for('admin_set_role_default', role_id=r.id) }}">
         <input type="hidden" name="value" value="{{ 'false' if r.is_default else 'true' }}">
@@ -40,31 +40,54 @@
   </div>
   {% if r.description %}<p class="bi-group-sub">{{ r.description }}</p>{% endif %}
 
-  {# Grants are picked from the real instance list rather than typed, so a
-     typo can't silently create a grant that matches nothing. #}
-  <form method="post" action="{{ url_for('admin_set_role_databases', role_id=r.id) }}">
-    <div class="bi-dbgrid">
-      {% for name in all_databases %}
-      <label class="bi-chip-check {{ 'bi-chip-missing' if name in missing_databases else '' }}"
-             {% if name in missing_databases %}title="Not currently on the instance"{% endif %}>
-        <input type="checkbox" name="databases" value="{{ name }}"
-               {% if name in r.databases %}checked{% endif %}>
-        <span>{{ name }}</span>
-      </label>
-      {% endfor %}
-    </div>
-    {% if not all_databases %}
-    <p class="bi-hint">Could not read the database list — check the server logs.</p>
-    {% endif %}
-    {% if missing_databases %}
-    <p class="bi-hint">
-      Struck through: granted but not currently on the instance
-      (<code>{{ missing_databases|join('</code>, <code>')|safe }}</code>). Kept so
-      saving this role can't quietly drop the grant.
-    </p>
-    {% endif %}
-    <button class="bi-btn sm" type="submit">Save databases</button>
-  </form>
+  {% if r.grants_everything() %}
+  <p class="bi-hint">
+    This role holds the <code>*</code> grant, so it allows every resource of
+    every type — including ones added in future. Per-type grants below are
+    ignored while that's the case.
+  </p>
+  {% endif %}
+
+  {# One form per resource type. Each posts only its own section, so saving
+     Databases can never wipe Charts. #}
+  {% for rtype in resource_types %}
+  <details class="bi-permsec" {% if r.keys(rtype) %}open{% endif %}>
+    <summary>
+      <span class="bi-permsec-tt">{{ resource_labels[rtype] }}</span>
+      <span class="bi-ds-stat">
+        {% if ANY in r.keys(rtype) %}all
+        {% else %}{{ r.keys(rtype)|length }} of {{ options[rtype]|length }}{% endif %}
+      </span>
+    </summary>
+    <form method="post" action="{{ url_for('admin_set_role_permissions', role_id=r.id) }}">
+      <input type="hidden" name="resource_type" value="{{ rtype }}">
+      <div class="bi-dbgrid">
+        {# The wildcard first: "everything of this type, including future ones". #}
+        <label class="bi-chip-check bi-chip-any">
+          <input type="checkbox" name="keys" value="{{ ANY }}"
+                 {% if ANY in r.keys(rtype) %}checked{% endif %}>
+          <span>all {{ resource_labels[rtype]|lower }}</span>
+        </label>
+        {% for key in options[rtype] %}
+        <label class="bi-chip-check {{ 'bi-chip-missing' if key in stale[rtype] else '' }}"
+               {% if key in stale[rtype] %}title="Granted but no longer exists"{% endif %}
+               {% if rtype == 'feature' and feature_labels.get(key) %}title="{{ feature_labels[key] }}"{% endif %}>
+          <input type="checkbox" name="keys" value="{{ key }}"
+                 {% if key in r.keys(rtype) %}checked{% endif %}>
+          <span>{{ key }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% if not options[rtype] %}
+      <p class="bi-hint">Nothing of this type exists yet — the “all” grant still works.</p>
+      {% endif %}
+      {% if stale[rtype] %}
+      <p class="bi-hint">Struck through: granted but no longer exists. Kept so saving can't quietly drop it.</p>
+      {% endif %}
+      <button class="bi-btn sm" type="submit">Save {{ resource_labels[rtype]|lower }}</button>
+    </form>
+  </details>
+  {% endfor %}
 </section>
 {% endfor %}
 
@@ -73,8 +96,9 @@
 {% endif %}
 
 <p class="bi-hint">
-  A user's access is the union of their roles' databases. Administrators reach
-  every database regardless of role. Nothing is enforced on the query console
-  yet — that lands next; until then this screen only records intent.
+  A user's access is the union of their roles' grants. Users flagged
+  <b>admin</b> on the Users tab reach everything regardless of role.
+  Features gate a capability rather than an object — <code>sql_console</code>
+  is needed to run queries at all, on top of a grant for the specific database.
 </p>
 {% endblock %}

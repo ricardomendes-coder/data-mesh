@@ -75,9 +75,9 @@ second password. `AUTH_MODE` picks how:
 alongside whichever mode is active — the break-glass path for when the IdP is
 unreachable. Keep one local account around for exactly that.
 
-Either way, **any user who can log in to BI 360 can use the hub**.
-Authentication *is* authorization here, matching how BI 360 itself behaves. See
-the security notes below.
+Signing in is only the first half. What a user may then *see* is decided by
+their roles — see [Users, roles and permissions](#users-roles-and-permissions).
+A brand-new user with no default role can log in and reaches nothing.
 
 ### `AUTH_MODE=superset` — borrowing the BI 360 session
 
@@ -140,51 +140,89 @@ Flask-based and its cookie is called `session`; since both apps live on
 `bi.v360.io`, sharing the name would make each one silently overwrite the
 other's login. Don't set `SESSION_COOKIE_NAME=session`.
 
-## Users, roles and the admin panel
+## Users, roles and permissions
 
 **Users are created on first sign-in.** There is nothing to provision — the
-identity provider decides who exists, this app decides what they may see. That's
-the same model as Superset's `AUTH_USER_REGISTRATION`.
+identity provider decides who exists, this app decides what they may see. Same
+model as Superset's `AUTH_USER_REGISTRATION`. A new user receives every role
+marked **default**.
 
-A new user receives every role marked **default**. Ships seeded with one:
-`Analytics`, default, granting the `analytics` database — so enabling this
-changes nothing for `analytics` while the other ~49 databases on the instance
-stop being on offer.
+### The permission model
 
-`/admin` (administrators only) has two screens:
+A permission is a pair: **`(resource_type, resource_key)`**, stored one row per
+grant in `role_permissions`. That's the whole model, and it's why adding a new
+kind of thing to protect is a constant rather than a migration.
 
-| | |
+| Type | Key is | Example |
+| --- | --- | --- |
+| `database` | a database name | `analytics` |
+| `report` | a report key from `reports.toml` | `rocketlane_projects` |
+| `chart` | a chart slug | `capturas-por-dia` |
+| `dashboard` | a dashboard slug | `ops` |
+| `feature` | a capability | `sql_console` |
+
+`*` as the key means *every resource of that type, including ones created
+later*. `('*','*')` means everything — that's what the seeded **Admin** role
+holds. A user flagged `is_admin` on the Users tab also reaches everything.
+
+**Features** gate a capability rather than an object, and they stack with object
+grants. Running a query needs `sql_console` **and** a grant for that specific
+database. The four are `sql_console`, `chart_builder`, `dashboard_builder`,
+`dataset_catalog`.
+
+A user's access is the **union of their roles' grants**, resolved once per
+request.
+
+### Where it's enforced
+
+Every one of these is a server-side check, not a hidden button — the UI filters
+too, but that's cosmetic:
+
+| Route | Requires |
 | --- | --- |
-**Users** | roles per user, grant/revoke admin, deactivate. Read-only otherwise — you can't create a user here, because logins do that. |
-**Roles & databases** | create roles, tick which databases each grants, mark one default |
+| `POST /query`, `POST /query/export` | `sql_console` + the target database |
+| `GET /report/{key}/export` | that report |
+| `GET /datasets`, `/datasets/{name}` | `dataset_catalog` + the catalog's database |
+| `GET /charts`, `/charts/{slug}` | filtered by chart; 403 on an ungranted slug |
+| `POST /charts/new`, `/charts/save` | `chart_builder` + the source database |
+| `GET /dashboards`, `/dashboards/{slug}` | filtered by dashboard |
+| dashboard edit + all layout mutations | `dashboard_builder` + that dashboard |
 
-Access is the **union of a user's roles' databases**. Administrators reach every
-database regardless of role.
+Two consequences worth knowing:
 
-Design notes worth knowing:
+- **Names are information.** The console's database picker is *filtered*, not
+  merely restricted — the list of ~50 databases includes client names, so an
+  ungranted one is never shown.
+- **A dashboard can't be a side door.** Tiles are filtered by *chart* grant, so
+  holding a dashboard never exposes a chart — or the database behind it — you
+  weren't granted.
 
-- **Grants hang off roles, not users.** At a few hundred people per-user rows
-  stop being manageable, and moving to roles later would mean migrating every
-  grant.
-- **A grant is just a database name.** The server and credentials stay in env,
-  because one login already reaches every database on the instance — so the
-  boundary is *who may see which name*, not how we connect. That's why there's
-  no credential storage anywhere in this feature.
-- **Admin is re-checked on every admin request**, not trusted from the session.
-  `session['is_admin']` exists only so the nav doesn't cost a query per page;
-  revoking admin takes effect immediately.
-- **The last administrator can't be removed** — via the panel or `manage.py`.
-  Otherwise the panel becomes unreachable.
-- **Login never depends on the app database.** If `report_hub` is down, sign-in
-  still works and the registration is skipped; an outage there must not lock
-  everyone out.
-- **A deactivated user gets nothing, even if flagged admin** — `granted_databases`
-  fails closed for unknown, inactive, and un-roled users alike.
-- **Stale grants are preserved.** If a role grants a database that's no longer on
-  the instance, it still appears (struck through) rather than vanishing — the
-  form posts the full set, so an invisible grant would be silently dropped.
+### If the app database is down
 
-Break-glass from a shell, so the panel can never lock you out entirely:
+Permission checks **fail open**: everyone gets everything. That's deliberate for
+an internal tool behind a VPN — losing `report_hub` would otherwise take the
+whole app down rather than just its own features. Revisit if this is ever exposed
+more widely. (Login itself never depends on the app database either.)
+
+Everything else fails **closed**: an unknown, deactivated, or un-roled user gets
+nothing, and a deactivated user gets nothing even if flagged admin.
+
+### The admin panel
+
+`/admin` (administrators only) has **Users** — roles per user, grant/revoke
+admin, deactivate — and **Roles & permissions**, where each role has a
+collapsible section per resource type. Each section is its own form, so saving
+Databases can't clear Charts.
+
+- **Admin is re-checked on every admin request**, not read from the session.
+  `session['is_admin']` exists only so the sidebar link doesn't cost a query per
+  page; revoking admin takes effect immediately.
+- **The last administrator can't be removed**, via the panel or `manage.py`.
+- **Stale grants are preserved.** A grant naming something that no longer exists
+  still appears (struck through) rather than vanishing — each section posts its
+  full set, so an invisible grant would be silently dropped.
+
+Break-glass from a shell:
 
 ```bash
 docker compose exec hub python manage.py list-users
@@ -192,11 +230,6 @@ docker compose exec hub python manage.py grant-admin marcelo.ferreira
 ```
 
 `INITIAL_ADMIN_USER` is also promoted to admin automatically on login.
-
-> **Not enforced yet.** This PR builds the structure and the panel; the query
-> console, datasets, charts and reports still ignore the grants. Enforcement is
-> the next change — doing it before the panel existed would have locked everyone
-> out with no way to grant anything.
 
 ## Dashboards
 
@@ -362,13 +395,15 @@ engines would need that adjusted in `app/db.py`):
   database on the server** the login can reach. The DB user's own permissions
   are your only guardrail; grant only what you're comfortable with every
   logged-in user having.
-- **The dropdown lists every database on the server** (from `pg_database`), so
-  all database names — client names included — are visible to anyone who can
-  log in.
-- **Everyone in the `v360` realm gets the SQL console.** There are no roles
-  here: a successful SSO login is full access. That's deliberate — it matches
-  BI 360, and the target is the analytical database, not a production one. If
-  that ever stops being true, gate `require_login` on a Keycloak role claim.
+- **The dropdown is filtered to granted databases.** Names are themselves
+  information (they include client names), so an ungranted database is never
+  listed rather than listed-and-refused.
+- **The SQL console is gated by role.** Running a query needs the
+  `sql_console` feature plus a grant on that specific database. This matters
+  more than it looks: the single login the app uses can `CONNECT` to **50 of the
+  52 databases** on the instance — every client `dw_*` warehouse, plus
+  `keycloak`, `gitlab` and `airflow` — so without grants a logged-in user could
+  read another client's data. Grant narrowly.
 - **HTTPS is required as configured.** `app/main.py` sets `https_only=True` on
   the session cookie, so login only works over `https://` (put it behind a
   reverse proxy like Caddy/Nginx/Traefik). For plain-HTTP local testing, flip

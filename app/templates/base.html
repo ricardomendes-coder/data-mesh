@@ -313,6 +313,15 @@
     .bi-chip-check input{width:13px;height:13px;accent-color:var(--orange);margin:0;}
     .bi-chip-check:has(input:checked){background:var(--orange-50);border-color:var(--orange-100);color:var(--orange-600);font-weight:600;}
     .bi-chip-missing span{text-decoration:line-through;color:var(--muted);}
+    .bi-chip-any span{font-weight:700;}
+    .bi-chip-check.bi-chip-any:has(input:checked){background:var(--purple-soft);border-color:#E3D3F7;color:var(--purple);}
+    .bi-permsec{border-top:1px solid var(--border);padding:.55rem 0 .2rem;}
+    .bi-permsec summary{display:flex;align-items:center;gap:.6rem;cursor:pointer;padding:.25rem 0;list-style:none;}
+    .bi-permsec summary::-webkit-details-marker{display:none;}
+    .bi-permsec summary::before{content:"▸";color:var(--g-300);font-size:.7rem;}
+    .bi-permsec[open] summary::before{content:"▾";}
+    .bi-permsec-tt{font-size:.82rem;font-weight:600;color:var(--title);}
+    .bi-permsec .bi-dbgrid{max-height:190px;}
     .bi-rolecard{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);margin-bottom:1rem;}
     .bi-rolecard-hd{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.35rem;}
     .bi-rolecard-nm{font-size:.95rem;font-weight:700;color:var(--title);letter-spacing:-.01em;}
