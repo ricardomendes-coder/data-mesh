@@ -180,6 +180,19 @@ MIGRATIONS: list[tuple[str, str]] = [
         DELETE FROM roles WHERE name = 'Analytics';
         """,
     ),
+    (
+        "0005_drop_admin_role",
+        """
+        -- The Admin role duplicated users.is_admin: two ways to say "sees
+        -- everything", which can disagree. The flag wins — it also gates the
+        -- admin panel, which a role never did — so the role goes.
+        --
+        -- Anyone holding it keeps their access via the flag if they had it;
+        -- this does not silently promote anyone, so check the Users tab after
+        -- applying if the role had members.
+        DELETE FROM roles WHERE name = 'Admin';
+        """,
+    ),
 ]
 
 

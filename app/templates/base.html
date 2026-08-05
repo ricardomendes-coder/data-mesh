@@ -322,6 +322,29 @@
     .bi-permsec[open] summary::before{content:"▾";}
     .bi-permsec-tt{font-size:.82rem;font-weight:600;color:var(--title);}
     .bi-permsec .bi-dbgrid{max-height:190px;}
+    .bi-permsec-actions{display:flex;align-items:center;gap:.4rem;margin-left:auto;}
+    .bi-linkbtn{border:none;background:none;padding:0;font:inherit;font-size:.72rem;color:var(--orange);cursor:pointer;}
+    .bi-linkbtn:hover{color:var(--orange-hover);text-decoration:underline;}
+
+    /* user detail */
+    .bi-usergrid{display:grid;grid-template-columns:minmax(280px,1fr) minmax(340px,1.35fr);gap:1rem;align-items:start;}
+    @media(max-width:960px){.bi-usergrid{grid-template-columns:1fr;}}
+    .bi-usercol{display:flex;flex-direction:column;gap:1rem;}
+    .bi-userlink{font-weight:700;color:var(--title);}
+    .bi-userlink:hover{color:var(--orange);}
+    .bi-deflist{display:grid;grid-template-columns:auto 1fr;gap:.4rem .9rem;font-size:.82rem;align-items:baseline;}
+    .bi-deflist dt{color:var(--muted);white-space:nowrap;}
+    .bi-deflist dd{color:var(--title);min-width:0;}
+    .bi-flagrow{display:flex;align-items:center;gap:1rem;padding:.7rem 0;border-top:1px solid var(--border);font-size:.84rem;}
+    .bi-flagrow:first-of-type{border-top:none;}
+    .bi-flagrow form{margin-left:auto;}
+    .bi-rolepill{display:inline-flex;align-items:center;height:20px;padding:0 .5rem;margin:.1rem .2rem .1rem 0;border-radius:var(--r-pill);background:var(--page);border:1px solid var(--border);font-size:.72rem;color:var(--body);font-family:var(--mono);}
+    .bi-rolelist{display:flex;flex-direction:column;gap:.2rem;margin-bottom:.8rem;}
+    .bi-rolerow{display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;gap:.5rem;padding:.42rem .5rem;border-radius:var(--r-sm);cursor:pointer;}
+    .bi-rolerow:hover{background:var(--page);}
+    .bi-rolerow input{width:14px;height:14px;accent-color:var(--orange);}
+    .bi-rolerow-nm{font-size:.85rem;font-weight:600;color:var(--title);}
+    .bi-rolerow .bi-sub{margin-top:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .bi-rolecard{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);margin-bottom:1rem;}
     .bi-rolecard-hd{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.35rem;}
     .bi-rolecard-nm{font-size:.95rem;font-weight:700;color:var(--title);letter-spacing:-.01em;}

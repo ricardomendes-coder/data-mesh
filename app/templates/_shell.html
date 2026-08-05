@@ -12,31 +12,31 @@
         <div class="bi-brand-tx"><b>{{ title }}</b><span>V360 · Data</span></div>
       </div>
       <nav class="bi-side-nav">
-        <a class="bi-nav-item {{ 'active' if active_nav == 'query' else '' }}"
+        {% if nav_query %}<a class="bi-nav-item {{ 'active' if active_nav == 'query' else '' }}"
            data-tab="query" href="{{ url_for('console') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
           <span>Query</span>
-        </a>
-        <a class="bi-nav-item {{ 'active' if active_nav == 'reports' else '' }}"
+        </a>{% endif %}
+        {% if nav_reports %}<a class="bi-nav-item {{ 'active' if active_nav == 'reports' else '' }}"
            data-tab="reports" href="{{ url_for('console') }}?tab=reports">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
           <span>Reports</span>
-        </a>
-        <a class="bi-nav-item {{ 'active' if active_nav == 'dashboards' else '' }}"
+        </a>{% endif %}
+        {% if nav_dashboards %}<a class="bi-nav-item {{ 'active' if active_nav == 'dashboards' else '' }}"
            href="{{ url_for('dashboards_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="5.5" height="5"/><rect x="8.5" y="2.5" width="5.5" height="5"/><rect x="2" y="8.5" width="5.5" height="5"/><rect x="8.5" y="8.5" width="5.5" height="5"/></svg>
           <span>Dashboards</span>
-        </a>
-        <a class="bi-nav-item {{ 'active' if active_nav == 'charts' else '' }}"
+        </a>{% endif %}
+        {% if nav_charts %}<a class="bi-nav-item {{ 'active' if active_nav == 'charts' else '' }}"
            href="{{ url_for('charts_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14h12"/><rect x="3" y="8" width="2.6" height="5"/><rect x="7" y="4.5" width="2.6" height="8.5"/><rect x="11" y="6.5" width="2.6" height="6.5"/></svg>
           <span>Charts</span>
-        </a>
-        <a class="bi-nav-item {{ 'active' if active_nav == 'datasets' else '' }}"
+        </a>{% endif %}
+        {% if nav_datasets %}<a class="bi-nav-item {{ 'active' if active_nav == 'datasets' else '' }}"
            href="{{ url_for('datasets_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>
           <span>Datasets</span>
-        </a>
+        </a>{% endif %}
         {# Read straight off the session: it's cached at login purely so the nav
            doesn't cost a query per page. Every admin route re-checks against
            the database, so a stale session can't actually do anything. #}

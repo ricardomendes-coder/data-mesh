@@ -7,60 +7,37 @@
 {{ admin_tabs('users') }}
 
 {% if users %}
+{# Read-only overview. Editing happens on the user's own page, so a mis-click
+   here can't change someone's access. #}
 <div class="bi-restbl-wrap">
   <table class="bi-restbl bi-admintbl">
     <thead>
-      <tr><th>User</th><th>Email</th><th>Roles</th><th>Via</th><th>Last seen</th><th>Admin</th><th>Active</th></tr>
+      <tr><th>User</th><th>Email</th><th>Roles</th><th>Via</th><th>Last seen</th><th></th></tr>
     </thead>
     <tbody>
       {% for u in users %}
       <tr class="{{ '' if u.is_active else 'bi-row-off' }}">
         <td>
-          <b>{{ u.username }}</b>
+          <a class="bi-userlink" href="{{ url_for('admin_user_detail', username=u.username) }}">{{ u.username }}</a>
+          {% if u.is_admin %}<span class="bi-kind bi-kind-table">admin</span>{% endif %}
+          {% if not u.is_active %}<span class="bi-kind bi-kind-view">inactive</span>{% endif %}
           {% if u.display_name and u.display_name != u.username %}
           <div class="bi-sub">{{ u.display_name }}</div>
           {% endif %}
         </td>
         <td>{% if u.email %}{{ u.email }}{% else %}<span class="bi-null">—</span>{% endif %}</td>
         <td>
-          {# Full set posted on submit: the form replaces a user's roles wholesale. #}
-          <form method="post" action="{{ url_for('admin_set_user_roles', username=u.username) }}"
-                class="bi-rolepick">
-            {% for r in roles %}
-            <label class="bi-chip-check">
-              <input type="checkbox" name="roles" value="{{ r.name }}"
-                     {% if r.name in u.roles %}checked{% endif %}>
-              <span>{{ r.name }}</span>
-            </label>
-            {% endfor %}
-            <button class="bi-btn sm ghost" type="submit">Save</button>
-          </form>
+          {% if u.roles %}
+            {% for r in u.roles %}<span class="bi-rolepill">{{ r }}</span>{% endfor %}
+          {% else %}<span class="bi-null">no roles — sees nothing</span>{% endif %}
         </td>
         <td><span class="bi-kind bi-kind-view">{{ u.auth_via or '—' }}</span></td>
         <td class="bi-nowrap">
           {% if u.last_seen_at %}{{ u.last_seen_at.strftime('%Y-%m-%d %H:%M') }}
           {% else %}<span class="bi-null">never</span>{% endif %}
         </td>
-        <td>
-          <form method="post" action="{{ url_for('admin_toggle_admin', username=u.username) }}">
-            <input type="hidden" name="value" value="{{ 'false' if u.is_admin else 'true' }}">
-            <button class="bi-btn sm {{ '' if u.is_admin else 'ghost' }}" type="submit">
-              {{ 'admin' if u.is_admin else 'grant' }}
-            </button>
-          </form>
-        </td>
-        <td>
-          <form method="post" action="{{ url_for('admin_toggle_active', username=u.username) }}">
-            <input type="hidden" name="value" value="{{ 'false' if u.is_active else 'true' }}">
-            <button class="bi-icobtn {{ 'danger' if u.is_active else '' }}" type="submit"
-                    title="{{ 'Deactivate' if u.is_active else 'Reactivate' }}">
-              {% if u.is_active %}
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-              {% else %}
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5L13 5"/></svg>
-              {% endif %}
-            </button>
-          </form>
+        <td class="bi-nowrap">
+          <a class="bi-btn sm ghost" href="{{ url_for('admin_user_detail', username=u.username) }}">Edit</a>
         </td>
       </tr>
       {% endfor %}
@@ -69,8 +46,8 @@
 </div>
 <p class="bi-hint">
   Users appear here the first time they sign in — there's nothing to create by
-  hand. A new user receives every role marked <b>default</b> on the Roles tab.
-  Deactivating someone revokes all access without losing their charts.
+  hand. Open one to change its roles, admin flag, or to see exactly what its
+  roles resolve to.
 </p>
 {% else %}
 <div class="bi-empty-lg">

@@ -20,14 +20,14 @@
 <section class="bi-rolecard">
   <div class="bi-rolecard-hd">
     <span class="bi-rolecard-nm">{{ r.name }}</span>
-    {% if r.is_default %}<span class="bi-kind bi-kind-table">default</span>{% endif %}
+    {% if r.is_default %}<span class="bi-kind bi-kind-table" title="Every new user gets this role on their first sign-in">given to new users</span>{% endif %}
     {% if r.grants_everything() %}<span class="bi-kind bi-kind-matview">everything</span>{% endif %}
     <span class="bi-ds-stat">{{ r.member_count }} member{{ '' if r.member_count == 1 else 's' }}</span>
     <div class="bi-rolecard-ctl">
       <form method="post" action="{{ url_for('admin_set_role_default', role_id=r.id) }}">
         <input type="hidden" name="value" value="{{ 'false' if r.is_default else 'true' }}">
         <button class="bi-btn sm ghost" type="submit">
-          {{ 'Unset default' if r.is_default else 'Make default' }}
+          {{ 'Stop giving to new users' if r.is_default else 'Give to new users' }}
         </button>
       </form>
       <form method="post" action="{{ url_for('admin_delete_role', role_id=r.id) }}"
@@ -61,6 +61,14 @@
     </summary>
     <form method="post" action="{{ url_for('admin_set_role_permissions', role_id=r.id) }}">
       <input type="hidden" name="resource_type" value="{{ rtype }}">
+      {# Select all/none acts on the individual boxes only — the wildcard above
+         is a different thing (it also covers resources created later), so
+         toggling it from here would quietly change what the grant means. #}
+      <div class="bi-permsec-actions">
+        <button class="bi-linkbtn" type="button" data-select="all">select all</button>
+        <span class="bi-sub">·</span>
+        <button class="bi-linkbtn" type="button" data-select="none">clear</button>
+      </div>
       <div class="bi-dbgrid">
         {# The wildcard first: "everything of this type, including future ones". #}
         <label class="bi-chip-check bi-chip-any">
@@ -96,9 +104,16 @@
 {% endif %}
 
 <p class="bi-hint">
+  <b>Given to new users</b> means exactly that: when someone signs in for the
+  first time they're created automatically, and any role marked this way is
+  attached to them. Mark none and new users start with no access at all.
+</p>
+<p class="bi-hint">
   A user's access is the union of their roles' grants. Users flagged
   <b>admin</b> on the Users tab reach everything regardless of role.
   Features gate a capability rather than an object — <code>sql_console</code>
   is needed to run queries at all, on top of a grant for the specific database.
 </p>
+
+<script src="{{ url_for('static', path='admin-roles.js') }}"></script>
 {% endblock %}

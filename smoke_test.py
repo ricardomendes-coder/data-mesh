@@ -647,7 +647,14 @@ def test_admin_panel_and_gate():
             r = client.get("/admin/users")
             assert r.status_code == 200, r.text[:300]
             assert "marcelo.ferreira" in r.text and "ana.silva" in r.text
-            assert "Analytics" in r.text and "Finance" in r.text
+            # The list is read-only now: it shows the roles a user *has*, and
+            # nothing else. "Finance" has no members, so it must not appear.
+            assert "Analytics" in r.text, "assigned role missing from the list"
+            assert "Finance" not in r.text, (
+                "the users list is still rendering every role — editing belongs "
+                "on the user's own page"
+            )
+            assert "/admin/users/ana.silva" in r.text, "no link to the user page"
 
             r = client.get("/admin/roles")
             assert r.status_code == 200, r.text[:300]
@@ -701,6 +708,152 @@ def test_admin_panel_and_gate():
             store.set_user_admin,
         ) = saved
     print("admin panel + gate: OK")
+
+
+def test_user_detail_page():
+    """The per-user page: roles are edited here, and it explains the result."""
+    from app import store
+
+    ana = store.User(
+        id=2,
+        username="ana.silva",
+        email="a@v360.io",
+        display_name="Ana Silva",
+        auth_via="superset",
+        roles=["Finance"],
+    )
+    roles = [
+        store.Role(
+            id=1, name="Analytics", is_default=True, permissions={store.DATABASE: ["analytics"]}
+        ),
+        store.Role(
+            id=2,
+            name="Finance",
+            description="Billing warehouses.",
+            permissions={store.DATABASE: ["dw_v360"], store.FEATURE: ["sql_console"]},
+        ),
+    ]
+    saved = (
+        store.available,
+        store.is_admin,
+        store.get_user,
+        store.list_users,
+        store.list_roles,
+        store.access_for,
+        store.upsert_user,
+        store.set_user_admin,
+        store.set_user_roles,
+    )
+    store.available = lambda: True
+    store.is_admin = lambda u: True
+    store.upsert_user = _no_op_user
+    store.set_user_admin = lambda u, v: True
+    store.set_user_roles = lambda u, r: True
+    store.get_user = lambda u: ana if u == "ana.silva" else None
+    store.list_users = lambda: [ana]
+    store.list_roles = lambda: roles
+    store.access_for = lambda u: store.Access(
+        username=u,
+        granted={store.DATABASE: {"dw_v360"}, store.FEATURE: {"sql_console"}},
+    )
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.get("/admin/users/ana.silva")
+            assert r.status_code == 200, r.text[:300]
+            # every role is offered here (this is where you assign them)
+            assert "Analytics" in r.text and "Finance" in r.text
+            # ...and the page explains what those roles resolve to
+            assert "Effective access" in r.text
+            assert "dw_v360" in r.text, "effective grants not shown"
+            assert "sql_console" in r.text
+            # the role that grants it is attributable
+            assert "via Finance" in r.text, "grant source not shown"
+
+            r = client.get("/admin/users/nobody", follow_redirects=False)
+            assert r.status_code == 404, r.status_code
+
+            # saving roles returns to the user's page, not the list
+            r = client.post(
+                "/admin/users/ana.silva/roles",
+                data={"roles": ["Analytics"]},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/admin/users/ana.silva" in r.headers["location"], r.headers["location"]
+    finally:
+        (
+            store.available,
+            store.is_admin,
+            store.get_user,
+            store.list_users,
+            store.list_roles,
+            store.access_for,
+            store.upsert_user,
+            store.set_user_admin,
+            store.set_user_roles,
+        ) = saved
+    print("user detail page: OK")
+
+
+def test_nav_hides_what_you_cannot_reach():
+    """A feature you have no permission for isn't in the sidebar at all."""
+    from app import main as main_mod
+    from app import store
+
+    saved_avail, saved_upsert = store.available, store.upsert_user
+    store.available = lambda: True
+    store.upsert_user = _no_op_user
+
+    def _render_nav(access):
+        main_mod.app.dependency_overrides[main_mod.access_for] = lambda: access
+        try:
+            with TestClient(app, base_url="https://testserver") as client:
+                client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+                return client.get("/").text
+        finally:
+            main_mod.app.dependency_overrides.pop(main_mod.access_for, None)
+
+    try:
+        # Only the query console, on one database
+        body = _render_nav(
+            store.Access(
+                username="ana",
+                granted={store.DATABASE: {"analytics"}, store.FEATURE: {"sql_console"}},
+            )
+        )
+        assert "<span>Query</span>" in body, "granted feature missing from the nav"
+        for hidden in (
+            "<span>Charts</span>",
+            "<span>Dashboards</span>",
+            "<span>Datasets</span>",
+            "<span>Reports</span>",
+        ):
+            assert hidden not in body, f"{hidden} shown without a grant"
+
+        # An admin sees the lot
+        body = _render_nav(store.Access(username="boss", everything=True))
+        for shown in (
+            "<span>Query</span>",
+            "<span>Charts</span>",
+            "<span>Dashboards</span>",
+            "<span>Datasets</span>",
+        ):
+            assert shown in body, f"{shown} hidden from an admin"
+
+        # No grants at all -> no nav entries
+        body = _render_nav(store.Access(username="new"))
+        for hidden in (
+            "<span>Query</span>",
+            "<span>Charts</span>",
+            "<span>Dashboards</span>",
+            "<span>Datasets</span>",
+        ):
+            assert hidden not in body, f"{hidden} shown to a user with no grants"
+    finally:
+        store.available, store.upsert_user = saved_avail, saved_upsert
+    print("nav hidden by permission: OK")
 
 
 def test_last_admin_cannot_be_removed():
@@ -1322,6 +1475,8 @@ if __name__ == "__main__":
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
     test_admin_panel_and_gate()
+    test_user_detail_page()
+    test_nav_hides_what_you_cannot_reach()
     test_last_admin_cannot_be_removed()
     test_access_resolution_fails_closed()
     test_wildcard_grant_covers_a_whole_type()

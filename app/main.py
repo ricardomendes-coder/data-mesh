@@ -396,9 +396,25 @@ async def logout(request: Request):
     return RedirectResponse(request.url_for("login_form"), status_code=303)
 
 
-def _shell_context(user: str, active_nav: str, **extra) -> dict:
-    """Context every signed-in page needs — the bits _shell.html renders."""
+def _shell_context(user: str, active_nav: str, access: store.Access | None = None, **extra) -> dict:
+    """Context every signed-in page needs — the bits _shell.html renders.
+
+    `access` drives which nav entries exist at all. Pages that don't resolve it
+    (the admin screens, which are admin-only anyway) pass None and get the full
+    nav — the routes behind each entry still enforce for themselves, so a shown
+    link is never itself a grant.
+    """
+    nav = access or store.Access(username=user, everything=True)
     context = {
+        # Nav visibility. Asking "has any grant of this type" rather than for a
+        # specific key, since the nav points at a list page.
+        "nav_query": nav.allows(store.FEATURE, "sql_console"),
+        "nav_reports": nav.has_any(store.REPORT),
+        "nav_charts": nav.has_any(store.CHART) or nav.allows(store.FEATURE, "chart_builder"),
+        "nav_dashboards": (
+            nav.has_any(store.DASHBOARD) or nav.allows(store.FEATURE, "dashboard_builder")
+        ),
+        "nav_datasets": nav.allows(store.FEATURE, "dataset_catalog"),
         "user": user,
         "title": settings.app_title,
         "active_nav": active_nav,
@@ -451,6 +467,7 @@ def _console_context(user: str, access: store.Access | None = None, **extra) -> 
     context = _shell_context(
         user,
         "reports" if active_tab == "reports" else "query",
+        access,
         sql=None,
         database=default_db,
         databases=databases,
@@ -499,7 +516,7 @@ def datasets_index(
     """Everything in the analytics schema, grouped by the manifest's folders."""
     if not _may_browse_datasets(access):
         return _forbidden(request, user, "You don't have access to the dataset catalog.")
-    context = _shell_context(user, "datasets", q=q, kind=kind, groups=[], total=0, shown=0)
+    context = _shell_context(user, "datasets", access, q=q, kind=kind, groups=[], total=0, shown=0)
     try:
         all_datasets = datasets.list_datasets()
     except Exception:
@@ -539,6 +556,7 @@ def dataset_detail(
         context = _shell_context(
             user,
             "datasets",
+            access,
             q="",
             kind="",
             groups=[],
@@ -563,6 +581,7 @@ def dataset_detail(
     context = _shell_context(
         user,
         "datasets",
+        access,
         dataset=dataset,
         columns=[],
         preview_columns=[],
@@ -766,6 +785,7 @@ def _builder_context(user: str, access: store.Access | None = None, **extra) -> 
     context = _shell_context(
         user,
         "charts",
+        access,
         databases=databases,
         chart_types=charts.CHART_TYPES,
         chart=None,
@@ -934,7 +954,9 @@ def chart_detail(
         logger.exception("Could not load chart %r", slug)
         return _charts_unavailable(request, user)
     if chart is None:
-        context = _shell_context(user, "charts", charts=[], error=f"Unknown chart: {slug!r}.")
+        context = _shell_context(
+            user, "charts", access, charts=[], error=f"Unknown chart: {slug!r}."
+        )
         return templates.TemplateResponse(request, "charts.html", context, status_code=404)
 
     context = _shell_context(
@@ -1035,6 +1057,7 @@ def dashboards_index(
     context = _shell_context(
         user,
         "dashboards",
+        access,
         dashboards=[],
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
     )
@@ -1145,6 +1168,7 @@ def dashboard_edit(
     context = _shell_context(
         user,
         "dashboards",
+        access,
         dashboard=dash,
         tiles=tiles,
         tile_specs=_tile_specs(tiles),
@@ -1282,6 +1306,60 @@ def admin_users(request: Request, user: str = Depends(require_admin)):
     return templates.TemplateResponse(request, "admin_users.html", context)
 
 
+@app.get("/admin/users/{username}", response_class=HTMLResponse)
+def admin_user_detail(request: Request, username: str, user: str = Depends(require_admin)):
+    """One user: their roles, flags, and what those roles actually resolve to.
+
+    The effective-access summary is the point of the page — it answers "why
+    can't they see X?" by cause rather than symptom, which is what you'd
+    otherwise reach for impersonation to find out.
+    """
+    target = store.get_user(username)
+    if target is None:
+        context = _shell_context(
+            user,
+            "admin",
+            admin_tab="users",
+            users=store.list_users(),
+            roles=store.list_roles(),
+            is_admin=True,
+            error=f"Unknown user: {username!r}.",
+        )
+        return templates.TemplateResponse(request, "admin_users.html", context, status_code=404)
+
+    roles = store.list_roles()
+    access = store.access_for(username)
+
+    # Which role granted what, so a surprising grant can be traced to its source.
+    by_role = {r.name: r for r in roles}
+    sources: dict[str, dict[str, list[str]]] = {}
+    for rname in target.roles:
+        role = by_role.get(rname)
+        if not role:
+            continue
+        for rtype, keys in role.permissions.items():
+            for key in keys:
+                sources.setdefault(rtype, {}).setdefault(key, []).append(rname)
+
+    context = _shell_context(
+        user,
+        "admin",
+        admin_tab="users",
+        target=target,
+        roles=roles,
+        # Deliberately NOT `access`: that parameter is the *viewer's*, and
+        # drives their nav. This is what the user being edited can reach.
+        target_access=access,
+        sources=sources,
+        resource_types=store.RESOURCE_TYPES,
+        resource_labels=store.RESOURCE_LABELS,
+        ANY=store.ANY,
+        is_admin=True,
+        is_self=target.username == user,
+    )
+    return templates.TemplateResponse(request, "admin_user_detail.html", context)
+
+
 @app.post("/admin/users/{username}/roles")
 def admin_set_user_roles(
     request: Request,
@@ -1291,7 +1369,9 @@ def admin_set_user_roles(
 ):
     store.set_user_roles(username, roles)
     logger.info("Roles for %r set to %r by %s", username, roles, user)
-    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+    return RedirectResponse(
+        request.url_for("admin_user_detail", username=username), status_code=303
+    )
 
 
 @app.post("/admin/users/{username}/admin")
@@ -1322,7 +1402,9 @@ def admin_toggle_admin(
             return templates.TemplateResponse(request, "admin_users.html", context, status_code=400)
     store.set_user_admin(username, grant)
     logger.info("Admin for %r set to %s by %s", username, grant, user)
-    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+    return RedirectResponse(
+        request.url_for("admin_user_detail", username=username), status_code=303
+    )
 
 
 @app.post("/admin/users/{username}/active")
@@ -1333,7 +1415,9 @@ def admin_toggle_active(
     user: str = Depends(require_admin),
 ):
     store.set_user_active(username, value == "true")
-    return RedirectResponse(request.url_for("admin_users"), status_code=303)
+    return RedirectResponse(
+        request.url_for("admin_user_detail", username=username), status_code=303
+    )
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)

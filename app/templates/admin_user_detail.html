@@ -1,0 +1,130 @@
+{% extends "_shell.html" %}
+{% block page_title %}{{ target.label }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('admin_users') }}">Users</a> / <code>{{ target.username }}</code>
+{% endblock %}
+
+{% block content %}
+<div class="bi-usergrid">
+  <div class="bi-usercol">
+    {# ── identity: everything here comes from the IdP, nothing is editable ── #}
+    <section class="bi-rolecard">
+      <div class="bi-rolecard-hd"><span class="bi-rolecard-nm">Account</span></div>
+      <dl class="bi-deflist">
+        <dt>Username</dt><dd><code>{{ target.username }}</code></dd>
+        <dt>Name</dt><dd>{{ target.display_name or '—' }}</dd>
+        <dt>Email</dt><dd>{{ target.email or '—' }}</dd>
+        <dt>Signs in via</dt><dd><span class="bi-kind bi-kind-view">{{ target.auth_via or '—' }}</span></dd>
+        <dt>First seen</dt>
+        <dd>{{ target.created_at.strftime('%Y-%m-%d %H:%M') if target.created_at else '—' }}</dd>
+        <dt>Last seen</dt>
+        <dd>{{ target.last_seen_at.strftime('%Y-%m-%d %H:%M') if target.last_seen_at else 'never' }}</dd>
+      </dl>
+      <p class="bi-hint">
+        These come from the identity provider on each sign-in and aren't editable here.
+      </p>
+    </section>
+
+    {# ── flags ── #}
+    <section class="bi-rolecard">
+      <div class="bi-rolecard-hd"><span class="bi-rolecard-nm">Status</span></div>
+      <div class="bi-flagrow">
+        <div>
+          <b>Administrator</b>
+          <div class="bi-sub">Reaches every resource, and can open these admin screens.</div>
+        </div>
+        <form method="post" action="{{ url_for('admin_toggle_admin', username=target.username) }}">
+          <input type="hidden" name="value" value="{{ 'false' if target.is_admin else 'true' }}">
+          <button class="bi-btn sm {{ '' if target.is_admin else 'ghost' }}" type="submit">
+            {{ 'Revoke admin' if target.is_admin else 'Make admin' }}
+          </button>
+        </form>
+      </div>
+      <div class="bi-flagrow">
+        <div>
+          <b>Active</b>
+          <div class="bi-sub">Deactivating revokes all access without deleting their work.</div>
+        </div>
+        <form method="post" action="{{ url_for('admin_toggle_active', username=target.username) }}">
+          <input type="hidden" name="value" value="{{ 'false' if target.is_active else 'true' }}">
+          <button class="bi-btn sm {{ 'ghost' if target.is_active else '' }}" type="submit">
+            {{ 'Deactivate' if target.is_active else 'Reactivate' }}
+          </button>
+        </form>
+      </div>
+      {% if is_self %}
+      <p class="bi-hint">This is your own account — careful with both of these.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="bi-usercol">
+    {# ── roles: the only thing that decides access ── #}
+    <section class="bi-rolecard">
+      <div class="bi-rolecard-hd">
+        <span class="bi-rolecard-nm">Roles</span>
+        <span class="bi-ds-stat">{{ target.roles|length }} of {{ roles|length }}</span>
+      </div>
+      <p class="bi-group-sub">
+        Access is the union of these. Change what a role <em>grants</em> on the
+        <a href="{{ url_for('admin_roles') }}">Roles &amp; permissions</a> tab.
+      </p>
+      <form method="post" action="{{ url_for('admin_set_user_roles', username=target.username) }}">
+        <div class="bi-rolelist">
+          {% for r in roles %}
+          <label class="bi-rolerow">
+            <input type="checkbox" name="roles" value="{{ r.name }}"
+                   {% if r.name in target.roles %}checked{% endif %}>
+            <span class="bi-rolerow-nm">{{ r.name }}</span>
+            {% if r.is_default %}<span class="bi-kind bi-kind-table">new users</span>{% endif %}
+            <span class="bi-sub">{{ r.description or '—' }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        {% if not roles %}
+        <p class="bi-hint">No roles exist yet. Create one on the Roles tab.</p>
+        {% endif %}
+        <button class="bi-btn" type="submit">Save roles</button>
+      </form>
+    </section>
+
+    {# ── what those roles actually resolve to ──
+       The reason this page exists: it answers "why can't they see X?" by cause,
+       which is what you'd otherwise use impersonation to find out. #}
+    <section class="bi-rolecard">
+      <div class="bi-rolecard-hd">
+        <span class="bi-rolecard-nm">Effective access</span>
+        {% if target_access.everything %}<span class="bi-kind bi-kind-matview">everything</span>{% endif %}
+      </div>
+      {% if target_access.everything %}
+      <p class="bi-group-sub">
+        Administrator — reaches every resource regardless of roles.
+      </p>
+      {% elif not target.is_active %}
+      <p class="bi-group-sub">Deactivated — reaches nothing, whatever the roles say.</p>
+      {% elif not target.roles %}
+      <p class="bi-group-sub">No roles, so nothing at all. Assign one above.</p>
+      {% else %}
+      <dl class="bi-deflist">
+        {% for rtype in resource_types %}
+        <dt>{{ resource_labels[rtype] }}</dt>
+        <dd>
+          {% set keys = target_access.keys(rtype) %}
+          {% if not keys %}<span class="bi-null">none</span>
+          {% elif ANY in keys %}<span class="bi-rolepill">all</span>
+            {% set via = sources.get(rtype, {}).get(ANY, []) %}
+            {% if via %}<span class="bi-sub">via {{ via|join(', ') }}</span>{% endif %}
+          {% else %}
+            {% for k in keys|sort %}
+            <span class="bi-rolepill" title="via {{ sources.get(rtype, {}).get(k, [])|join(', ') }}">{{ k }}</span>
+            {% endfor %}
+          {% endif %}
+        </dd>
+        {% endfor %}
+      </dl>
+      <p class="bi-hint">Hover a grant to see which role provides it.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}
