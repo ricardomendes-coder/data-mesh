@@ -45,9 +45,18 @@ def _inline_code(value: str) -> Markup:
 
 templates.env.filters["inline_code"] = _inline_code
 
-# Cap how many result rows are rendered in the browser. The full result set is
-# still available via Export — this only bounds the HTML we build per request.
-QUERY_DISPLAY_LIMIT = 500
+
+def _row_limit(requested: str | int | None) -> int:
+    """Clamp a requested row count into [1, QUERY_MAX_ROWS].
+
+    Anything unparseable falls back to the default rather than erroring — the
+    box is a convenience, and a typo shouldn't lose the query you just wrote.
+    """
+    try:
+        wanted = int(requested)
+    except (TypeError, ValueError):
+        return settings.query_default_rows
+    return max(1, min(wanted, settings.query_max_rows))
 
 
 def _file_response(df, fmt: str, basename: str) -> Response:
@@ -477,6 +486,8 @@ def _console_context(user: str, access: store.Access | None = None, **extra) -> 
         result=None,
         active_tab=active_tab,
         can_query=access.allows(store.FEATURE, "sql_console"),
+        limit=settings.query_default_rows,
+        max_rows=settings.query_max_rows,
     )
     context.update(extra)
     return context
@@ -525,6 +536,10 @@ def datasets_index(
         context["db_error"] = "Could not read the dataset catalog — check the server logs."
         return templates.TemplateResponse(request, "datasets.html", context, status_code=502)
 
+    # Per-dataset grants. Filtered rather than merely un-clickable: a table
+    # name is itself information, so an ungranted dataset is never listed.
+    all_datasets = [d for d in all_datasets if access.allows(store.DATASET, d.name)]
+
     needle = q.strip().lower()
     matched = [
         d
@@ -551,6 +566,10 @@ def dataset_detail(
     """Preview, catalog, description and example queries for one dataset."""
     if not _may_browse_datasets(access):
         return _forbidden(request, user, "You don't have access to the dataset catalog.")
+    # 403 before the catalog lookup, so an ungranted name can't be probed for
+    # existence by telling 403 apart from 404.
+    if not access.allows(store.DATASET, name):
+        return _forbidden(request, user, "You don't have access to that dataset.")
 
     def _catalog_failure(message: str, status: int):
         context = _shell_context(
@@ -615,6 +634,7 @@ def run_query(
     request: Request,
     sql: str = Form(...),
     database: str = Form(...),
+    limit: str = Form(""),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -626,7 +646,8 @@ def run_query(
         logger.warning("%s attempted a query against ungranted database %r", user, database)
         return _forbidden(request, user, f"You don't have access to {database!r}.")
 
-    context = _console_context(user, access, sql=sql, database=database)
+    max_rows = _row_limit(limit)
+    context = _console_context(user, access, sql=sql, database=database, limit=max_rows)
 
     # Only accept a database the server actually reported (when we have a list).
     if context["databases"] and database not in context["databases"]:
@@ -634,7 +655,7 @@ def run_query(
         return templates.TemplateResponse(request, "console.html", context, status_code=400)
 
     try:
-        result = db.execute(sql, database)
+        result = db.execute(sql, database, max_rows=max_rows)
     except Exception as exc:
         # This is a trusted, login-gated internal console, so showing the real
         # DB error is the useful behavior (unlike report export).
@@ -643,13 +664,19 @@ def run_query(
         return templates.TemplateResponse(request, "console.html", context, status_code=400)
 
     if result.returns_rows:
-        shown = result.rows[:QUERY_DISPLAY_LIMIT]
+        # Two separate caps. `max_rows` bounded what left the database and is
+        # what Export gets; `query_display_rows` bounds what we send to the
+        # browser, because 100k rows of HTML locks the tab.
+        shown = result.rows[: settings.query_display_rows]
         context["result"] = {
             "columns": result.columns,
             "rows": [[None if v is None else str(v) for v in row] for row in shown],
             "total": result.rowcount,
             "shown": len(shown),
-            "truncated": result.rowcount > QUERY_DISPLAY_LIMIT,
+            "display_capped": result.rowcount > settings.query_display_rows,
+            "hit_limit": result.truncated,
+            "limit": max_rows,
+            "page_size": settings.query_page_size,
         }
     else:
         context["message"] = f"OK — {result.rowcount} row(s) affected."
@@ -662,6 +689,7 @@ def export_query(
     format: str = "csv",
     sql: str = Form(...),
     database: str = Form(...),
+    limit: str = Form(""),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -685,7 +713,7 @@ def export_query(
         return _error(f"Unknown database: {database!r}.")
 
     try:
-        result = db.execute(sql, database)
+        result = db.execute(sql, database, max_rows=_row_limit(limit))
     except Exception as exc:
         logger.exception("Ad-hoc query export failed")
         return _error(f"Query failed: {exc}")
@@ -717,7 +745,7 @@ def export_report(
         logger.warning("%s attempted ungranted report %r", user, key)
         return _forbidden(request, user, "You don't have access to that report.")
     try:
-        df = reports.get_report_df(key)
+        df = reports.get_report_df(key, max_rows=settings.query_max_rows)
     except KeyError:
         context = _console_context(
             user, access, error=f"Unknown report: {key!r}.", active_tab="reports"
@@ -1420,15 +1448,17 @@ def admin_toggle_active(
     )
 
 
-@app.get("/admin/roles", response_class=HTMLResponse)
-def admin_roles(request: Request, user: str = Depends(require_admin)):
+def _grantable() -> dict[str, list[str]]:
+    """Every existing key, per resource type — the checkboxes on the roles screen.
+
+    Must return an entry for every RESOURCE_TYPE: a type missing here renders
+    a section with no checkboxes, so the permission cannot be granted and any
+    existing grant is dropped the moment that section is saved. Each source is
+    caught separately so one dead source costs one section, not the screen.
+    """
     # Every database on the instance, so grants are picked from a list rather
     # than typed. This is the one place the full list is still shown, and it is
     # admin-only by construction.
-    roles = store.list_roles()
-
-    # Every grantable resource, gathered per type. Admin-only by construction,
-    # so this is the one screen that still sees the full instance.
     live_databases: list[str] = []
     try:
         live_databases = db.list_databases()
@@ -1436,7 +1466,9 @@ def admin_roles(request: Request, user: str = Depends(require_admin)):
         logger.exception("Could not list databases for the roles screen")
 
     try:
-        report_keys = [r.key for r in reports.load_reports()]
+        # all_reports(), not load_reports(): a report created in the UI is just
+        # as grantable as one defined in reports.toml.
+        report_keys = [r.key for r in reports.all_reports()]
     except Exception:
         logger.exception("Could not load reports for the roles screen")
         report_keys = []
@@ -1444,17 +1476,34 @@ def admin_roles(request: Request, user: str = Depends(require_admin)):
     try:
         chart_slugs = [c.slug for c in store.list_charts()]
         dashboard_slugs = [d.slug for d in store.list_dashboards()]
+        folder_slugs = [f.slug for f in store.list_folders()]
     except Exception:
-        logger.exception("Could not load charts/dashboards for the roles screen")
-        chart_slugs, dashboard_slugs = [], []
+        logger.exception("Could not load charts/dashboards/folders for the roles screen")
+        chart_slugs, dashboard_slugs, folder_slugs = [], [], []
 
-    live = {
+    # Separate from the block above: the catalog is a live query against the
+    # warehouse, so it fails independently of anything in the app database.
+    try:
+        dataset_names = [d.name for d in datasets.list_datasets()]
+    except Exception:
+        logger.exception("Could not list datasets for the roles screen")
+        dataset_names = []
+
+    return {
         store.DATABASE: live_databases,
+        store.DATASET: dataset_names,
         store.REPORT: report_keys,
         store.CHART: chart_slugs,
         store.DASHBOARD: dashboard_slugs,
+        store.FOLDER: folder_slugs,
         store.FEATURE: list(store.FEATURE_KEYS),
     }
+
+
+@app.get("/admin/roles", response_class=HTMLResponse)
+def admin_roles(request: Request, user: str = Depends(require_admin)):
+    roles = store.list_roles()
+    live = _grantable()
 
     # Union in whatever is already granted. A grant naming something that no
     # longer exists would otherwise have no checkbox, and since each section
@@ -1532,6 +1581,291 @@ def admin_delete_role(request: Request, role_id: int, user: str = Depends(requir
     store.delete_role(role_id)
     logger.info("Role %s deleted by %s", role_id, user)
     return RedirectResponse(request.url_for("admin_roles"), status_code=303)
+
+
+# ── reports ────────────────────────────────────────────────────────────────
+
+
+@app.get("/reports", response_class=HTMLResponse)
+def reports_index(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Reports on their own page.
+
+    They used to be a second pane inside the query console, which stopped
+    making sense once they became things you create and manage rather than a
+    fixed list bolted onto the SQL editor.
+    """
+    visible = []
+    try:
+        visible = [r for r in reports.all_reports() if access.allows(store.REPORT, r.key)]
+    except Exception:
+        logger.exception("Could not load reports")
+
+    folders: dict[str, list[str]] = {}
+    if store.available():
+        try:
+            for f in store.list_folders():
+                for key in f.keys(store.REPORT):
+                    folders.setdefault(key, []).append(f.name)
+        except Exception:
+            logger.exception("Could not read folders for the reports page")
+
+    context = _shell_context(
+        user,
+        "reports",
+        access,
+        reports=visible,
+        folders=folders,
+        can_build=access.allows(store.FEATURE, "report_builder") and store.available(),
+    )
+    return templates.TemplateResponse(request, "reports.html", context)
+
+
+def _report_form_context(user: str, access: store.Access, **extra) -> dict:
+    databases: list[str] = []
+    try:
+        databases = access.filter(store.DATABASE, db.list_databases())
+    except Exception:
+        logger.exception("Could not list databases for the report builder")
+    context = _shell_context(
+        user,
+        "reports",
+        access,
+        databases=databases,
+        report=None,
+        slug="",
+        title="",
+        description="",
+        source_db=databases[0] if databases else "",
+        sql="",
+        preview=None,
+        max_rows=settings.query_max_rows,
+    )
+    context.update(extra)
+    return context
+
+
+@app.get("/reports/new", response_class=HTMLResponse)
+def report_new(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not store.available():
+        return _forbidden(request, user, "The app database is not configured.", 503)
+    if not access.allows(store.FEATURE, "report_builder"):
+        return _forbidden(request, user, "You don't have access to create reports.")
+    return templates.TemplateResponse(
+        request, "report_builder.html", _report_form_context(user, access)
+    )
+
+
+@app.post("/reports/preview", response_class=HTMLResponse)
+def report_preview(
+    request: Request,
+    sql: str = Form(...),
+    source_db: str = Form(...),
+    title: str = Form(""),
+    description: str = Form(""),
+    slug: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Run the report's SQL so you can see it before saving."""
+    if not access.allows(store.FEATURE, "report_builder"):
+        return _forbidden(request, user, "You don't have access to create reports.")
+    if not access.allows(store.DATABASE, source_db):
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+
+    context = _report_form_context(
+        user,
+        access,
+        sql=sql,
+        source_db=source_db,
+        title=title,
+        description=description,
+        slug=slug,
+    )
+    try:
+        # Small ceiling: this is a look before saving, not the export.
+        result = db.execute(sql, source_db, max_rows=settings.query_page_size)
+    except Exception as exc:
+        logger.exception("Report preview failed")
+        context["error"] = f"Query failed: {exc}"
+        return templates.TemplateResponse(request, "report_builder.html", context, status_code=400)
+    if not result.returns_rows:
+        context["error"] = "That statement returns no rows, so it can't be a report."
+        return templates.TemplateResponse(request, "report_builder.html", context, status_code=400)
+    context["preview"] = {
+        "columns": result.columns,
+        "rows": [[None if v is None else str(v) for v in row] for row in result.rows],
+        "more": result.truncated,
+    }
+    return templates.TemplateResponse(request, "report_builder.html", context)
+
+
+@app.post("/reports/save")
+def report_save(
+    request: Request,
+    sql: str = Form(...),
+    source_db: str = Form(...),
+    title: str = Form(...),
+    description: str = Form(""),
+    slug: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not store.available():
+        return _forbidden(request, user, "The app database is not configured.", 503)
+    if not access.allows(store.FEATURE, "report_builder"):
+        return _forbidden(request, user, "You don't have access to create reports.")
+    if not access.allows(store.DATABASE, source_db):
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+
+    title = title.strip() or "Untitled report"
+    # Editing keeps the slug; a new report gets one that isn't taken. File
+    # reports are never editable here, so their keys can't be clobbered.
+    if not slug:
+        taken = {r.key for r in reports.load_reports()}
+        slug = store.unique_slug(
+            title, exists=lambda s: True if s in taken else store.get_report(s)
+        )
+    saved = store.save_report(
+        store.Report(
+            slug=slug,
+            title=title,
+            description=description,
+            source_db=source_db,
+            sql=sql,
+            created_by=user,
+        )
+    )
+    logger.info("Report %r saved by %s", saved.slug, user)
+    return RedirectResponse(request.url_for("reports_index"), status_code=303)
+
+
+@app.get("/reports/{slug}/edit", response_class=HTMLResponse)
+def report_edit(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not store.available():
+        return _forbidden(request, user, "The app database is not configured.", 503)
+    if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
+        return _forbidden(request, user, "You don't have access to that report.")
+    saved = store.get_report(slug)
+    if saved is None:
+        # Either unknown, or a reports.toml report — those are edited in git.
+        return _forbidden(
+            request,
+            user,
+            "That report is defined in reports.toml and is edited in git, not here.",
+            404,
+        )
+    return templates.TemplateResponse(
+        request,
+        "report_builder.html",
+        _report_form_context(
+            user,
+            access,
+            slug=saved.slug,
+            title=saved.title,
+            description=saved.description,
+            source_db=saved.source_db,
+            sql=saved.sql,
+        ),
+    )
+
+
+@app.post("/reports/{slug}/delete")
+def report_delete(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
+        return _forbidden(request, user, "You don't have access to that report.")
+    if store.available():
+        store.delete_report(slug)
+        logger.info("Report %r deleted by %s", slug, user)
+    return RedirectResponse(request.url_for("reports_index"), status_code=303)
+
+
+@app.get("/admin/folders", response_class=HTMLResponse)
+def admin_folders(request: Request, user: str = Depends(require_admin)):
+    """Folders — the unit a team gets granted.
+
+    Membership is edited here; granting a folder to a role happens on the Roles
+    tab like any other resource. That split is deliberate: what's *in* a folder
+    is a content decision, who gets it is an access decision.
+    """
+    folders = store.list_folders()
+
+    # Same source as the roles screen, minus the types you can't put in a
+    # folder (a folder holds content, not databases, features or other folders).
+    grantable = _grantable()
+    options: dict[str, list[str]] = {t: list(grantable[t]) for t in store.FOLDERABLE}
+
+    # Same rule as the roles screen: never hide an existing member just because
+    # the underlying thing has gone, or saving would silently drop it.
+    stale: dict[str, list[str]] = {}
+    for rtype in store.FOLDERABLE:
+        current = {k for f in folders for k in f.keys(rtype)}
+        stale[rtype] = sorted(current - set(options[rtype])) if options[rtype] else []
+        options[rtype] = sorted(set(options[rtype]) | current)
+
+    context = _shell_context(
+        user,
+        "admin",
+        admin_tab="folders",
+        folders=folders,
+        options=options,
+        stale=stale,
+        folderable=store.FOLDERABLE,
+        resource_labels=store.RESOURCE_LABELS,
+        is_admin=True,
+    )
+    return templates.TemplateResponse(request, "admin_folders.html", context)
+
+
+@app.post("/admin/folders")
+def admin_create_folder(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    user: str = Depends(require_admin),
+):
+    if store.create_folder(name, description, created_by=user) is None:
+        logger.info("Folder %r not created (empty or duplicate), by %s", name, user)
+    return RedirectResponse(request.url_for("admin_folders"), status_code=303)
+
+
+@app.post("/admin/folders/{folder_id}/items")
+def admin_set_folder_items(
+    request: Request,
+    folder_id: int,
+    resource_type: str = Form(...),
+    keys: list[str] = Form(default=[]),
+    user: str = Depends(require_admin),
+):
+    if not store.set_folder_items(folder_id, resource_type, keys):
+        logger.warning("Rejected folder update %s/%r by %s", folder_id, resource_type, user)
+    else:
+        logger.info("Folder %s %s set to %r by %s", folder_id, resource_type, keys, user)
+    return RedirectResponse(request.url_for("admin_folders"), status_code=303)
+
+
+@app.post("/admin/folders/{folder_id}/delete")
+def admin_delete_folder(request: Request, folder_id: int, user: str = Depends(require_admin)):
+    store.delete_folder(folder_id)
+    logger.info("Folder %s deleted by %s", folder_id, user)
+    return RedirectResponse(request.url_for("admin_folders"), status_code=303)
 
 
 @app.get("/healthz")

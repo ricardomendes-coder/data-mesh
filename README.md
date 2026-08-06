@@ -18,7 +18,11 @@ server, one login. The **database** is chosen per request:
 
 - **Run a query**: pick a database from the dropdown (auto-discovered from the
   server via `pg_database`) and run whatever SQL you type.
-- **Reports**: each report in `reports.toml` names its own database and SQL.
+- **Reports**: each report names its own database and SQL.
+
+One login reaching every database is the point — it's why there's no connection
+to configure per database. It also means **permissions, not credentials, are the
+security boundary here**; see [Users, roles and permissions](#users-roles-and-permissions).
 
 Connections are opened and disposed per request, so there's no long-lived
 connection to go stale.
@@ -156,22 +160,40 @@ kind of thing to protect is a constant rather than a migration.
 | Type | Key is | Example |
 | --- | --- | --- |
 | `database` | a database name | `analytics` |
-| `report` | a report key from `reports.toml` | `rocketlane_projects` |
+| `dataset` | a table, view or matview name | `bank_slips` |
+| `report` | a report key | `rocketlane_projects` |
 | `chart` | a chart slug | `capturas-por-dia` |
 | `dashboard` | a dashboard slug | `ops` |
+| `folder` | a folder slug — expands to its contents | `financeiro` |
 | `feature` | a capability | `sql_console` |
 
 `*` as the key means *every resource of that type, including ones created
-later*. `('*','*')` means everything — that's what the seeded **Admin** role
-holds. A user flagged `is_admin` on the Users tab also reaches everything.
+later*. `('*','*')` means everything. A user flagged `is_admin` on the Users tab
+also reaches everything.
 
 **Features** gate a capability rather than an object, and they stack with object
 grants. Running a query needs `sql_console` **and** a grant for that specific
-database. The four are `sql_console`, `chart_builder`, `dashboard_builder`,
-`dataset_catalog`.
+database. The five are `sql_console`, `chart_builder`, `dashboard_builder`,
+`report_builder`, `dataset_catalog`.
 
 A user's access is the **union of their roles' grants**, resolved once per
 request.
+
+### Folders — granting a team its things
+
+Granting a team fifteen datasets, four charts and two dashboards one checkbox at
+a time doesn't survive contact with a growing warehouse: every new table means
+editing every role that should see it. A **folder** is the indirection. Put the
+team's datasets, reports, charts and dashboards in one on **Admin → Folders**,
+then grant the *folder* to their role.
+
+When access is resolved, a folder grant **expands to its contents** — so adding
+a dataset to the folder later extends every role holding it, with no role edit.
+Two properties that follow, and are worth knowing:
+
+- A folder only carries the four content types. **`database` is never granted
+  through a folder** — the database grant stays an explicit, separate decision.
+- Deleting a folder revokes the access it conferred; the items themselves stay.
 
 ### Where it's enforced
 
@@ -181,12 +203,15 @@ too, but that's cosmetic:
 | Route | Requires |
 | --- | --- |
 | `POST /query`, `POST /query/export` | `sql_console` + the target database |
-| `GET /report/{key}/export` | that report |
-| `GET /datasets`, `/datasets/{name}` | `dataset_catalog` + the catalog's database |
+| `GET /reports`, `/report/{key}/export` | filtered by report; 403 on an ungranted key |
+| `POST /reports/new`, `/reports/save`, `/reports/{slug}/delete` | `report_builder` + the source database |
+| `GET /datasets` | `dataset_catalog` + the catalog's database; **filtered by dataset** |
+| `GET /datasets/{name}`, its preview | that dataset |
 | `GET /charts`, `/charts/{slug}` | filtered by chart; 403 on an ungranted slug |
 | `POST /charts/new`, `/charts/save` | `chart_builder` + the source database |
 | `GET /dashboards`, `/dashboards/{slug}` | filtered by dashboard |
 | dashboard edit + all layout mutations | `dashboard_builder` + that dashboard |
+| everything under `/admin` | `is_admin`, re-read from the database per request |
 
 Two consequences worth knowing:
 
@@ -209,10 +234,11 @@ nothing, and a deactivated user gets nothing even if flagged admin.
 
 ### The admin panel
 
-`/admin` (administrators only) has **Users** — roles per user, grant/revoke
-admin, deactivate — and **Roles & permissions**, where each role has a
-collapsible section per resource type. Each section is its own form, so saving
-Databases can't clear Charts.
+`/admin` (administrators only) has three tabs: **Users** — the list, linking to
+a page per user where roles are edited and admin is granted or revoked;
+**Roles & permissions**, where each role has a collapsible section per resource
+type; and **Folders**. Each section is its own form, so saving Databases can't
+clear Charts.
 
 - **Admin is re-checked on every admin request**, not read from the session.
   `session['is_admin']` exists only so the sidebar link doesn't cost a query per
@@ -220,7 +246,11 @@ Databases can't clear Charts.
 - **The last administrator can't be removed**, via the panel or `manage.py`.
 - **Stale grants are preserved.** A grant naming something that no longer exists
   still appears (struck through) rather than vanishing — each section posts its
-  full set, so an invisible grant would be silently dropped.
+  full set, so an invisible grant would be silently dropped. For the same
+  reason, *every* resource type must offer checkboxes: a type with no options
+  renders an empty section that looks like "nothing exists yet" while quietly
+  wiping that type's grants on save. `test_every_resource_type_is_grantable`
+  pins this.
 
 Break-glass from a shell:
 
@@ -347,10 +377,18 @@ A few things worth knowing:
 - **Previews carry a statement timeout** (`DATASET_TIMEOUT_MS`, default 10s) so
   a scan of a large table can't hang the page.
 
-## Defining reports
+## Reports
 
-Reports live in `reports.toml`. Each `[[report]]` names a `database` and its SQL
-(a `sql_file` path or inline `sql`):
+A report is a saved query with a download button, on its own **Reports** tab.
+They come from two places and the tab shows both:
+
+**From the UI.** *New report* takes a title, a database and SQL, previews it,
+and saves it to `report_hub`. This is the normal path — writing SQL in the
+console and keeping it needs no deploy, and needs the `report_builder` feature.
+
+**From git.** `reports.toml` still works, for reports that should be reviewed
+like code. Each `[[report]]` names a `database` and its SQL (a `sql_file` path
+or inline `sql`):
 
 ```toml
 [[report]]
@@ -360,9 +398,28 @@ database = "rocketlane"
 sql_file = "sql/rocketlane_projects.sql"
 ```
 
-Both `reports.toml` and the `sql/` directory are mounted into the container (see
-`docker-compose.yml`) and read fresh on each export, so edits take effect
-immediately — no rebuild or restart needed.
+These are marked `IN GIT` on the tab and have no Edit or Delete button — the
+file is the source of truth. On a key collision the file wins, so a UI report
+can never shadow a reviewed one. Both `reports.toml` and `sql/` are mounted into
+the container (see `docker-compose.yml`) and read fresh on each export, so edits
+take effect immediately — no rebuild or restart.
+
+## Query results: the row limit
+
+The console's **rows** box is the fetch ceiling, editable per query, clamped to
+`QUERY_MAX_ROWS` (default 100,000). It is enforced with a **server-side cursor**
+— `stream_results` plus `fetchmany(limit + 1)` — so a `SELECT *` on a
+hundred-million-row table reads `limit + 1` rows, not the table. The `+ 1` is
+how the page can say *"stopped at the limit"* rather than leaving you unsure
+whether that's all the data.
+
+Two further bounds sit on top:
+
+- `QUERY_DISPLAY_ROWS` (2,000) caps what is rendered as HTML. Beyond it the page
+  says so, and the CSV/Excel export still carries every fetched row.
+- `QUERY_PAGE_SIZE` (50) pages what's rendered, client-side. Every row is in the
+  DOM and the pager only toggles visibility, so without JS you get all of them —
+  the old behaviour, not a broken one.
 
 ## Adding more users
 
@@ -474,12 +531,15 @@ app/
   auth.py       login dependency + session start/end
   superset_session.py  delegated auth: identity from Superset's /api/v1/me/
   oidc.py       Keycloak OIDC client and claim mapping (AUTH_MODE=sso)
+  store.py      the app database: migrations, users/roles/permissions,
+                charts, dashboards, reports, folders — all app state
   datasets.py   live catalog + datasets.toml curation layer
   users.py      JSON-backed user store for the break-glass login
   db.py         direct SQLAlchemy connection: run_query / execute / list_databases
-  reports.py    manifest-driven reports + CSV/Excel serialization
+  reports.py    reports from the database merged with reports.toml
   config.py     settings from environment
-  templates/    login + dashboard pages
+  templates/    every page (server-rendered Jinja, no build step)
+  static/       vendored Chart.js + the handful of small scripts
 reports.toml    report definitions (database + SQL per report)
 datasets.toml   dataset folders, descriptions, example queries, hide list
 sql/            report SQL files (report.sql is the connectivity check)

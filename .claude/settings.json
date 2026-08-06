@@ -12,7 +12,16 @@
       "Bash(rm -f adm-*.png)",
       "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1440,760 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/adm-users.png http://127.0.0.1:8103/__adminusers)",
       "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1440,1000 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/adm-roles.png http://127.0.0.1:8103/__adminroles)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=4000 --window-size=1440,900 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/new-query2.png http://127.0.0.1:8107/__query)",
+      "Bash(awk '{print \"  \" $NF}')",
+      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=4000 --window-size=1440,1560 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/new-query3.png http://127.0.0.1:8107/__query)",
+      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=4000 --window-size=1440,1100 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/n-roles.png http://127.0.0.1:8107/__roles)",
+      "Bash(python -)",
+      "Bash(kill 37393)",
+      "Bash(google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=5000 --window-size=1440,1500 --screenshot=/tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/n-roles4.png http://127.0.0.1:8107/__roles)",
+      "Bash(QUERY_MAX_ROWS=777 /tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/venv/bin/python -c ' *)",
+      "Bash(kill 49986)"
     ]
   }
 }

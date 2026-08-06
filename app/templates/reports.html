@@ -1,0 +1,53 @@
+{% extends "_shell.html" %}
+{% block page_title %}Reports{% endblock %}
+{% block page_sub %}{{ reports|length }} available{% endblock %}
+{% block topbar_extra %}
+{% if can_build %}
+<a class="bi-btn" href="{{ url_for('report_new') }}">
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+  New report
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if reports %}
+<div class="bi-cards">
+  {% for r in reports %}
+  <div class="bi-card">
+    <div class="bi-card-ic">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+    </div>
+    <div class="bi-card-nm">{{ r.title }}</div>
+    <div class="bi-card-sub">
+      <code>{{ r.database }}</code>
+      {# A file report is under git review and can't be edited here — worth
+         showing, so nobody hunts for an edit button that shouldn't exist. #}
+      {% if not r.editable %}<span class="bi-kind bi-kind-view" title="Defined in reports.toml">in git</span>{% endif %}
+      {% for f in folders.get(r.key, []) %}<span class="bi-rolepill">{{ f }}</span>{% endfor %}
+      {% if r.description %}<div class="bi-sub">{{ r.description|inline_code }}</div>{% endif %}
+    </div>
+    <div class="bi-card-meta">
+      <a class="bi-btn sm" href="{{ url_for('export_report', key=r.key) }}?format=csv">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1v8M4 6l3 3 3-3M2 12h10"/></svg>
+        CSV
+      </a>
+      <a class="bi-btn sm ghost" href="{{ url_for('export_report', key=r.key) }}?format=xlsx">Excel</a>
+      {% if can_build and r.editable %}
+      <a class="bi-btn sm ghost" href="{{ url_for('report_edit', slug=r.key) }}">Edit</a>
+      <form method="post" action="{{ url_for('report_delete', slug=r.key) }}"
+            onsubmit="return confirm('Delete the {{ r.title }} report?')">
+        <button class="bi-btn sm ghost" type="submit">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bi-empty-lg">
+  No reports you can reach.
+  {% if can_build %}<a href="{{ url_for('report_new') }}">Create one</a> from a SQL query.{% endif %}
+</div>
+{% endif %}
+{% endblock %}

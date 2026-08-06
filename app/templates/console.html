@@ -1,19 +1,7 @@
 {% extends "_shell.html" %}
 {% block content %}
 
-<div class="bi-panel-tabs">
-  <button class="bi-ptab {{ 'active' if active_tab != 'reports' else '' }}" data-tab="query" type="button">
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
-    Query
-  </button>
-  <button class="bi-ptab {{ 'active' if active_tab == 'reports' else '' }}" data-tab="reports" type="button">
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
-    Reports
-  </button>
-</div>
-
-<!-- ── QUERY PANE ── -->
-<section class="pane {{ 'active' if active_tab != 'reports' else '' }}" data-pane="query">
+<section>
   {% if not can_query %}
   <div class="bi-empty-lg">
     You don't have access to the query console. Ask an administrator for the
@@ -35,6 +23,13 @@
         <span class="bi-editor-dot"></span>
         <span class="bi-editor-tag">query.sql</span>
         <span class="bi-editor-hint">⌘/Ctrl + Enter to run</span>
+        {# Bounds what leaves the database, not just what's displayed. Capped
+           server-side at max_rows however this field is edited. #}
+        <label class="bi-limit" title="Maximum rows to fetch (ceiling {{ '{:,}'.format(max_rows) }})">
+          rows
+          <input type="number" name="limit" min="1" max="{{ max_rows }}" step="100"
+                 value="{{ limit }}">
+        </label>
         <button class="bi-btn sm" type="submit" id="run-btn" formaction="{{ url_for('run_query') }}">
           <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor"><path d="M4 3l7 4-7 4z"/></svg>
           Run
@@ -50,10 +45,29 @@
 
   {% if result %}
   <div class="bi-result-meta">
-    {{ result.total }} row(s){% if result.truncated %} — showing the first {{ result.shown }}{% endif %}
+    <b>{{ '{:,}'.format(result.total) }}</b> row(s) fetched
+    {%- if result.hit_limit %} — stopped at the {{ '{:,}'.format(result.limit) }}-row limit;
+      raise it or add your own <code>LIMIT</code>/<code>WHERE</code>
+    {%- endif %}
+    {%- if result.display_capped %} · showing the first
+      {{ '{:,}'.format(result.shown) }} here, all {{ '{:,}'.format(result.total) }} in the export
+    {%- endif %}
   </div>
-  <div class="bi-restbl-wrap">
-    <table class="bi-restbl">
+
+  {# Paged rather than dumped: a few thousand rows of <tr> makes the page
+     unusable, so the rows live in the DOM but only one page is displayed.
+     The pager sits above the table: the table is capped at 60vh so its own
+     bottom edge is usually below the fold, and a pager you have to scroll
+     twice to reach may as well not exist. #}
+  <div class="bi-pager" id="result-pager" hidden>
+    <button class="bi-btn sm ghost" type="button" data-page="first">&laquo;</button>
+    <button class="bi-btn sm ghost" type="button" data-page="prev">Prev</button>
+    <span class="bi-pager-info"></span>
+    <button class="bi-btn sm ghost" type="button" data-page="next">Next</button>
+    <button class="bi-btn sm ghost" type="button" data-page="last">&raquo;</button>
+  </div>
+  <div class="bi-restbl-wrap bi-restbl-paged">
+    <table class="bi-restbl" id="result-table" data-page-size="{{ result.page_size }}">
       <thead>
         <tr>{% for c in result.columns %}<th>{{ c }}</th>{% endfor %}</tr>
       </thead>
@@ -64,33 +78,8 @@
       </tbody>
     </table>
   </div>
+  <script src="{{ url_for('static', path='table-pager.js') }}"></script>
   {% endif %}
-  {% endif %}
-</section>
-
-<!-- ── REPORTS PANE ── -->
-<section class="pane {{ 'active' if active_tab == 'reports' else '' }}" data-pane="reports">
-  {% if reports %}
-  <div class="bi-cards">
-    {% for report in reports %}
-    <div class="bi-card">
-      <div class="bi-card-ic">
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
-      </div>
-      <div class="bi-card-nm">{{ report.title }}</div>
-      <div class="bi-card-sub">database: <code>{{ report.database }}</code></div>
-      <div class="bi-card-meta">
-        <a class="bi-btn sm" href="{{ url_for('export_report', key=report.key) }}?format=csv">
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1v8M4 6l3 3 3-3M2 12h10"/></svg>
-          CSV
-        </a>
-        <a class="bi-btn sm ghost" href="{{ url_for('export_report', key=report.key) }}?format=xlsx">Excel</a>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="bi-empty-lg">No reports defined. Add one to <code>reports.toml</code>.</div>
   {% endif %}
 </section>
 

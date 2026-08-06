@@ -302,6 +302,21 @@
     .bi-icobtn:hover{border-color:var(--g-300);color:var(--title);background:#FCFCFD;}
     .bi-icobtn.danger:hover{border-color:#FBD9C2;color:var(--danger);background:#FFF6F0;}
 
+    /* ── query limit + result paging ── */
+    .bi-limit{display:inline-flex;align-items:center;gap:.35rem;font-size:.72rem;color:var(--muted);margin-left:.2rem;}
+    .bi-limit input{width:82px;height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .35rem;font-family:var(--mono);font-size:.74rem;color:var(--title);background:var(--surface);outline:none;}
+    .bi-limit input:focus{border-color:var(--orange);box-shadow:var(--ring);}
+    /* Bounded height so a result never pushes the page to an absurd length */
+    .bi-restbl-paged{max-height:60vh;}
+    .bi-pager{display:flex;align-items:center;gap:.4rem;margin:0 0 .55rem;flex-wrap:wrap;}
+    .bi-pager-info{font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums;margin:0 .4rem;}
+    .bi-pager .bi-btn[disabled]{opacity:.4;cursor:default;}
+    .bi-pager .bi-btn[disabled]:hover{border-color:var(--border-strong);background:var(--surface);color:var(--body);}
+
+    .bi-tworow{display:grid;grid-template-columns:1fr 260px;gap:.9rem;align-items:end;}
+    @media(max-width:760px){.bi-tworow{grid-template-columns:1fr;}}
+    .bi-tworow .bi-fld,.bi-fld-wide{max-width:none;}
+
     /* ── admin ── */
     .bi-admintbl td{white-space:normal;vertical-align:middle;padding:.6rem .75rem;}
     .bi-admintbl .bi-nowrap{white-space:nowrap;}

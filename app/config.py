@@ -75,6 +75,19 @@ class Settings(BaseSettings):
     initial_admin_user: str | None = None
     initial_admin_password: str | None = None
 
+    # ---- Query console limits ----
+    # Hard ceiling on rows fetched by an ad-hoc query. A user can ask for less
+    # (there's a box in the console) but never more — without it, one
+    # `SELECT * FROM anticipation` pulls 1.8M rows into the app's memory.
+    query_max_rows: int = 100_000
+    # What the limit box starts at.
+    query_default_rows: int = 1_000
+    # Rows actually sent to the browser. The rest are reachable via Export:
+    # embedding 100k rows would produce tens of MB of HTML and lock the tab.
+    query_display_rows: int = 2_000
+    # Rows per page in the result table.
+    query_page_size: int = 50
+
     # ---- Reports ----
     # Manifest declaring the available reports (see reports.toml).
     reports_file: str = "reports.toml"

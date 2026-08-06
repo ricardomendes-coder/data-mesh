@@ -1,0 +1,74 @@
+{% extends "_shell.html" %}
+{% block page_title %}{{ 'Edit report' if slug else 'New report' }}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('reports_index') }}">Reports</a> /
+  {{ 'editing ' ~ slug if slug else 'from a SQL query' }}
+{% endblock %}
+
+{% block content %}
+{# One form, two actions: Preview re-renders this page with rows, Save stores
+   it. Same fields either way, so nothing typed is lost when you preview. #}
+<form method="post" id="reportform">
+  <input type="hidden" name="slug" value="{{ slug }}">
+
+  <div class="bi-tworow">
+    <div class="bi-fld">
+      <label for="title">Title</label>
+      <input id="title" name="title" value="{{ title }}" required
+             placeholder="e.g. Invoices awaiting approval">
+    </div>
+    <div class="bi-fld">
+      <label for="source_db">Database</label>
+      <select id="source_db" name="source_db" required>
+        {% for name in databases %}
+        <option value="{{ name }}" {% if name == source_db %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="bi-fld bi-fld-wide">
+    <label for="description">Description</label>
+    <input id="description" name="description" value="{{ description }}"
+           placeholder="What it contains, and its grain (optional)">
+  </div>
+
+  <div class="bi-editor">
+    <div class="bi-editor-bar">
+      <span class="bi-editor-dot"></span>
+      <span class="bi-editor-tag">report.sql</span>
+      <span class="bi-editor-hint">must return rows — exports run this as-is</span>
+      <button class="bi-btn sm ghost" type="submit" formaction="{{ url_for('report_preview') }}">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor"><path d="M4 3l7 4-7 4z"/></svg>
+        Preview
+      </button>
+      <button class="bi-btn sm" type="submit" formaction="{{ url_for('report_save') }}">
+        {{ 'Save changes' if slug else 'Save report' }}
+      </button>
+    </div>
+    <textarea class="bi-ta" name="sql" spellcheck="false" required
+      placeholder="SELECT ...">{{ sql }}</textarea>
+  </div>
+</form>
+
+{% if preview %}
+<div class="bi-result-meta">
+  Preview — first {{ preview.rows|length }} row(s){% if preview.more %}, more available{% endif %}
+</div>
+<div class="bi-restbl-wrap">
+  <table class="bi-restbl">
+    <thead><tr>{% for c in preview.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in preview.rows %}
+      <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="bi-hint">
+  Exports fetch up to {{ '{:,}'.format(max_rows) }} rows. Reports defined in
+  <code>reports.toml</code> stay in git and aren't editable here.
+</p>
+{% endblock %}

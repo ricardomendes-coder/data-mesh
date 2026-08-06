@@ -81,30 +81,53 @@ class QueryResult:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple] = field(default_factory=list)
     rowcount: int = -1
+    # True when the statement had more rows than `max_rows` allowed us to take.
+    # `rowcount` is then the number fetched, not the number that existed — we
+    # deliberately never count the full set, since that means running it twice.
+    truncated: bool = False
 
     def to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self.rows, columns=self.columns)
 
 
-def execute(sql: str, database: str | None = None) -> QueryResult:
+def execute(sql: str, database: str | None = None, max_rows: int | None = None) -> QueryResult:
     """Run an arbitrary SQL statement against `database`.
 
     Row-returning statements come back as columns + rows; write/DDL statements
     are committed and reported via rowcount. Whatever the DB rejects is raised
     to the caller so the console can show the real error.
+
+    `max_rows` is a hard ceiling on what is pulled into memory. It is enforced
+    with a server-side cursor (`stream_results`) plus fetchmany, NOT by wrapping
+    the SQL in an outer LIMIT: wrapping breaks on trailing semicolons, multiple
+    statements and non-SELECTs, and a user could defeat it anyway. Streaming
+    means an unbounded `SELECT *` over a 1.8M-row table transfers only the rows
+    we actually take.
     """
     engine = _engine(database)
     try:
         with engine.connect() as conn:
+            if max_rows is not None:
+                conn = conn.execution_options(stream_results=True, max_row_buffer=1000)
             result = conn.execute(text(sql))
             if result.returns_rows:
                 columns = list(result.keys())
-                rows = [tuple(r) for r in result.fetchall()]
+                if max_rows is None:
+                    rows = [tuple(r) for r in result.fetchall()]
+                    truncated = False
+                else:
+                    # One extra row is the truncation probe: if it comes back,
+                    # there was more than the caller allowed.
+                    batch = result.fetchmany(max_rows + 1)
+                    truncated = len(batch) > max_rows
+                    rows = [tuple(r) for r in batch[:max_rows]]
+                    result.close()
                 return QueryResult(
                     returns_rows=True,
                     columns=columns,
                     rows=rows,
                     rowcount=len(rows),
+                    truncated=truncated,
                 )
             conn.commit()
             return QueryResult(returns_rows=False, rowcount=result.rowcount)

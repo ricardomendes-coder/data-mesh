@@ -1,0 +1,83 @@
+{% extends "_shell.html" %}
+{% from "_admin_tabs.html" import admin_tabs with context %}
+{% block page_title %}Administration{% endblock %}
+{% block page_sub %}{{ folders|length }} folder{{ '' if folders|length == 1 else 's' }}{% endblock %}
+
+{% block content %}
+{{ admin_tabs('folders') }}
+
+<form class="bi-toolbar" method="post" action="{{ url_for('admin_create_folder') }}">
+  <div class="bi-search bi-search-plain">
+    <input name="name" placeholder="New folder — e.g. Finance" required>
+  </div>
+  <div class="bi-search bi-search-plain">
+    <input name="description" placeholder="Which team it's for (optional)">
+  </div>
+  <button class="bi-btn" type="submit">Create folder</button>
+</form>
+
+<p class="bi-hint">
+  A folder is what you grant to a team. Put the team's datasets, charts,
+  dashboards and reports in one here, then grant that folder to their role on
+  the <a href="{{ url_for('admin_roles') }}">Roles &amp; permissions</a> tab —
+  one grant that keeps working as you add things to the folder.
+</p>
+
+{% for f in folders %}
+<section class="bi-rolecard">
+  <div class="bi-rolecard-hd">
+    <span class="bi-rolecard-nm">{{ f.name }}</span>
+    <code>{{ f.slug }}</code>
+    <span class="bi-ds-stat">{{ f.item_count }} item{{ '' if f.item_count == 1 else 's' }}</span>
+    <div class="bi-rolecard-ctl">
+      <form method="post" action="{{ url_for('admin_delete_folder', folder_id=f.id) }}"
+            onsubmit="return confirm('Delete the {{ f.name }} folder? Roles granted it lose access to everything inside. The items themselves are kept.')">
+        <button class="bi-icobtn danger" type="submit" title="Delete folder">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </form>
+    </div>
+  </div>
+  {% if f.description %}<p class="bi-group-sub">{{ f.description }}</p>{% endif %}
+
+  {# One form per type, same as roles: saving Charts can't clear Datasets. #}
+  {% for rtype in folderable %}
+  <details class="bi-permsec" {% if f.keys(rtype) %}open{% endif %}>
+    <summary>
+      <span class="bi-permsec-tt">{{ resource_labels[rtype] }}</span>
+      <span class="bi-ds-stat">{{ f.keys(rtype)|length }} of {{ options[rtype]|length }}</span>
+    </summary>
+    <form method="post" action="{{ url_for('admin_set_folder_items', folder_id=f.id) }}">
+      <input type="hidden" name="resource_type" value="{{ rtype }}">
+      <div class="bi-permsec-actions">
+        <button class="bi-linkbtn" type="button" data-select="all">select all</button>
+        <span class="bi-sub">·</span>
+        <button class="bi-linkbtn" type="button" data-select="none">clear</button>
+      </div>
+      <div class="bi-dbgrid">
+        {% for key in options[rtype] %}
+        <label class="bi-chip-check {{ 'bi-chip-missing' if key in stale[rtype] else '' }}"
+               {% if key in stale[rtype] %}title="In this folder but no longer exists"{% endif %}>
+          <input type="checkbox" name="keys" value="{{ key }}"
+                 {% if key in f.keys(rtype) %}checked{% endif %}>
+          <span>{{ key }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% if not options[rtype] %}
+      <p class="bi-hint">Nothing of this type exists yet.</p>
+      {% endif %}
+      <button class="bi-btn sm" type="submit">Save {{ resource_labels[rtype]|lower }}</button>
+    </form>
+  </details>
+  {% endfor %}
+</section>
+{% endfor %}
+
+{% if not folders %}
+<div class="bi-empty-lg">No folders yet. Create one above.</div>
+{% endif %}
+
+{# Same select-all behaviour as the roles screen; it keys off data-select. #}
+<script src="{{ url_for('static', path='admin-roles.js') }}"></script>
+{% endblock %}

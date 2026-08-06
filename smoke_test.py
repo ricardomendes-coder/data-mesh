@@ -107,11 +107,13 @@ def test_auth_flow():
         )
         assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
 
-        # Now the dashboard is reachable and shows the user + Query/Reports tabs
+        # The console is reachable and is now *only* the query console —
+        # reports moved to their own page.
         r = client.get("/")
         assert r.status_code == 200 and "Signed in as admin" in r.text
-        assert 'data-tab="query"' in r.text and 'data-tab="reports"' in r.text, (
-            "query/reports tabs missing from dashboard"
+        assert 'id="sql"' in r.text, "query editor missing from the console"
+        assert 'data-pane="reports"' not in r.text, (
+            "the reports pane is still inside the query console"
         )
 
         # Logout clears the session. Password sessions never touch Keycloak.
@@ -543,7 +545,7 @@ def test_dashboard_pages_render():
     store.get_dashboard = lambda slug, with_items=True: dash if slug == "ops" else None
     store.list_charts = lambda: [chart]
     store.list_dashboards = lambda: [dash]
-    db_mod.execute = lambda sql, database=None: db_mod.QueryResult(
+    db_mod.execute = lambda sql, database=None, max_rows=None: db_mod.QueryResult(
         returns_rows=True,
         columns=["dia", "total"],
         rows=[("2026-07-01", 10), ("2026-07-02", 14)],
@@ -708,6 +710,65 @@ def test_admin_panel_and_gate():
             store.set_user_admin,
         ) = saved
     print("admin panel + gate: OK")
+
+
+def test_every_resource_type_is_grantable():
+    """Each permission type must offer checkboxes on the roles screen.
+
+    A type missing from _grantable() renders an empty section: the permission
+    can't be granted at all, and because each section posts its full set, an
+    existing grant of that type is wiped the moment the section is saved. This
+    shipped broken for datasets and folders, and it is invisible on the page —
+    an empty section looks exactly like "nothing exists yet".
+    """
+    from app import datasets as ds_mod
+    from app import db as db_mod
+    from app import main, reports, store
+
+    saved = (
+        db_mod.list_databases,
+        ds_mod.list_datasets,
+        reports.all_reports,
+        store.list_charts,
+        store.list_dashboards,
+        store.list_folders,
+    )
+    db_mod.list_databases = lambda: ["analytics"]
+    ds_mod.list_datasets = lambda: [ds_mod.Dataset(name="companies", kind="table", column_count=5)]
+    reports.all_reports = lambda: [
+        reports.Report(key="faturamento", title="F", database="analytics", sql="SELECT 1")
+    ]
+    store.list_charts = lambda: [
+        store.Chart(
+            id=1,
+            slug="c1",
+            title="C",
+            source_db="analytics",
+            sql="SELECT 1",
+            chart_type="bar",
+            x_column="a",
+        )
+    ]
+    store.list_dashboards = lambda: [store.Dashboard(id=1, slug="d1", title="D")]
+    store.list_folders = lambda: [store.Folder(id=1, slug="financeiro", name="Financeiro")]
+    try:
+        grantable = main._grantable()
+        missing = [t for t in store.RESOURCE_TYPES if t not in grantable]
+        assert not missing, f"no checkboxes would render for: {missing}"
+        empty = [t for t in store.RESOURCE_TYPES if not grantable[t]]
+        assert not empty, f"every source was stubbed non-empty, yet these are empty: {empty}"
+        # A UI-created report is as grantable as a reports.toml one.
+        assert "faturamento" in grantable[store.REPORT]
+    finally:
+        (
+            db_mod.list_databases,
+            ds_mod.list_datasets,
+            reports.all_reports,
+            store.list_charts,
+            store.list_dashboards,
+            store.list_folders,
+        ) = saved
+    print("every resource type grantable: OK")
 
 
 def test_user_detail_page():
@@ -1062,7 +1123,7 @@ def test_enforcement_at_every_route():
     store.list_dashboards = lambda: [ops, secret]
     store.get_dashboard = lambda s, with_items=True: {"ops": ops, "secret": secret}.get(s)
     db_mod.list_databases = lambda: ["analytics", "dw_whirlpool", "keycloak"]
-    db_mod.execute = lambda sql, database=None: db_mod.QueryResult(
+    db_mod.execute = lambda sql, database=None, max_rows=None: db_mod.QueryResult(
         returns_rows=True, columns=["a", "b"], rows=[(1, 2)], rowcount=1
     )
     try:
@@ -1145,9 +1206,28 @@ def test_enforcement_at_every_route():
             )
             assert r.status_code == 403, "layout mutation not gated"
 
-            # ── datasets: needs the feature as well as the database ──
+            # ── datasets: needs the feature, the database AND the dataset ──
             assert client.get("/datasets", follow_redirects=False).status_code == 403
             assert client.get("/datasets/companies", follow_redirects=False).status_code == 403
+
+            # With the feature + database but no per-dataset grant, the catalog
+            # opens and is empty rather than listing tables you can't open.
+            main_mod.app.dependency_overrides[main_mod.access_for] = lambda: store.Access(
+                username="ana",
+                granted={
+                    store.DATABASE: {"analytics"},
+                    store.FEATURE: {"dataset_catalog"},
+                    store.DATASET: {"companies"},
+                },
+            )
+            r = client.get("/datasets")
+            assert r.status_code == 200, r.status_code
+            assert "companies" in r.text, "granted dataset missing"
+            assert "captura" not in r.text, "ungranted dataset name leaked into the catalog"
+            assert client.get("/datasets/companies").status_code == 200
+            r = client.get("/datasets/captura", follow_redirects=False)
+            assert r.status_code == 403, f"ungranted dataset opened: {r.status_code}"
+            main_mod.app.dependency_overrides[main_mod.access_for] = lambda: limited
 
             # ── reports ──
             assert client.get("/report/anything/export", follow_redirects=False).status_code == 403
@@ -1166,6 +1246,98 @@ def test_enforcement_at_every_route():
         ) = saved
     assert charts_mod.MAX_SERIES  # keeps the import meaningful
     print("enforcement at every route: OK")
+
+
+def test_folder_grant_expands_to_its_contents():
+    """Granting a folder grants everything in it — the whole point of folders.
+
+    Exercised through access_for against a fake connection, because the
+    expansion is a second query most stubs would skip.
+    """
+    from app import store
+
+    users = {"ana": {"id": 2, "is_admin": False, "is_active": True}}
+    # Ana's role grants the `finance` folder and nothing else directly.
+    perms = {2: [("folder", "finance")]}
+    folder_members = [
+        ("dataset", "invoices"),
+        ("chart", "invoices-by-month"),
+        ("dashboard", "finance-ops"),
+        ("report", "invoice_summary"),
+    ]
+
+    class _R:
+        def __init__(self, mapping=None, rows=()):
+            self._mapping, self._rows = mapping, list(rows)
+
+        def first(self):
+            return self if self._mapping is not None else None
+
+        def __iter__(self):
+            return iter(self._rows)
+
+    class _Conn:
+        def __init__(self):
+            self.saw_slugs = None
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "is_admin, is_active FROM users" in sql:
+                return _R(mapping=users.get(params["u"]))
+            if "role_permissions" in sql:
+                return _R(rows=perms.get(params["id"], []))
+            if "folder_items" in sql:
+                self.saw_slugs = (params or {}).get("slugs")
+                return _R(rows=folder_members)
+            return _R()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    conn = _Conn()
+    original = store.engine
+    store.engine = lambda: type("E", (), {"connect": staticmethod(lambda: conn)})()
+    try:
+        access = store.access_for("ana")
+    finally:
+        store.engine = original
+
+    assert conn.saw_slugs == ["finance"], conn.saw_slugs
+    # everything inside the folder is now reachable...
+    assert access.allows(store.DATASET, "invoices")
+    assert access.allows(store.CHART, "invoices-by-month")
+    assert access.allows(store.DASHBOARD, "finance-ops")
+    assert access.allows(store.REPORT, "invoice_summary")
+    # ...and nothing outside it is
+    assert not access.allows(store.CHART, "some-other-chart")
+    assert not access.allows(store.DATABASE, "dw_whirlpool")
+    # the folder grant itself is still visible, so the UI can show why
+    assert access.allows(store.FOLDER, "finance")
+    print("folder grant expands: OK")
+
+
+def test_row_limit_is_clamped():
+    """The console's row box can't exceed the configured ceiling."""
+    from app.config import get_settings
+    from app.main import _row_limit
+
+    s = get_settings()
+    assert _row_limit(50) == 50
+    assert _row_limit("250") == 250
+    # over the ceiling -> clamped, not honoured
+    assert _row_limit(s.query_max_rows * 10) == s.query_max_rows
+    assert _row_limit(999_999_999) == s.query_max_rows
+    # nonsense falls back rather than erroring, so a typo can't lose the query
+    assert _row_limit("") == s.query_default_rows
+    assert _row_limit(None) == s.query_default_rows
+    assert _row_limit("; DROP TABLE") == s.query_default_rows
+    # zero and negatives are meaningless
+    assert _row_limit(0) == 1
+    assert _row_limit(-5) == 1
+    print("row limit clamped: OK")
 
 
 def test_wildcard_grant_covers_a_whole_type():
@@ -1436,10 +1608,14 @@ def test_query_picker_and_reports():
     with TestClient(app, base_url="https://testserver") as client:
         client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
 
-        # Dashboard shows the DB picker + the manifest report
+        # The console shows the DB picker; the report lives on /reports now
         r = client.get("/")
         assert ">main<" in r.text and ">other<" in r.text, "db picker not populated"
-        assert "Temp report" in r.text, "report not listed"
+        assert "Temp report" not in r.text, "reports still rendered inside the console"
+
+        r = client.get("/reports")
+        assert r.status_code == 200, r.status_code
+        assert "Temp report" in r.text, "report missing from its own page"
 
         # Query against a listed database -> rendered table (NULL shown blank)
         r = client.post("/query", data={"sql": "SELECT * FROM t ORDER BY id", "database": "main"})
@@ -1475,10 +1651,13 @@ if __name__ == "__main__":
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
     test_admin_panel_and_gate()
+    test_every_resource_type_is_grantable()
     test_user_detail_page()
     test_nav_hides_what_you_cannot_reach()
     test_last_admin_cannot_be_removed()
     test_access_resolution_fails_closed()
+    test_folder_grant_expands_to_its_contents()
+    test_row_limit_is_clamped()
     test_wildcard_grant_covers_a_whole_type()
     test_enforcement_at_every_route()
     # Last: these reload app.main, which rebinds this module's `app` reference.

@@ -193,6 +193,61 @@ MIGRATIONS: list[tuple[str, str]] = [
         DELETE FROM roles WHERE name = 'Admin';
         """,
     ),
+    (
+        "0006_reports",
+        """
+        -- Reports authored in the UI rather than in reports.toml. Deliberately
+        -- the same shape as `charts` — slug/title/source_db/sql/created_by —
+        -- because they are the same idea with a different renderer, and the
+        -- store code, permission keys and admin screens all stay uniform.
+        --
+        -- reports.toml keeps working: file reports are merged in read-only, so
+        -- the ones under git review are not lost.
+        CREATE TABLE IF NOT EXISTS reports (
+            id          bigserial   PRIMARY KEY,
+            slug        text        NOT NULL UNIQUE,
+            title       text        NOT NULL,
+            description text        NOT NULL DEFAULT '',
+            source_db   text        NOT NULL,
+            sql         text        NOT NULL,
+            created_by  text        NOT NULL DEFAULT '',
+            created_at  timestamptz NOT NULL DEFAULT now(),
+            updated_at  timestamptz NOT NULL DEFAULT now()
+        );
+        """,
+    ),
+    (
+        "0007_folders",
+        """
+        -- Folders are the unit a team gets granted. Rather than adding a
+        -- parallel permission mechanism, a folder is just another resource in
+        -- role_permissions ('folder', <slug>) — granting it expands to
+        -- everything inside, so "the Finance team gets the Finance folder" is
+        -- one grant that keeps working as items are added.
+        CREATE TABLE IF NOT EXISTS folders (
+            id          bigserial   PRIMARY KEY,
+            slug        text        NOT NULL UNIQUE,
+            name        text        NOT NULL,
+            description text        NOT NULL DEFAULT '',
+            created_by  text        NOT NULL DEFAULT '',
+            created_at  timestamptz NOT NULL DEFAULT now()
+        );
+
+        -- Membership is (type, key) exactly like a permission, so the same
+        -- vocabulary covers both and an item can sit in several folders.
+        -- No FK to charts/dashboards: datasets live in another database
+        -- entirely and are identified by name, so all four types are keys.
+        CREATE TABLE IF NOT EXISTS folder_items (
+            folder_id     bigint NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+            resource_type text   NOT NULL,
+            resource_key  text   NOT NULL,
+            PRIMARY KEY (folder_id, resource_type, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS folder_items_type_key_idx
+            ON folder_items (resource_type, resource_key);
+        """,
+    ),
 ]
 
 
@@ -658,12 +713,19 @@ def move_item(dashboard_slug: str, item_id: int, delta: int) -> bool:
 ANY = "*"
 
 DATABASE = "database"
+DATASET = "dataset"
 REPORT = "report"
 CHART = "chart"
 DASHBOARD = "dashboard"
+FOLDER = "folder"
 FEATURE = "feature"
 
-RESOURCE_TYPES = (DATABASE, REPORT, CHART, DASHBOARD, FEATURE)
+RESOURCE_TYPES = (DATABASE, DATASET, REPORT, CHART, DASHBOARD, FOLDER, FEATURE)
+
+# What a folder can contain. Databases and features are excluded on purpose:
+# a database is infrastructure rather than content, and a feature is a
+# capability — neither belongs to a team's folder of things.
+FOLDERABLE = (DATASET, REPORT, CHART, DASHBOARD)
 
 # Capabilities that aren't a stored object. Adding one here is all it takes to
 # make it grantable — no migration, since permissions are just (type, key).
@@ -671,15 +733,18 @@ FEATURES: tuple[tuple[str, str], ...] = (
     ("sql_console", "Run ad-hoc SQL in the query console"),
     ("chart_builder", "Create and edit charts"),
     ("dashboard_builder", "Create and edit dashboards"),
+    ("report_builder", "Create and edit reports from SQL"),
     ("dataset_catalog", "Browse the dataset catalog"),
 )
 FEATURE_KEYS = tuple(k for k, _ in FEATURES)
 
 RESOURCE_LABELS = {
     DATABASE: "Databases",
+    DATASET: "Datasets",
     REPORT: "Reports",
     CHART: "Charts",
     DASHBOARD: "Dashboards",
+    FOLDER: "Folders",
     FEATURE: "Features",
 }
 
@@ -1045,7 +1110,249 @@ def access_for(username: str) -> Access:
         for rtype, rkey in rows:
             granted.setdefault(rtype, set()).add(rkey)
 
-    # A role holding ('*','*') grants everything, same as the admin flag.
-    if ANY in granted.get(ANY, set()):
-        return Access(username=username, everything=True)
+        # A role holding ('*','*') grants everything, same as the admin flag.
+        if ANY in granted.get(ANY, set()):
+            return Access(username=username, everything=True)
+
+        # Expand folder grants into their contents. This is what makes "the
+        # Finance team gets the Finance folder" a single durable grant: items
+        # added to the folder later are covered without touching any role.
+        folder_keys = granted.get(FOLDER, set())
+        if folder_keys:
+            if ANY in folder_keys:
+                members = conn.execute(text("SELECT resource_type, resource_key FROM folder_items"))
+            else:
+                members = conn.execute(
+                    text(
+                        "SELECT fi.resource_type, fi.resource_key FROM folder_items fi "
+                        "JOIN folders f ON f.id = fi.folder_id "
+                        "WHERE f.slug = ANY(:slugs)"
+                    ),
+                    {"slugs": sorted(folder_keys)},
+                )
+            for rtype, rkey in members:
+                granted.setdefault(rtype, set()).add(rkey)
+
     return Access(username=username, granted=granted)
+
+
+# ── reports (authored in the UI) ───────────────────────────────────────────
+
+
+@dataclass
+class Report:
+    """A saved query rendered as a downloadable report.
+
+    Same shape as Chart on purpose — the difference is what renders it, not
+    what it is. `editable` is False for reports that came from reports.toml,
+    which stay under git review and can't be changed from the UI.
+    """
+
+    slug: str
+    title: str
+    source_db: str
+    sql: str
+    description: str = ""
+    created_by: str = ""
+    id: int | None = None
+    editable: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+_REPORT_SELECT = (
+    "SELECT id, slug, title, description, source_db, sql, created_by, "
+    "created_at, updated_at FROM reports"
+)
+
+
+def _row_to_report(row: Any) -> Report:
+    m = row._mapping
+    return Report(
+        id=m["id"],
+        slug=m["slug"],
+        title=m["title"],
+        description=m["description"],
+        source_db=m["source_db"],
+        sql=m["sql"],
+        created_by=m["created_by"],
+        created_at=m["created_at"],
+        updated_at=m["updated_at"],
+    )
+
+
+def list_reports() -> list[Report]:
+    with engine().connect() as conn:
+        rows = conn.execute(text(f"{_REPORT_SELECT} ORDER BY title"))
+        return [_row_to_report(r) for r in rows]
+
+
+def get_report(slug: str) -> Report | None:
+    with engine().connect() as conn:
+        row = conn.execute(text(f"{_REPORT_SELECT} WHERE slug = :s"), {"s": slug}).first()
+        return _row_to_report(row) if row else None
+
+
+def save_report(report: Report) -> Report:
+    with engine().begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                INSERT INTO reports (slug, title, description, source_db, sql, created_by)
+                VALUES (:slug, :title, :description, :source_db, :sql, :created_by)
+                ON CONFLICT (slug) DO UPDATE SET
+                    title       = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    source_db   = EXCLUDED.source_db,
+                    sql         = EXCLUDED.sql,
+                    updated_at  = now()
+                RETURNING id, slug, title, description, source_db, sql, created_by,
+                          created_at, updated_at
+                """
+            ),
+            {
+                "slug": report.slug,
+                "title": report.title,
+                "description": report.description,
+                "source_db": report.source_db,
+                "sql": report.sql,
+                "created_by": report.created_by,
+            },
+        ).first()
+    return _row_to_report(row)
+
+
+def delete_report(slug: str) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(text("DELETE FROM reports WHERE slug = :s"), {"s": slug})
+        return result.rowcount > 0
+
+
+# ── folders ────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Folder:
+    slug: str
+    name: str
+    description: str = ""
+    created_by: str = ""
+    id: int | None = None
+    # resource_type -> keys inside this folder
+    items: dict[str, list[str]] = field(default_factory=dict)
+
+    def keys(self, resource_type: str) -> list[str]:
+        return self.items.get(resource_type, [])
+
+    @property
+    def item_count(self) -> int:
+        return sum(len(v) for v in self.items.values())
+
+
+def list_folders() -> list[Folder]:
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, slug, name, description, created_by FROM folders ORDER BY name")
+        ).fetchall()
+        members = conn.execute(
+            text(
+                "SELECT folder_id, resource_type, resource_key FROM folder_items "
+                "ORDER BY resource_type, resource_key"
+            )
+        ).fetchall()
+    by_folder: dict[int, dict[str, list[str]]] = {}
+    for fid, rtype, rkey in members:
+        by_folder.setdefault(fid, {}).setdefault(rtype, []).append(rkey)
+    out = []
+    for r in rows:
+        m = r._mapping
+        out.append(
+            Folder(
+                id=m["id"],
+                slug=m["slug"],
+                name=m["name"],
+                description=m["description"],
+                created_by=m["created_by"],
+                items=by_folder.get(m["id"], {}),
+            )
+        )
+    return out
+
+
+def get_folder(slug: str) -> Folder | None:
+    return next((f for f in list_folders() if f.slug == slug), None)
+
+
+def create_folder(name: str, description: str = "", created_by: str = "") -> Folder | None:
+    name = name.strip()
+    if not name:
+        return None
+    slug = unique_slug(name, exists=get_folder)
+    with engine().begin() as conn:
+        row = conn.execute(
+            text(
+                "INSERT INTO folders (slug, name, description, created_by) "
+                "VALUES (:s, :n, :d, :b) ON CONFLICT (slug) DO NOTHING "
+                "RETURNING id, slug, name, description, created_by"
+            ),
+            {"s": slug, "n": name, "d": description, "b": created_by},
+        ).first()
+    if row is None:
+        return None
+    m = row._mapping
+    return Folder(
+        id=m["id"],
+        slug=m["slug"],
+        name=m["name"],
+        description=m["description"],
+        created_by=m["created_by"],
+    )
+
+
+def delete_folder(folder_id: int) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(text("DELETE FROM folders WHERE id = :id"), {"id": folder_id})
+        return result.rowcount > 0
+
+
+def set_folder_items(folder_id: int, resource_type: str, keys: list[str]) -> bool:
+    """Replace one resource type's membership — one section per submit, so
+    saving Charts can't clear Datasets."""
+    if resource_type not in FOLDERABLE:
+        return False
+    cleaned = sorted({k.strip() for k in keys if k and k.strip()})
+    with engine().begin() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM folders WHERE id = :id"), {"id": folder_id}
+        ).scalar()
+        if not exists:
+            return False
+        conn.execute(
+            text("DELETE FROM folder_items WHERE folder_id = :id AND resource_type = :t"),
+            {"id": folder_id, "t": resource_type},
+        )
+        for key in cleaned:
+            conn.execute(
+                text(
+                    "INSERT INTO folder_items (folder_id, resource_type, resource_key) "
+                    "VALUES (:id, :t, :k) ON CONFLICT DO NOTHING"
+                ),
+                {"id": folder_id, "t": resource_type, "k": key},
+            )
+    return True
+
+
+def folders_containing(resource_type: str, key: str) -> list[str]:
+    """Folder names holding this item — shown on list pages so it's obvious
+    which team owns a thing."""
+    with engine().connect() as conn:
+        return [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT f.name FROM folders f JOIN folder_items fi ON fi.folder_id = f.id "
+                    "WHERE fi.resource_type = :t AND fi.resource_key = :k ORDER BY f.name"
+                ),
+                {"t": resource_type, "k": key},
+            )
+        ]
