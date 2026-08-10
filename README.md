@@ -164,7 +164,6 @@ kind of thing to protect is a constant rather than a migration.
 | `report` | a report key | `rocketlane_projects` |
 | `chart` | a chart slug | `capturas-por-dia` |
 | `dashboard` | a dashboard slug | `ops` |
-| `folder` | a folder slug — expands to its contents | `financeiro` |
 | `feature` | a capability | `sql_console` |
 
 `*` as the key means *every resource of that type, including ones created
@@ -179,21 +178,17 @@ database. The five are `sql_console`, `chart_builder`, `dashboard_builder`,
 A user's access is the **union of their roles' grants**, resolved once per
 request.
 
-### Folders — granting a team its things
+### Folders are not part of this
 
-Granting a team fifteen datasets, four charts and two dashboards one checkbox at
-a time doesn't survive contact with a growing warehouse: every new table means
-editing every role that should see it. A **folder** is the indirection. Put the
-team's datasets, reports, charts and dashboards in one on **Admin → Folders**,
-then grant the *folder* to their role.
+Folders exist (see [Folders](#folders)) and grant **nothing**. They decide how
+the list pages are grouped and stop there. It's worth saying plainly because an
+earlier version did make a folder a bundle of grants, and it was removed: a
+folder groups *things* while a role groups *people*, and merging the two made
+"where does this live?" and "who may read it?" the same question with one
+answer.
 
-When access is resolved, a folder grant **expands to its contents** — so adding
-a dataset to the folder later extends every role holding it, with no role edit.
-Two properties that follow, and are worth knowing:
-
-- A folder only carries the four content types. **`database` is never granted
-  through a folder** — the database grant stays an explicit, separate decision.
-- Deleting a folder revokes the access it conferred; the items themselves stay.
+The practical version: to change what someone can see, edit a **role**. Nothing
+you do on the Folders tab can widen or narrow anyone's access.
 
 ### Where it's enforced
 
@@ -237,8 +232,9 @@ nothing, and a deactivated user gets nothing even if flagged admin.
 `/admin` (administrators only) has three tabs: **Users** — the list, linking to
 a page per user where roles are edited and admin is granted or revoked;
 **Roles & permissions**, where each role has a collapsible section per resource
-type; and **Folders**. Each section is its own form, so saving Databases can't
-clear Charts.
+type (each section is its own form, so saving Databases can't clear Charts); and
+**[Folders](#folders)**, which grants nothing and only sets how the list pages
+are grouped.
 
 - **Admin is re-checked on every admin request**, not read from the session.
   `session['is_admin']` exists only so the sidebar link doesn't cost a query per
@@ -403,6 +399,37 @@ file is the source of truth. On a key collision the file wins, so a UI report
 can never shadow a reviewed one. Both `reports.toml` and `sql/` are mounted into
 the container (see `docker-compose.yml`) and read fresh on each export, so edits
 take effect immediately — no rebuild or restart.
+
+## Folders
+
+Folders group the **Charts**, **Dashboards** and **Reports** pages into
+sections. They are presentation only — see
+[Folders are not part of this](#folders-are-not-part-of-this). Filing a chart
+into a folder never changes who can see it.
+
+- **Create, rename, reorder and delete** on **Admin → Folders**. Order there is
+  the order the sections appear in.
+- **File an item** from its own page, with the small dropdown on its card — the
+  one place you can see what you're moving. Filing needs the same feature that
+  lets you create that kind of thing (`chart_builder` to file a chart), because
+  organising a chart is editing a chart, not a separate power.
+- **One folder per item.** The folder is a column on the item, not a join table,
+  so "where is this?" always has a single answer and nothing appears twice.
+- **Deleting a folder keeps its contents** — they return to *Ungrouped*. The
+  foreign key is `ON DELETE SET NULL`, never `CASCADE`.
+
+Two behaviours that follow from folders being cosmetic, both pinned by tests:
+
+- **Grouping runs after permission filtering, never before.** An empty folder is
+  dropped rather than shown as an empty heading — a folder *name* is itself
+  information ("Whirlpool renegotiation"), so rendering one to somebody who may
+  see nothing inside it would leak exactly what the filter just removed.
+- **Losing folders costs the headings, not the content.** If the folder read
+  fails while the chart read succeeds, everything still lists, under *Ungrouped*.
+
+Datasets are grouped separately, by `datasets.toml` — they live in another
+database, aren't app-owned objects, and their grouping is curated in git next to
+their descriptions and example queries. See [Datasets](#datasets).
 
 ## Query results: the row limit
 

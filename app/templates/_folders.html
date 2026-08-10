@@ -1,0 +1,39 @@
+{# Folder UI shared by the charts, dashboards and reports pages.
+
+   Imported `with context` — url_for needs `request`, which a plain macro
+   import does not carry through. #}
+
+{# The heading above a group of cards. `folder` is None for the leftovers. #}
+{% macro group_head(folder, count) -%}
+<div class="bi-group-hd">
+  <h2 class="bi-group-tt">
+    {% if folder %}
+    <svg class="bi-fld-ic" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.6H2z"/></svg>
+    {{ folder.name }}
+    {% else %}
+    <span class="bi-fld-none">Ungrouped</span>
+    {% endif %}
+  </h2>
+  <span class="bi-group-ct">{{ count }}</span>
+</div>
+{% if folder and folder.description %}<p class="bi-group-sub">{{ folder.description }}</p>{% endif %}
+{%- endmacro %}
+
+{# Files one item into a folder. Submits on change: a save button here would be
+   a second click for a one-field form. Hidden entirely when the viewer can't
+   organise, so it never reads as a control that silently does nothing. #}
+{% macro file_into(resource_type, resource_key, current_id, folders, can_file) -%}
+{% if can_file and folders %}
+<form class="bi-fileform" method="post" action="{{ url_for('folder_file_item') }}">
+  <input type="hidden" name="resource_type" value="{{ resource_type }}">
+  <input type="hidden" name="resource_key" value="{{ resource_key }}">
+  <select class="bi-fileselect" name="folder_id" onchange="this.form.submit()"
+          title="Move to a folder">
+    <option value="" {% if not current_id %}selected{% endif %}>— no folder —</option>
+    {% for f in folders %}
+    <option value="{{ f.id }}" {% if current_id == f.id %}selected{% endif %}>{{ f.name }}</option>
+    {% endfor %}
+  </select>
+</form>
+{% endif %}
+{%- endmacro %}

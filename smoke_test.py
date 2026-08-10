@@ -21,6 +21,17 @@ os.environ["SSO_REDIRECT_URI"] = "https://testserver/auth/callback"
 # `store` functions instead.
 os.environ["APP_DB_PASSWORD"] = ""
 os.environ["APP_DB_HOST"] = ""
+# Point every database setting at a closed local port. Tests that need the app
+# database stub store.available() to True, and any *unstubbed* reader then falls
+# through to a real engine — which without this resolves the warehouse endpoint
+# from .env and makes the suite hang or pass depending on whether a tunnel or
+# VPN happens to be up. A refused connection fails in microseconds instead, and
+# turns "reached the network" from a flake into a visible error.
+os.environ["DB_HOST"] = "127.0.0.1"
+os.environ["DB_PORT"] = "1"
+os.environ["APP_DB_PORT"] = "1"
+# Same for the delegated-auth path: no test should make a real call to Superset.
+os.environ["SUPERSET_INTERNAL_URL"] = "http://127.0.0.1:1"
 
 from urllib.parse import urlsplit
 
@@ -584,6 +595,185 @@ def test_dashboard_pages_render():
     print("dashboard pages render: OK")
 
 
+def test_folder_pages_render():
+    """Render every page that grew folder UI.
+
+    Same reason as test_dashboard_pages_render: the folder macros are imported
+    `with context`, and only a real render proves it.
+    """
+    from app import store
+
+    fin = store.Folder(id=1, name="Financeiro", slug="financeiro", description="Faturamento.")
+    chart = store.Chart(
+        id=1,
+        slug="vendas",
+        title="Vendas por dia",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="line",
+        x_column="dia",
+        y_columns=["total"],
+        folder_id=1,
+    )
+    loose = store.Chart(
+        id=2,
+        slug="avulso",
+        title="Gráfico avulso",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="a",
+    )
+    dash = store.Dashboard(id=1, slug="ops", title="Operação", folder_id=1)
+
+    saved = (
+        store.available,
+        store.list_charts,
+        store.list_dashboards,
+        store.list_folders,
+        store.folder_counts,
+        store.is_admin,
+        store.upsert_user,
+        store.set_user_admin,
+    )
+    store.available = lambda: True
+    store.list_charts = lambda: [chart, loose]
+    store.list_dashboards = lambda: [dash]
+    store.list_folders = lambda: [fin]
+    store.folder_counts = lambda: {1: 2}
+    store.is_admin = lambda u: True
+    store.upsert_user = _no_op_user
+    store.set_user_admin = lambda u, v: True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.get("/charts")
+            assert r.status_code == 200, r.text[:400]
+            assert "Financeiro" in r.text, "folder heading missing"
+            assert "Ungrouped" in r.text, "the unfiled chart lost its heading"
+            assert "bi-fileselect" in r.text, "no way to file a chart from its page"
+
+            r = client.get("/dashboards")
+            assert r.status_code == 200, r.text[:400]
+            assert "Financeiro" in r.text and "Operação" in r.text
+
+            r = client.get("/admin/folders")
+            assert r.status_code == 200, r.text[:400]
+            assert "Financeiro" in r.text and "financeiro" in r.text
+            assert "2 items" in r.text, "folder item count missing"
+            # The screen has to say what a folder is not, next to permissions.
+            assert "organisation only" in r.text.lower()
+    finally:
+        (
+            store.available,
+            store.list_charts,
+            store.list_dashboards,
+            store.list_folders,
+            store.folder_counts,
+            store.is_admin,
+            store.upsert_user,
+            store.set_user_admin,
+        ) = saved
+    print("folder pages render: OK")
+
+
+def test_folders_are_organisation_only():
+    """A folder groups the list pages and can never change who sees what.
+
+    This is the property the whole design rests on, and an earlier version got
+    it wrong: folders were a permission bundle, and "where does this live" and
+    "who may read it" became the same question. So it is pinned three ways —
+    the vocabulary, the resolver, and the writer.
+    """
+    from app import main, store
+
+    # 1. Not part of the permission vocabulary at all. If `folder` ever becomes
+    #    a resource type, it becomes grantable on the roles screen.
+    assert "folder" not in store.RESOURCE_TYPES, (
+        "folder is a resource type again — it would be grantable, and grouping "
+        "would start deciding access"
+    )
+    assert not hasattr(store, "FOLDERABLE"), "the permission-era folder API is back"
+
+    # 2. access_for() must never read a folder. Rather than trust a reading of
+    #    the code, watch every statement it executes against a fake connection.
+    seen: list[str] = []
+
+    class _R:
+        def __init__(self, mapping=None, rows=()):
+            self._mapping, self._rows = mapping, list(rows)
+
+        def first(self):
+            return self if self._mapping is not None else None
+
+        def __iter__(self):
+            return iter(self._rows)
+
+    class _Conn:
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            seen.append(sql)
+            if "is_admin, is_active FROM users" in sql:
+                return _R(mapping={"id": 2, "is_admin": False, "is_active": True})
+            if "role_permissions" in sql:
+                return _R(rows=[("chart", "vendas")])
+            return _R()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    original = store.engine
+    store.engine = lambda: type("E", (), {"connect": staticmethod(lambda: _Conn())})()
+    try:
+        access = store.access_for("ana")
+    finally:
+        store.engine = original
+
+    assert access.allows(store.CHART, "vendas")
+    assert not any("folder" in sql.lower() for sql in seen), (
+        f"access_for touched folders: {[s for s in seen if 'folder' in s.lower()]}"
+    )
+
+    # 3. Grouping runs on an already-filtered list, so it can only ever reorder
+    #    what the caller decided to show. An item whose folder is unknown falls
+    #    into the ungrouped bucket rather than disappearing.
+    fin = store.Folder(id=1, name="Financeiro", slug="financeiro", position=0)
+    ops = store.Folder(id=2, name="Operações", slug="operacoes", position=1)
+    empty = store.Folder(id=3, name="Vazia", slug="vazia", position=2)
+    items = [
+        store.Chart(
+            id=i,
+            slug=slug,
+            title=slug,
+            source_db="analytics",
+            sql="SELECT 1",
+            chart_type="bar",
+            x_column="a",
+            folder_id=fid,
+        )
+        for i, (slug, fid) in enumerate(
+            [("a", 1), ("b", None), ("c", 2), ("d", 999)],
+            start=1,
+        )
+    ]
+    groups = main._grouped(items, [fin, ops, empty])
+    shown = [(f.name if f else None, [c.slug for c in group]) for f, group in groups]
+    assert shown == [("Financeiro", ["a"]), ("Operações", ["c"]), (None, ["b", "d"])], shown
+    # Nothing is lost or duplicated by grouping — the whole point.
+    assert sorted(c.slug for _, g in groups for c in g) == ["a", "b", "c", "d"]
+
+    # 4. Losing the folders entirely must cost the headings and nothing else.
+    #    _folders() fails open to [], so this is the shape of a real outage:
+    #    charts readable, folders not. Every chart still has to be listed.
+    blind = main._grouped(items, [])
+    assert blind == [(None, items)], "a folder read failure hid filed content"
+    print("folders are organisation only: OK")
+
+
 def test_admin_panel_and_gate():
     """The admin screens, and the guarantee that the gate is checked live."""
     from app import db as db_mod
@@ -717,9 +907,9 @@ def test_every_resource_type_is_grantable():
 
     A type missing from _grantable() renders an empty section: the permission
     can't be granted at all, and because each section posts its full set, an
-    existing grant of that type is wiped the moment the section is saved. This
-    shipped broken for datasets and folders, and it is invisible on the page —
-    an empty section looks exactly like "nothing exists yet".
+    existing grant of that type is wiped the moment the section is saved. That
+    is invisible on the page — an empty section looks exactly like "nothing
+    exists yet" — so it gets a test rather than a careful reading.
     """
     from app import datasets as ds_mod
     from app import db as db_mod
@@ -731,7 +921,6 @@ def test_every_resource_type_is_grantable():
         reports.all_reports,
         store.list_charts,
         store.list_dashboards,
-        store.list_folders,
     )
     db_mod.list_databases = lambda: ["analytics"]
     ds_mod.list_datasets = lambda: [ds_mod.Dataset(name="companies", kind="table", column_count=5)]
@@ -750,7 +939,6 @@ def test_every_resource_type_is_grantable():
         )
     ]
     store.list_dashboards = lambda: [store.Dashboard(id=1, slug="d1", title="D")]
-    store.list_folders = lambda: [store.Folder(id=1, slug="financeiro", name="Financeiro")]
     try:
         grantable = main._grantable()
         missing = [t for t in store.RESOURCE_TYPES if t not in grantable]
@@ -766,7 +954,6 @@ def test_every_resource_type_is_grantable():
             reports.all_reports,
             store.list_charts,
             store.list_dashboards,
-            store.list_folders,
         ) = saved
     print("every resource type grantable: OK")
 
@@ -863,35 +1050,56 @@ def test_nav_hides_what_you_cannot_reach():
     from app import main as main_mod
     from app import store
 
-    saved_avail, saved_upsert = store.available, store.upsert_user
+    saved = (
+        store.available,
+        store.upsert_user,
+        store.list_charts,
+        store.list_dashboards,
+        store.list_folders,
+        store.list_reports,
+    )
     store.available = lambda: True
     store.upsert_user = _no_op_user
+    # Every reader the pages below touch. available() is stubbed True, so an
+    # unstubbed one would fall back to the real DB_HOST and make this test hit
+    # the network — passing or timing out depending on where it's run.
+    store.list_charts = lambda: []
+    store.list_dashboards = lambda: []
+    store.list_folders = lambda: []
+    store.list_reports = lambda: []
 
-    def _render_nav(access):
+    # Every signed-in page, not just the console. The nav is built per page from
+    # the `access` that page passes down, so one route forgetting to pass it
+    # shows the full sidebar on that page alone — which is how /charts shipped
+    # briefly listing features the viewer had no grant for.
+    PAGES = ("/", "/charts", "/dashboards", "/reports", "/datasets")
+
+    def _render_nav(access, path="/"):
         main_mod.app.dependency_overrides[main_mod.access_for] = lambda: access
         try:
             with TestClient(app, base_url="https://testserver") as client:
                 client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
-                return client.get("/").text
+                return client.get(path).text
         finally:
             main_mod.app.dependency_overrides.pop(main_mod.access_for, None)
 
     try:
-        # Only the query console, on one database
-        body = _render_nav(
-            store.Access(
-                username="ana",
-                granted={store.DATABASE: {"analytics"}, store.FEATURE: {"sql_console"}},
-            )
+        narrow = store.Access(
+            username="ana",
+            granted={store.DATABASE: {"analytics"}, store.FEATURE: {"sql_console"}},
         )
-        assert "<span>Query</span>" in body, "granted feature missing from the nav"
-        for hidden in (
-            "<span>Charts</span>",
-            "<span>Dashboards</span>",
-            "<span>Datasets</span>",
-            "<span>Reports</span>",
-        ):
-            assert hidden not in body, f"{hidden} shown without a grant"
+        for path in PAGES:
+            body = _render_nav(narrow, path)
+            for hidden in (
+                "<span>Charts</span>",
+                "<span>Dashboards</span>",
+                "<span>Datasets</span>",
+                "<span>Reports</span>",
+            ):
+                assert hidden not in body, f"{hidden} shown without a grant, on {path}"
+
+        # The one entry she does have is present.
+        assert "<span>Query</span>" in _render_nav(narrow), "granted feature missing from the nav"
 
         # An admin sees the lot
         body = _render_nav(store.Access(username="boss", everything=True))
@@ -913,7 +1121,14 @@ def test_nav_hides_what_you_cannot_reach():
         ):
             assert hidden not in body, f"{hidden} shown to a user with no grants"
     finally:
-        store.available, store.upsert_user = saved_avail, saved_upsert
+        (
+            store.available,
+            store.upsert_user,
+            store.list_charts,
+            store.list_dashboards,
+            store.list_folders,
+            store.list_reports,
+        ) = saved
     print("nav hidden by permission: OK")
 
 
@@ -1248,77 +1463,6 @@ def test_enforcement_at_every_route():
     print("enforcement at every route: OK")
 
 
-def test_folder_grant_expands_to_its_contents():
-    """Granting a folder grants everything in it — the whole point of folders.
-
-    Exercised through access_for against a fake connection, because the
-    expansion is a second query most stubs would skip.
-    """
-    from app import store
-
-    users = {"ana": {"id": 2, "is_admin": False, "is_active": True}}
-    # Ana's role grants the `finance` folder and nothing else directly.
-    perms = {2: [("folder", "finance")]}
-    folder_members = [
-        ("dataset", "invoices"),
-        ("chart", "invoices-by-month"),
-        ("dashboard", "finance-ops"),
-        ("report", "invoice_summary"),
-    ]
-
-    class _R:
-        def __init__(self, mapping=None, rows=()):
-            self._mapping, self._rows = mapping, list(rows)
-
-        def first(self):
-            return self if self._mapping is not None else None
-
-        def __iter__(self):
-            return iter(self._rows)
-
-    class _Conn:
-        def __init__(self):
-            self.saw_slugs = None
-
-        def execute(self, statement, params=None):
-            sql = str(statement)
-            if "is_admin, is_active FROM users" in sql:
-                return _R(mapping=users.get(params["u"]))
-            if "role_permissions" in sql:
-                return _R(rows=perms.get(params["id"], []))
-            if "folder_items" in sql:
-                self.saw_slugs = (params or {}).get("slugs")
-                return _R(rows=folder_members)
-            return _R()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    conn = _Conn()
-    original = store.engine
-    store.engine = lambda: type("E", (), {"connect": staticmethod(lambda: conn)})()
-    try:
-        access = store.access_for("ana")
-    finally:
-        store.engine = original
-
-    assert conn.saw_slugs == ["finance"], conn.saw_slugs
-    # everything inside the folder is now reachable...
-    assert access.allows(store.DATASET, "invoices")
-    assert access.allows(store.CHART, "invoices-by-month")
-    assert access.allows(store.DASHBOARD, "finance-ops")
-    assert access.allows(store.REPORT, "invoice_summary")
-    # ...and nothing outside it is
-    assert not access.allows(store.CHART, "some-other-chart")
-    assert not access.allows(store.DATABASE, "dw_whirlpool")
-    # the folder grant itself is still visible, so the UI can show why
-    assert access.allows(store.FOLDER, "finance")
-    print("folder grant expands: OK")
-
-
 def test_row_limit_is_clamped():
     """The console's row box can't exceed the configured ceiling."""
     from app.config import get_settings
@@ -1650,13 +1794,14 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_folder_pages_render()
+    test_folders_are_organisation_only()
     test_admin_panel_and_gate()
     test_every_resource_type_is_grantable()
     test_user_detail_page()
     test_nav_hides_what_you_cannot_reach()
     test_last_admin_cannot_be_removed()
     test_access_resolution_fails_closed()
-    test_folder_grant_expands_to_its_contents()
     test_row_limit_is_clamped()
     test_wildcard_grant_covers_a_whole_type()
     test_enforcement_at_every_route()

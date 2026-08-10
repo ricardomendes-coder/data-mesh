@@ -11,73 +11,68 @@
     <input name="name" placeholder="New folder — e.g. Finance" required>
   </div>
   <div class="bi-search bi-search-plain">
-    <input name="description" placeholder="Which team it's for (optional)">
+    <input name="description" placeholder="What belongs in it (optional)">
   </div>
   <button class="bi-btn" type="submit">Create folder</button>
 </form>
 
 <p class="bi-hint">
-  A folder is what you grant to a team. Put the team's datasets, charts,
-  dashboards and reports in one here, then grant that folder to their role on
-  the <a href="{{ url_for('admin_roles') }}">Roles &amp; permissions</a> tab —
-  one grant that keeps working as you add things to the folder.
+  Folders are <b>organisation only</b> — they set how the Charts, Dashboards and
+  Reports pages are grouped and nothing else. Filing something into a folder
+  never changes who can see it; that stays on
+  <a href="{{ url_for('admin_roles') }}">Roles &amp; permissions</a>. You file an
+  item from its own page, where you can see what you're moving.
 </p>
 
 {% for f in folders %}
-<section class="bi-rolecard">
-  <div class="bi-rolecard-hd">
-    <span class="bi-rolecard-nm">{{ f.name }}</span>
+<section class="bi-fldcard">
+  <div class="bi-fldcard-hd">
+    <svg class="bi-fld-ic" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.6H2z"/></svg>
+    <span class="bi-fldcard-nm">{{ f.name }}</span>
     <code>{{ f.slug }}</code>
-    <span class="bi-ds-stat">{{ f.item_count }} item{{ '' if f.item_count == 1 else 's' }}</span>
-    <div class="bi-rolecard-ctl">
+    <span class="bi-ds-stat">
+      {% set n = counts.get(f.id, 0) %}
+      {{ n }} item{{ '' if n == 1 else 's' }}
+    </span>
+
+    <div class="bi-fldcard-ctl">
+      {# Order is what the list pages render in, so it's edited here. #}
+      <form method="post" action="{{ url_for('admin_move_folder', folder_id=f.id) }}">
+        <input type="hidden" name="direction" value="up">
+        <button class="bi-icobtn" type="submit" title="Move up"
+                {% if loop.first %}disabled{% endif %}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V4M4 7.5L8 3.5l4 4"/></svg>
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('admin_move_folder', folder_id=f.id) }}">
+        <input type="hidden" name="direction" value="down">
+        <button class="bi-icobtn" type="submit" title="Move down"
+                {% if loop.last %}disabled{% endif %}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5V12M4 8.5l4 4 4-4"/></svg>
+        </button>
+      </form>
       <form method="post" action="{{ url_for('admin_delete_folder', folder_id=f.id) }}"
-            onsubmit="return confirm('Delete the {{ f.name }} folder? Roles granted it lose access to everything inside. The items themselves are kept.')">
+            onsubmit="return confirm('Delete the {{ f.name }} folder? The {{ counts.get(f.id, 0) }} item(s) in it are kept — they just go back to Ungrouped.')">
         <button class="bi-icobtn danger" type="submit" title="Delete folder">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
         </button>
       </form>
     </div>
   </div>
-  {% if f.description %}<p class="bi-group-sub">{{ f.description }}</p>{% endif %}
 
-  {# One form per type, same as roles: saving Charts can't clear Datasets. #}
-  {% for rtype in folderable %}
-  <details class="bi-permsec" {% if f.keys(rtype) %}open{% endif %}>
-    <summary>
-      <span class="bi-permsec-tt">{{ resource_labels[rtype] }}</span>
-      <span class="bi-ds-stat">{{ f.keys(rtype)|length }} of {{ options[rtype]|length }}</span>
-    </summary>
-    <form method="post" action="{{ url_for('admin_set_folder_items', folder_id=f.id) }}">
-      <input type="hidden" name="resource_type" value="{{ rtype }}">
-      <div class="bi-permsec-actions">
-        <button class="bi-linkbtn" type="button" data-select="all">select all</button>
-        <span class="bi-sub">·</span>
-        <button class="bi-linkbtn" type="button" data-select="none">clear</button>
-      </div>
-      <div class="bi-dbgrid">
-        {% for key in options[rtype] %}
-        <label class="bi-chip-check {{ 'bi-chip-missing' if key in stale[rtype] else '' }}"
-               {% if key in stale[rtype] %}title="In this folder but no longer exists"{% endif %}>
-          <input type="checkbox" name="keys" value="{{ key }}"
-                 {% if key in f.keys(rtype) %}checked{% endif %}>
-          <span>{{ key }}</span>
-        </label>
-        {% endfor %}
-      </div>
-      {% if not options[rtype] %}
-      <p class="bi-hint">Nothing of this type exists yet.</p>
-      {% endif %}
-      <button class="bi-btn sm" type="submit">Save {{ resource_labels[rtype]|lower }}</button>
-    </form>
-  </details>
-  {% endfor %}
+  <form class="bi-fldform" method="post" action="{{ url_for('admin_update_folder', folder_id=f.id) }}">
+    <input class="bi-fldinput" name="name" value="{{ f.name }}" required aria-label="Folder name">
+    <input class="bi-fldinput" name="description" value="{{ f.description }}"
+           placeholder="What belongs in it (optional)" aria-label="Folder description">
+    <button class="bi-btn sm" type="submit">Save</button>
+  </form>
 </section>
 {% endfor %}
 
 {% if not folders %}
-<div class="bi-empty-lg">No folders yet. Create one above.</div>
+<div class="bi-empty-lg">
+  No folders yet. Create one above, then file charts, dashboards and reports
+  into it from their own pages.
+</div>
 {% endif %}
-
-{# Same select-all behaviour as the roles screen; it keys off data-select. #}
-<script src="{{ url_for('static', path='admin-roles.js') }}"></script>
 {% endblock %}

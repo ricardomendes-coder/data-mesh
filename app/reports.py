@@ -34,6 +34,10 @@ class Report:
     description: str = ""
     # False for reports from reports.toml: those are edited in git, not here.
     editable: bool = False
+    # Display grouping, carried through from the stored report. File reports
+    # have no folder — reports.toml describes what a report *is*, and where it
+    # is filed is a UI decision made in the app.
+    folder_id: int | None = None
 
     def resolve_sql(self) -> str:
         """Return the report's SQL, reading the .sql file fresh if configured."""
@@ -108,6 +112,7 @@ def all_reports() -> list[Report]:
                     sql=saved.sql,
                     description=saved.description,
                     editable=True,
+                    folder_id=saved.folder_id,
                 )
             )
     except Exception:

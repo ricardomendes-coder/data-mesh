@@ -260,7 +260,9 @@
     .bi-check{display:flex;align-items:center;gap:.5rem;padding:.32rem .4rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--body);cursor:pointer;}
     .bi-check:hover{background:var(--page);color:var(--title);}
     .bi-check input{width:14px;height:14px;accent-color:var(--orange);flex-shrink:0;}
-    .bi-hint{font-size:.74rem;color:var(--muted);line-height:1.5;margin-top:.5rem;}
+    /* Capped measure: these run the full content width otherwise, and a 1300px
+       line of 12px text is a paragraph nobody reads. */
+    .bi-hint{font-size:.74rem;color:var(--muted);line-height:1.5;margin-top:.5rem;max-width:78ch;}
     .bi-chart-main .bi-fld{max-width:none;}
     #chart-warnings:not(:empty){margin-top:1rem;}
     #chart-warnings .bi-err{margin-bottom:.6rem;}
@@ -301,6 +303,28 @@
     .bi-icobtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--body);cursor:pointer;transition:all .12s;}
     .bi-icobtn:hover{border-color:var(--g-300);color:var(--title);background:#FCFCFD;}
     .bi-icobtn.danger:hover{border-color:#FBD9C2;color:var(--danger);background:#FFF6F0;}
+    .bi-icobtn[disabled]{opacity:.35;cursor:default;}
+    .bi-icobtn[disabled]:hover{border-color:var(--border-strong);color:var(--body);background:var(--surface);}
+
+    /* ── folders (grouping only — they carry no permission) ── */
+    .bi-fld-ic{color:var(--muted);flex:none;}
+    .bi-group-tt .bi-fld-ic{margin-right:.1rem;vertical-align:-2px;}
+    /* Ungrouped is a real heading but not a name — lighter, so the eye reads
+       the named folders first and the leftovers last. */
+    .bi-fld-none{color:var(--muted);font-weight:500;}
+    .bi-fileform{display:inline-flex;}
+    .bi-fileselect{height:26px;max-width:130px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .3rem;font-size:.72rem;color:var(--muted);background:var(--surface);cursor:pointer;outline:none;}
+    .bi-fileselect:hover{border-color:var(--g-300);color:var(--title);}
+    .bi-fileselect:focus{border-color:var(--orange);box-shadow:var(--ring);color:var(--title);}
+
+    .bi-fldcard{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--sh-1);padding:.85rem 1rem;margin-bottom:.7rem;}
+    .bi-fldcard-hd{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;}
+    .bi-fldcard-nm{font-weight:600;color:var(--title);}
+    .bi-fldcard-ctl{margin-left:auto;display:flex;gap:.3rem;}
+    .bi-fldform{display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,2fr) auto;gap:.4rem;margin-top:.6rem;}
+    @media(max-width:700px){.bi-fldform{grid-template-columns:1fr;}}
+    .bi-fldinput{height:30px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font-size:.8rem;color:var(--title);background:var(--surface);outline:none;}
+    .bi-fldinput:focus{border-color:var(--orange);box-shadow:var(--ring);}
 
     /* ── query limit + result paging ── */
     .bi-limit{display:inline-flex;align-items:center;gap:.35rem;font-size:.72rem;color:var(--muted);margin-left:.2rem;}

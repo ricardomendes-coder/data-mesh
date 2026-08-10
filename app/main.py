@@ -235,10 +235,63 @@ def _may_browse_datasets(access: store.Access) -> bool:
     )
 
 
-def _forbidden(request: Request, user: str, message: str, status: int = 403):
-    """A refusal that looks like the rest of the app rather than a bare 403."""
-    context = _shell_context(user, "", error=message)
+def _forbidden(
+    request: Request,
+    user: str,
+    message: str,
+    status: int = 403,
+    access: store.Access | None = None,
+):
+    """A refusal that looks like the rest of the app rather than a bare 403.
+
+    Pass `access` wherever it's in scope: without it the sidebar falls back to
+    showing everything, which on this page of all pages reads as a list of what
+    you were just told you can't have.
+    """
+    context = _shell_context(user, "", access, error=message)
     return templates.TemplateResponse(request, "forbidden.html", context, status_code=status)
+
+
+def _folders() -> list[store.Folder]:
+    """Every folder, or none if they can't be read. Never fatal: folders are
+    decoration, so losing them costs the headings and nothing else."""
+    if not store.available():
+        return []
+    try:
+        return store.list_folders()
+    except Exception:
+        logger.exception("Could not list folders")
+        return []
+
+
+def _grouped(items: list, folders: list[store.Folder]) -> list[tuple]:
+    """Group items under their folders, ungrouped last, empty folders dropped.
+
+    Takes the items the viewer may *already* see, never the full set. Grouping
+    runs strictly after permission filtering, so the most a folder can do is
+    decide which heading something appears under.
+
+    Empty folders are dropped rather than rendered as empty headings. That is
+    not tidiness: a folder name is itself information ("Whirlpool renegotiation"),
+    and showing one to someone who may see nothing inside it would leak exactly
+    what the permission filter just removed.
+    """
+    known = {f.id for f in folders}
+    by_folder: dict[int, list] = {}
+    loose: list = []
+    for item in items:
+        fid = getattr(item, "folder_id", None)
+        # An unknown folder_id falls through to ungrouped rather than being
+        # dropped. It matters because _folders() fails open to an empty list:
+        # if the folder read breaks while the chart read succeeds, every filed
+        # chart would otherwise vanish from the page. Losing folders may cost
+        # the headings; it must never cost the content.
+        (by_folder.setdefault(fid, []) if fid in known else loose).append(item)
+
+    groups = [(f, by_folder[f.id]) for f in folders if by_folder.get(f.id)]
+    if loose:
+        groups.append((None, loose))
+    return groups
 
 
 def _login_page(request: Request, error: str | None = None, status_code: int = 200):
@@ -526,7 +579,9 @@ def datasets_index(
 ):
     """Everything in the analytics schema, grouped by the manifest's folders."""
     if not _may_browse_datasets(access):
-        return _forbidden(request, user, "You don't have access to the dataset catalog.")
+        return _forbidden(
+            request, user, "You don't have access to the dataset catalog.", access=access
+        )
     context = _shell_context(user, "datasets", access, q=q, kind=kind, groups=[], total=0, shown=0)
     try:
         all_datasets = datasets.list_datasets()
@@ -565,11 +620,13 @@ def dataset_detail(
 ):
     """Preview, catalog, description and example queries for one dataset."""
     if not _may_browse_datasets(access):
-        return _forbidden(request, user, "You don't have access to the dataset catalog.")
+        return _forbidden(
+            request, user, "You don't have access to the dataset catalog.", access=access
+        )
     # 403 before the catalog lookup, so an ungranted name can't be probed for
     # existence by telling 403 apart from 404.
     if not access.allows(store.DATASET, name):
-        return _forbidden(request, user, "You don't have access to that dataset.")
+        return _forbidden(request, user, "You don't have access to that dataset.", access=access)
 
     def _catalog_failure(message: str, status: int):
         context = _shell_context(
@@ -641,10 +698,12 @@ def run_query(
     # Checked server-side, not just hidden in the UI: the dropdown being
     # filtered means nothing when the target is a posted form field.
     if not access.allows(store.FEATURE, "sql_console"):
-        return _forbidden(request, user, "You don't have access to the query console.")
+        return _forbidden(
+            request, user, "You don't have access to the query console.", access=access
+        )
     if not access.allows(store.DATABASE, database):
         logger.warning("%s attempted a query against ungranted database %r", user, database)
-        return _forbidden(request, user, f"You don't have access to {database!r}.")
+        return _forbidden(request, user, f"You don't have access to {database!r}.", access=access)
 
     max_rows = _row_limit(limit)
     context = _console_context(user, access, sql=sql, database=database, limit=max_rows)
@@ -696,10 +755,12 @@ def export_query(
     # Export is a second way to run the same SQL, so it needs the same gate —
     # enforcing only on /query would leave the door open here.
     if not access.allows(store.FEATURE, "sql_console"):
-        return _forbidden(request, user, "You don't have access to the query console.")
+        return _forbidden(
+            request, user, "You don't have access to the query console.", access=access
+        )
     if not access.allows(store.DATABASE, database):
         logger.warning("%s attempted an export from ungranted database %r", user, database)
-        return _forbidden(request, user, f"You don't have access to {database!r}.")
+        return _forbidden(request, user, f"You don't have access to {database!r}.", access=access)
 
     def _error(msg: str, status: int = 400):
         context = _console_context(user, access, sql=sql, database=database, error=msg)
@@ -743,7 +804,7 @@ def export_report(
     # grant — being able to run it is not implied by console access.
     if not access.allows(store.REPORT, key):
         logger.warning("%s attempted ungranted report %r", user, key)
-        return _forbidden(request, user, "You don't have access to that report.")
+        return _forbidden(request, user, "You don't have access to that report.", access=access)
     try:
         df = reports.get_report_df(key, max_rows=settings.query_max_rows)
     except KeyError:
@@ -789,11 +850,21 @@ def charts_index(
     if not store.available():
         return _charts_unavailable(request, user)
     context = _shell_context(
-        user, "charts", charts=[], can_build=access.allows(store.FEATURE, "chart_builder")
+        user,
+        "charts",
+        access,
+        charts=[],
+        groups=[],
+        folders=[],
+        can_build=access.allows(store.FEATURE, "chart_builder"),
     )
     try:
         # Filtered by slug: a chart you can't open shouldn't be listed either.
-        context["charts"] = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        visible = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        context["charts"] = visible
+        context["folders"] = _folders()
+        # Grouping comes after the filter above, never before it.
+        context["groups"] = _grouped(visible, context["folders"])
     except Exception:
         logger.exception("Could not list charts")
         context["db_ok"] = False
@@ -851,7 +922,9 @@ def chart_new(
     if not store.available():
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
-        return _forbidden(request, user, "You don't have access to the chart builder.")
+        return _forbidden(
+            request, user, "You don't have access to the chart builder.", access=access
+        )
     return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user, access))
 
 
@@ -871,12 +944,14 @@ def chart_run(
     if not store.available():
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
-        return _forbidden(request, user, "You don't have access to the chart builder.")
+        return _forbidden(
+            request, user, "You don't have access to the chart builder.", access=access
+        )
     # The builder runs arbitrary SQL, so it needs the same database gate as the
     # console — otherwise it is a way around it.
     if not access.allows(store.DATABASE, source_db):
         logger.warning("%s attempted a chart query against ungranted %r", user, source_db)
-        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
     context = _builder_context(
         user,
@@ -943,9 +1018,11 @@ def chart_save(
     if not store.available():
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
-        return _forbidden(request, user, "You don't have access to the chart builder.")
+        return _forbidden(
+            request, user, "You don't have access to the chart builder.", access=access
+        )
     if not access.allows(store.DATABASE, source_db):
-        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
     title = title.strip() or "Untitled chart"
     chart = store.Chart(
@@ -974,7 +1051,7 @@ def chart_detail(
         return _charts_unavailable(request, user)
     # 403 before the lookup, so an ungranted slug can't be probed for existence.
     if not access.allows(store.CHART, slug):
-        return _forbidden(request, user, "You don't have access to that chart.")
+        return _forbidden(request, user, "You don't have access to that chart.", access=access)
 
     try:
         chart = store.get_chart(slug)
@@ -988,7 +1065,7 @@ def chart_detail(
         return templates.TemplateResponse(request, "charts.html", context, status_code=404)
 
     context = _shell_context(
-        user, "charts", chart=chart, spec=None, columns=[], rows=[], chart_error=None
+        user, "charts", access, chart=chart, spec=None, columns=[], rows=[], chart_error=None
     )
     try:
         result = db.execute(chart.sql, chart.source_db)
@@ -1015,7 +1092,7 @@ def chart_delete(
     access: store.Access = Depends(access_for),
 ):
     if not (access.allows(store.CHART, slug) and access.allows(store.FEATURE, "chart_builder")):
-        return _forbidden(request, user, "You don't have access to that chart.")
+        return _forbidden(request, user, "You don't have access to that chart.", access=access)
     if store.available():
         store.delete_chart(slug)
         logger.info("Chart %r deleted by %s", slug, user)
@@ -1087,12 +1164,15 @@ def dashboards_index(
         "dashboards",
         access,
         dashboards=[],
+        groups=[],
+        folders=[],
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
     )
     try:
-        context["dashboards"] = [
-            d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)
-        ]
+        visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
+        context["dashboards"] = visible
+        context["folders"] = _folders()
+        context["groups"] = _grouped(visible, context["folders"])
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False
@@ -1110,7 +1190,9 @@ def dashboard_create(
     if not store.available():
         return _dashboards_unavailable(request, user)
     if not access.allows(store.FEATURE, "dashboard_builder"):
-        return _forbidden(request, user, "You don't have access to the dashboard builder.")
+        return _forbidden(
+            request, user, "You don't have access to the dashboard builder.", access=access
+        )
     title = title.strip() or "Untitled dashboard"
     dash = store.save_dashboard(
         store.Dashboard(
@@ -1154,7 +1236,7 @@ def dashboard_show(
     if not store.available():
         return _dashboards_unavailable(request, user)
     if not access.allows(store.DASHBOARD, slug):
-        return _forbidden(request, user, "You don't have access to that dashboard.")
+        return _forbidden(request, user, "You don't have access to that dashboard.", access=access)
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
@@ -1180,7 +1262,9 @@ def dashboard_edit(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
@@ -1218,7 +1302,9 @@ def dashboard_add_item(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     if store.available():
         store.add_item(slug, chart_slug, width)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1235,7 +1321,9 @@ def dashboard_remove_item(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     if store.available():
         store.remove_item(slug, item_id)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1253,7 +1341,9 @@ def dashboard_set_width(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     if store.available():
         store.set_item_width(slug, item_id, width)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1271,7 +1361,9 @@ def dashboard_move_item(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     if store.available():
         store.move_item(slug, item_id, -1 if direction == "up" else 1)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
@@ -1287,7 +1379,9 @@ def dashboard_delete(
     if not (
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
-        return _forbidden(request, user, "You don't have access to edit that dashboard.")
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
     if store.available():
         store.delete_dashboard(slug)
         logger.info("Dashboard %r deleted by %s", slug, user)
@@ -1476,10 +1570,9 @@ def _grantable() -> dict[str, list[str]]:
     try:
         chart_slugs = [c.slug for c in store.list_charts()]
         dashboard_slugs = [d.slug for d in store.list_dashboards()]
-        folder_slugs = [f.slug for f in store.list_folders()]
     except Exception:
-        logger.exception("Could not load charts/dashboards/folders for the roles screen")
-        chart_slugs, dashboard_slugs, folder_slugs = [], [], []
+        logger.exception("Could not load charts/dashboards for the roles screen")
+        chart_slugs, dashboard_slugs = [], []
 
     # Separate from the block above: the catalog is a live query against the
     # warehouse, so it fails independently of anything in the app database.
@@ -1495,7 +1588,6 @@ def _grantable() -> dict[str, list[str]]:
         store.REPORT: report_keys,
         store.CHART: chart_slugs,
         store.DASHBOARD: dashboard_slugs,
-        store.FOLDER: folder_slugs,
         store.FEATURE: list(store.FEATURE_KEYS),
     }
 
@@ -1604,21 +1696,14 @@ def reports_index(
     except Exception:
         logger.exception("Could not load reports")
 
-    folders: dict[str, list[str]] = {}
-    if store.available():
-        try:
-            for f in store.list_folders():
-                for key in f.keys(store.REPORT):
-                    folders.setdefault(key, []).append(f.name)
-        except Exception:
-            logger.exception("Could not read folders for the reports page")
-
+    folders = _folders()
     context = _shell_context(
         user,
         "reports",
         access,
         reports=visible,
         folders=folders,
+        groups=_grouped(visible, folders),
         can_build=access.allows(store.FEATURE, "report_builder") and store.available(),
     )
     return templates.TemplateResponse(request, "reports.html", context)
@@ -1655,9 +1740,9 @@ def report_new(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503)
+        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.")
+        return _forbidden(request, user, "You don't have access to create reports.", access=access)
     return templates.TemplateResponse(
         request, "report_builder.html", _report_form_context(user, access)
     )
@@ -1676,9 +1761,9 @@ def report_preview(
 ):
     """Run the report's SQL so you can see it before saving."""
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.")
+        return _forbidden(request, user, "You don't have access to create reports.", access=access)
     if not access.allows(store.DATABASE, source_db):
-        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
     context = _report_form_context(
         user,
@@ -1719,11 +1804,11 @@ def report_save(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503)
+        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.")
+        return _forbidden(request, user, "You don't have access to create reports.", access=access)
     if not access.allows(store.DATABASE, source_db):
-        return _forbidden(request, user, f"You don't have access to {source_db!r}.")
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
     title = title.strip() or "Untitled report"
     # Editing keeps the slug; a new report gets one that isn't taken. File
@@ -1755,9 +1840,9 @@ def report_edit(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503)
+        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
     if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
-        return _forbidden(request, user, "You don't have access to that report.")
+        return _forbidden(request, user, "You don't have access to that report.", access=access)
     saved = store.get_report(slug)
     if saved is None:
         # Either unknown, or a reports.toml report — those are edited in git.
@@ -1790,45 +1875,83 @@ def report_delete(
     access: store.Access = Depends(access_for),
 ):
     if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
-        return _forbidden(request, user, "You don't have access to that report.")
+        return _forbidden(request, user, "You don't have access to that report.", access=access)
     if store.available():
         store.delete_report(slug)
         logger.info("Report %r deleted by %s", slug, user)
     return RedirectResponse(request.url_for("reports_index"), status_code=303)
 
 
+# ── folders ────────────────────────────────────────────────────────────────
+#
+# Folders group the list pages and nothing else. They carry no permission, so
+# these routes are gated on the ordinary builder features rather than on admin:
+# filing a chart is editing a chart. See store.py's folders section.
+
+# Which feature lets you file each kind of thing — the same one that lets you
+# create it. There is no separate "organise" permission because organising is
+# not a separate power.
+_FILE_FEATURE = {
+    store.CHART: "chart_builder",
+    store.DASHBOARD: "dashboard_builder",
+    store.REPORT: "report_builder",
+}
+
+_FILE_REDIRECT = {
+    store.CHART: "charts_index",
+    store.DASHBOARD: "dashboards_index",
+    store.REPORT: "reports_index",
+}
+
+
+@app.post("/folders/file")
+def folder_file_item(
+    request: Request,
+    resource_type: str = Form(...),
+    resource_key: str = Form(...),
+    folder_id: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Move one item into a folder, or out of all of them with a blank value."""
+    feature = _FILE_FEATURE.get(resource_type)
+    if feature is None:
+        return _forbidden(
+            request, user, "That kind of thing can't be filed in a folder.", access=access
+        )
+    # Both checks matter: the feature says you may organise this kind of thing,
+    # the key says you may see this particular one. Neither implies the other.
+    if not (access.allows(store.FEATURE, feature) and access.allows(resource_type, resource_key)):
+        return _forbidden(request, user, "You don't have access to that.", access=access)
+
+    target = int(folder_id) if folder_id.strip().isdigit() else None
+    if store.available():
+        store.set_item_folder(resource_type, resource_key, target)
+        logger.info("%s %r filed under folder %s by %s", resource_type, resource_key, target, user)
+    return RedirectResponse(request.url_for(_FILE_REDIRECT[resource_type]), status_code=303)
+
+
 @app.get("/admin/folders", response_class=HTMLResponse)
 def admin_folders(request: Request, user: str = Depends(require_admin)):
-    """Folders — the unit a team gets granted.
+    """Create, rename, reorder and delete folders.
 
-    Membership is edited here; granting a folder to a role happens on the Roles
-    tab like any other resource. That split is deliberate: what's *in* a folder
-    is a content decision, who gets it is an access decision.
+    Deliberately *not* where membership is edited: you file something from the
+    page where you can see it, which is the only place the choice makes sense.
     """
-    folders = store.list_folders()
-
-    # Same source as the roles screen, minus the types you can't put in a
-    # folder (a folder holds content, not databases, features or other folders).
-    grantable = _grantable()
-    options: dict[str, list[str]] = {t: list(grantable[t]) for t in store.FOLDERABLE}
-
-    # Same rule as the roles screen: never hide an existing member just because
-    # the underlying thing has gone, or saving would silently drop it.
-    stale: dict[str, list[str]] = {}
-    for rtype in store.FOLDERABLE:
-        current = {k for f in folders for k in f.keys(rtype)}
-        stale[rtype] = sorted(current - set(options[rtype])) if options[rtype] else []
-        options[rtype] = sorted(set(options[rtype]) | current)
+    folders, counts = [], {}
+    if store.available():
+        try:
+            folders = store.list_folders()
+            counts = store.folder_counts()
+        except Exception:
+            logger.exception("Could not read folders for the admin screen")
 
     context = _shell_context(
         user,
         "admin",
         admin_tab="folders",
         folders=folders,
-        options=options,
-        stale=stale,
-        folderable=store.FOLDERABLE,
-        resource_labels=store.RESOURCE_LABELS,
+        counts=counts,
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_folders.html", context)
@@ -1842,29 +1965,37 @@ def admin_create_folder(
     user: str = Depends(require_admin),
 ):
     if store.create_folder(name, description, created_by=user) is None:
-        logger.info("Folder %r not created (empty or duplicate), by %s", name, user)
+        logger.info("Folder %r not created (empty name), by %s", name, user)
     return RedirectResponse(request.url_for("admin_folders"), status_code=303)
 
 
-@app.post("/admin/folders/{folder_id}/items")
-def admin_set_folder_items(
+@app.post("/admin/folders/{folder_id}")
+def admin_update_folder(
     request: Request,
     folder_id: int,
-    resource_type: str = Form(...),
-    keys: list[str] = Form(default=[]),
+    name: str = Form(...),
+    description: str = Form(""),
     user: str = Depends(require_admin),
 ):
-    if not store.set_folder_items(folder_id, resource_type, keys):
-        logger.warning("Rejected folder update %s/%r by %s", folder_id, resource_type, user)
-    else:
-        logger.info("Folder %s %s set to %r by %s", folder_id, resource_type, keys, user)
+    store.update_folder(folder_id, name, description)
+    return RedirectResponse(request.url_for("admin_folders"), status_code=303)
+
+
+@app.post("/admin/folders/{folder_id}/move")
+def admin_move_folder(
+    request: Request,
+    folder_id: int,
+    direction: str = Form(...),
+    user: str = Depends(require_admin),
+):
+    store.move_folder(folder_id, direction)
     return RedirectResponse(request.url_for("admin_folders"), status_code=303)
 
 
 @app.post("/admin/folders/{folder_id}/delete")
 def admin_delete_folder(request: Request, folder_id: int, user: str = Depends(require_admin)):
     store.delete_folder(folder_id)
-    logger.info("Folder %s deleted by %s", folder_id, user)
+    logger.info("Folder %s deleted by %s (contents kept, now ungrouped)", folder_id, user)
     return RedirectResponse(request.url_for("admin_folders"), status_code=303)
 
 

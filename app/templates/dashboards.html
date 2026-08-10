@@ -1,4 +1,5 @@
 {% extends "_shell.html" %}
+{% from "_folders.html" import group_head, file_into with context %}
 {% block page_title %}Dashboards{% endblock %}
 {% block page_sub %}{{ dashboards|length }} saved{% endblock %}
 
@@ -14,27 +15,33 @@
 </form>{% endif %}
 
 {% if dashboards %}
-<div class="bi-cards">
-  {% for d in dashboards %}
-  <div class="bi-card">
-    <div class="bi-card-ic bi-card-ic-dash">
-      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="5.5" height="5"/><rect x="8.5" y="2.5" width="5.5" height="5"/><rect x="2" y="8.5" width="5.5" height="5"/><rect x="8.5" y="8.5" width="5.5" height="5"/></svg>
+  {% for folder, items in groups %}
+  <section class="bi-group">
+    {{ group_head(folder, items|length) }}
+    <div class="bi-cards">
+      {% for d in items %}
+      <div class="bi-card">
+        <div class="bi-card-ic bi-card-ic-dash">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="5.5" height="5"/><rect x="8.5" y="2.5" width="5.5" height="5"/><rect x="2" y="8.5" width="5.5" height="5"/><rect x="8.5" y="8.5" width="5.5" height="5"/></svg>
+        </div>
+        <div class="bi-card-nm">{{ d.title }}</div>
+        <div class="bi-card-sub">
+          {{ d.items|length }} chart{{ '' if d.items|length == 1 else 's' }}
+        </div>
+        <div class="bi-card-meta">
+          <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.slug) }}">Open</a>
+          <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.slug) }}">Edit</a>
+          {{ file_into('dashboard', d.slug, d.folder_id, folders, can_build) }}
+          <form method="post" action="{{ url_for('dashboard_delete', slug=d.slug) }}"
+                onsubmit="return confirm('Delete {{ d.title }}? The charts themselves are kept.')">
+            <button class="bi-btn sm ghost" type="submit">Delete</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
     </div>
-    <div class="bi-card-nm">{{ d.title }}</div>
-    <div class="bi-card-sub">
-      {{ d.items|length }} chart{{ '' if d.items|length == 1 else 's' }}
-    </div>
-    <div class="bi-card-meta">
-      <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.slug) }}">Open</a>
-      <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.slug) }}">Edit</a>
-      <form method="post" action="{{ url_for('dashboard_delete', slug=d.slug) }}"
-            onsubmit="return confirm('Delete {{ d.title }}? The charts themselves are kept.')">
-        <button class="bi-btn sm ghost" type="submit">Delete</button>
-      </form>
-    </div>
-  </div>
+  </section>
   {% endfor %}
-</div>
 {% else %}
 <div class="bi-empty-lg">
   No dashboards yet. Name one above, then add charts to it.

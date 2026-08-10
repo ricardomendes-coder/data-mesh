@@ -219,33 +219,43 @@ MIGRATIONS: list[tuple[str, str]] = [
     (
         "0007_folders",
         """
-        -- Folders are the unit a team gets granted. Rather than adding a
-        -- parallel permission mechanism, a folder is just another resource in
-        -- role_permissions ('folder', <slug>) — granting it expands to
-        -- everything inside, so "the Finance team gets the Finance folder" is
-        -- one grant that keeps working as items are added.
+        -- Folders are presentation, not permission. They decide how the list
+        -- pages are grouped and nothing else: no folder resource type, no row
+        -- in role_permissions, no expansion when access is resolved. Putting a
+        -- chart in a folder can neither grant nor hide it, and the list pages
+        -- group only what the viewer was already allowed to see.
+        --
+        -- Keeping it this way is the whole point. If a folder ever decided who
+        -- may see something, "where does this live" and "who may read it"
+        -- become one question with one answer, which is exactly the coupling
+        -- this schema avoids.
         CREATE TABLE IF NOT EXISTS folders (
             id          bigserial   PRIMARY KEY,
             slug        text        NOT NULL UNIQUE,
             name        text        NOT NULL,
             description text        NOT NULL DEFAULT '',
+            position    integer     NOT NULL DEFAULT 0,
             created_by  text        NOT NULL DEFAULT '',
             created_at  timestamptz NOT NULL DEFAULT now()
         );
 
-        -- Membership is (type, key) exactly like a permission, so the same
-        -- vocabulary covers both and an item can sit in several folders.
-        -- No FK to charts/dashboards: datasets live in another database
-        -- entirely and are identified by name, so all four types are keys.
-        CREATE TABLE IF NOT EXISTS folder_items (
-            folder_id     bigint NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
-            resource_type text   NOT NULL,
-            resource_key  text   NOT NULL,
-            PRIMARY KEY (folder_id, resource_type, resource_key)
-        );
+        -- ON DELETE SET NULL, never CASCADE: deleting a folder must lose the
+        -- grouping and never the content. A dropped folder means "these are
+        -- ungrouped again", which is why membership is a column on the item
+        -- rather than a join table — an item is in one place, like a folder.
+        ALTER TABLE charts
+            ADD COLUMN IF NOT EXISTS folder_id bigint
+            REFERENCES folders(id) ON DELETE SET NULL;
+        ALTER TABLE dashboards
+            ADD COLUMN IF NOT EXISTS folder_id bigint
+            REFERENCES folders(id) ON DELETE SET NULL;
+        ALTER TABLE reports
+            ADD COLUMN IF NOT EXISTS folder_id bigint
+            REFERENCES folders(id) ON DELETE SET NULL;
 
-        CREATE INDEX IF NOT EXISTS folder_items_type_key_idx
-            ON folder_items (resource_type, resource_key);
+        CREATE INDEX IF NOT EXISTS charts_folder_idx     ON charts (folder_id);
+        CREATE INDEX IF NOT EXISTS dashboards_folder_idx ON dashboards (folder_id);
+        CREATE INDEX IF NOT EXISTS reports_folder_idx    ON reports (folder_id);
         """,
     ),
 ]
@@ -318,6 +328,9 @@ class Chart:
     description: str = ""
     created_by: str = ""
     id: int | None = None
+    # Display grouping only — see set_item_folder(). Never read when resolving
+    # access, and deliberately not written by save_chart().
+    folder_id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -347,6 +360,7 @@ def _row_to_chart(row: Any) -> Chart:
         x_column=m["x_column"],
         y_columns=list(y or []),
         created_by=m["created_by"],
+        folder_id=m["folder_id"],
         created_at=m["created_at"],
         updated_at=m["updated_at"],
     )
@@ -354,7 +368,7 @@ def _row_to_chart(row: Any) -> Chart:
 
 _SELECT = (
     "SELECT id, slug, title, description, source_db, sql, chart_type, "
-    "x_column, y_columns, created_by, created_at, updated_at FROM charts"
+    "x_column, y_columns, created_by, folder_id, created_at, updated_at FROM charts"
 )
 
 
@@ -415,8 +429,12 @@ def save_chart(chart: Chart) -> Chart:
                     x_column    = EXCLUDED.x_column,
                     y_columns   = EXCLUDED.y_columns,
                     updated_at  = now()
+                -- folder_id is absent from both the INSERT and the UPDATE on
+                -- purpose: saving a chart must never move it. It is returned so
+                -- the mapper stays whole, and it is set only by set_item_folder.
                 RETURNING id, slug, title, description, source_db, sql, chart_type,
-                          x_column, y_columns, created_by, created_at, updated_at
+                          x_column, y_columns, created_by, folder_id,
+                          created_at, updated_at
                 """
             ),
             params,
@@ -456,12 +474,14 @@ class Dashboard:
     created_by: str = ""
     id: int | None = None
     items: list[DashboardItem] = field(default_factory=list)
+    folder_id: int | None = None  # display grouping only
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
 
 _DASH_SELECT = (
-    "SELECT id, slug, title, description, created_by, created_at, updated_at FROM dashboards"
+    "SELECT id, slug, title, description, created_by, folder_id, "
+    "created_at, updated_at FROM dashboards"
 )
 
 
@@ -473,6 +493,7 @@ def _row_to_dashboard(row: Any) -> Dashboard:
         title=m["title"],
         description=m["description"],
         created_by=m["created_by"],
+        folder_id=m["folder_id"],
         created_at=m["created_at"],
         updated_at=m["updated_at"],
     )
@@ -564,7 +585,9 @@ def save_dashboard(dash: Dashboard) -> Dashboard:
                     title       = EXCLUDED.title,
                     description = EXCLUDED.description,
                     updated_at  = now()
-                RETURNING id, slug, title, description, created_by, created_at, updated_at
+                -- folder_id deliberately untouched; see save_chart().
+                RETURNING id, slug, title, description, created_by, folder_id,
+                          created_at, updated_at
                 """
             ),
             {
@@ -717,15 +740,9 @@ DATASET = "dataset"
 REPORT = "report"
 CHART = "chart"
 DASHBOARD = "dashboard"
-FOLDER = "folder"
 FEATURE = "feature"
 
-RESOURCE_TYPES = (DATABASE, DATASET, REPORT, CHART, DASHBOARD, FOLDER, FEATURE)
-
-# What a folder can contain. Databases and features are excluded on purpose:
-# a database is infrastructure rather than content, and a feature is a
-# capability — neither belongs to a team's folder of things.
-FOLDERABLE = (DATASET, REPORT, CHART, DASHBOARD)
+RESOURCE_TYPES = (DATABASE, DATASET, REPORT, CHART, DASHBOARD, FEATURE)
 
 # Capabilities that aren't a stored object. Adding one here is all it takes to
 # make it grantable — no migration, since permissions are just (type, key).
@@ -744,7 +761,6 @@ RESOURCE_LABELS = {
     REPORT: "Reports",
     CHART: "Charts",
     DASHBOARD: "Dashboards",
-    FOLDER: "Folders",
     FEATURE: "Features",
 }
 
@@ -1114,25 +1130,6 @@ def access_for(username: str) -> Access:
         if ANY in granted.get(ANY, set()):
             return Access(username=username, everything=True)
 
-        # Expand folder grants into their contents. This is what makes "the
-        # Finance team gets the Finance folder" a single durable grant: items
-        # added to the folder later are covered without touching any role.
-        folder_keys = granted.get(FOLDER, set())
-        if folder_keys:
-            if ANY in folder_keys:
-                members = conn.execute(text("SELECT resource_type, resource_key FROM folder_items"))
-            else:
-                members = conn.execute(
-                    text(
-                        "SELECT fi.resource_type, fi.resource_key FROM folder_items fi "
-                        "JOIN folders f ON f.id = fi.folder_id "
-                        "WHERE f.slug = ANY(:slugs)"
-                    ),
-                    {"slugs": sorted(folder_keys)},
-                )
-            for rtype, rkey in members:
-                granted.setdefault(rtype, set()).add(rkey)
-
     return Access(username=username, granted=granted)
 
 
@@ -1156,13 +1153,14 @@ class Report:
     created_by: str = ""
     id: int | None = None
     editable: bool = True
+    folder_id: int | None = None  # display grouping only
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
 
 _REPORT_SELECT = (
     "SELECT id, slug, title, description, source_db, sql, created_by, "
-    "created_at, updated_at FROM reports"
+    "folder_id, created_at, updated_at FROM reports"
 )
 
 
@@ -1176,6 +1174,7 @@ def _row_to_report(row: Any) -> Report:
         source_db=m["source_db"],
         sql=m["sql"],
         created_by=m["created_by"],
+        folder_id=m["folder_id"],
         created_at=m["created_at"],
         updated_at=m["updated_at"],
     )
@@ -1206,8 +1205,9 @@ def save_report(report: Report) -> Report:
                     source_db   = EXCLUDED.source_db,
                     sql         = EXCLUDED.sql,
                     updated_at  = now()
+                -- folder_id deliberately untouched; see save_chart().
                 RETURNING id, slug, title, description, source_db, sql, created_by,
-                          created_at, updated_at
+                          folder_id, created_at, updated_at
                 """
             ),
             {
@@ -1228,59 +1228,59 @@ def delete_report(slug: str) -> bool:
         return result.rowcount > 0
 
 
-# ── folders ────────────────────────────────────────────────────────────────
+# ── folders (presentation only) ────────────────────────────────────────────
+#
+# Nothing in this section is consulted by access_for(). Folders group the list
+# pages and nothing more: they are applied *after* permission filtering, so the
+# most a folder can do is decide under which heading an already-visible item
+# appears. There is deliberately no FOLDER resource type — see RESOURCE_TYPES.
 
 
 @dataclass
 class Folder:
-    slug: str
     name: str
+    slug: str = ""
     description: str = ""
+    position: int = 0
     created_by: str = ""
     id: int | None = None
-    # resource_type -> keys inside this folder
-    items: dict[str, list[str]] = field(default_factory=dict)
 
-    def keys(self, resource_type: str) -> list[str]:
-        return self.items.get(resource_type, [])
 
-    @property
-    def item_count(self) -> int:
-        return sum(len(v) for v in self.items.values())
+# The three tables carrying a folder_id. Datasets are absent on purpose: they
+# live in another database and are grouped by datasets.toml, which also holds
+# their descriptions and example queries.
+FOLDERED = (CHART, DASHBOARD, REPORT)
+_FOLDER_TABLE = {CHART: "charts", DASHBOARD: "dashboards", REPORT: "reports"}
+
+
+def _row_to_folder(row: Any) -> Folder:
+    m = row._mapping
+    return Folder(
+        id=m["id"],
+        slug=m["slug"],
+        name=m["name"],
+        description=m["description"],
+        position=m["position"],
+        created_by=m["created_by"],
+    )
+
+
+_FOLDER_COLUMNS = "id, slug, name, description, position, created_by"
+_FOLDER_SELECT = f"SELECT {_FOLDER_COLUMNS} FROM folders"
 
 
 def list_folders() -> list[Folder]:
+    """Folders in display order. `position` first so an admin can order them,
+    name as the tiebreak so two new folders never flip around between loads."""
     with engine().connect() as conn:
-        rows = conn.execute(
-            text("SELECT id, slug, name, description, created_by FROM folders ORDER BY name")
-        ).fetchall()
-        members = conn.execute(
-            text(
-                "SELECT folder_id, resource_type, resource_key FROM folder_items "
-                "ORDER BY resource_type, resource_key"
-            )
-        ).fetchall()
-    by_folder: dict[int, dict[str, list[str]]] = {}
-    for fid, rtype, rkey in members:
-        by_folder.setdefault(fid, {}).setdefault(rtype, []).append(rkey)
-    out = []
-    for r in rows:
-        m = r._mapping
-        out.append(
-            Folder(
-                id=m["id"],
-                slug=m["slug"],
-                name=m["name"],
-                description=m["description"],
-                created_by=m["created_by"],
-                items=by_folder.get(m["id"], {}),
-            )
-        )
-    return out
+        rows = conn.execute(text(f"{_FOLDER_SELECT} ORDER BY position, name"))
+        return [_row_to_folder(r) for r in rows]
 
 
 def get_folder(slug: str) -> Folder | None:
-    return next((f for f in list_folders() if f.slug == slug), None)
+    with engine().connect() as conn:
+        row = conn.execute(text(f"{_FOLDER_SELECT} WHERE slug = :s"), {"s": slug}).first()
+        return _row_to_folder(row) if row else None
 
 
 def create_folder(name: str, description: str = "", created_by: str = "") -> Folder | None:
@@ -1289,70 +1289,105 @@ def create_folder(name: str, description: str = "", created_by: str = "") -> Fol
         return None
     slug = unique_slug(name, exists=get_folder)
     with engine().begin() as conn:
+        # New folders land at the bottom rather than jumping to the top.
+        last = conn.execute(text("SELECT coalesce(max(position), 0) FROM folders")).scalar()
         row = conn.execute(
             text(
-                "INSERT INTO folders (slug, name, description, created_by) "
-                "VALUES (:s, :n, :d, :b) ON CONFLICT (slug) DO NOTHING "
-                "RETURNING id, slug, name, description, created_by"
+                "INSERT INTO folders (slug, name, description, position, created_by) "
+                "VALUES (:slug, :name, :description, :position, :created_by) "
+                f"RETURNING {_FOLDER_COLUMNS}"
             ),
-            {"s": slug, "n": name, "d": description, "b": created_by},
+            {
+                "slug": slug,
+                "name": name,
+                "description": description.strip(),
+                "position": (last or 0) + 1,
+                "created_by": created_by,
+            },
         ).first()
-    if row is None:
-        return None
-    m = row._mapping
-    return Folder(
-        id=m["id"],
-        slug=m["slug"],
-        name=m["name"],
-        description=m["description"],
-        created_by=m["created_by"],
-    )
+    return _row_to_folder(row)
+
+
+def update_folder(folder_id: int, name: str, description: str = "") -> bool:
+    """Rename in place. The slug is left alone so any link to it keeps working."""
+    name = name.strip()
+    if not name:
+        return False
+    with engine().begin() as conn:
+        result = conn.execute(
+            text("UPDATE folders SET name = :n, description = :d WHERE id = :id"),
+            {"n": name, "d": description.strip(), "id": folder_id},
+        )
+        return result.rowcount > 0
 
 
 def delete_folder(folder_id: int) -> bool:
+    """Delete the folder. Its contents survive and become ungrouped — the FK is
+    ON DELETE SET NULL, so this can never take a chart or report with it."""
     with engine().begin() as conn:
         result = conn.execute(text("DELETE FROM folders WHERE id = :id"), {"id": folder_id})
         return result.rowcount > 0
 
 
-def set_folder_items(folder_id: int, resource_type: str, keys: list[str]) -> bool:
-    """Replace one resource type's membership — one section per submit, so
-    saving Charts can't clear Datasets."""
-    if resource_type not in FOLDERABLE:
+def move_folder(folder_id: int, direction: str) -> bool:
+    """Swap this folder's position with its neighbour above or below."""
+    if direction not in ("up", "down"):
         return False
-    cleaned = sorted({k.strip() for k in keys if k and k.strip()})
     with engine().begin() as conn:
-        exists = conn.execute(
-            text("SELECT 1 FROM folders WHERE id = :id"), {"id": folder_id}
-        ).scalar()
-        if not exists:
+        ordered = [
+            (r[0], r[1])
+            for r in conn.execute(text("SELECT id, position FROM folders ORDER BY position, name"))
+        ]
+        index = next((i for i, (fid, _) in enumerate(ordered) if fid == folder_id), None)
+        if index is None:
             return False
-        conn.execute(
-            text("DELETE FROM folder_items WHERE folder_id = :id AND resource_type = :t"),
-            {"id": folder_id, "t": resource_type},
-        )
-        for key in cleaned:
+        target = index - 1 if direction == "up" else index + 1
+        if not 0 <= target < len(ordered):
+            return False
+        # Rewrite the whole order rather than swapping two values: positions
+        # seeded from other paths can collide, and a swap of equal values is a
+        # no-op the user reads as a bug.
+        ordered[index], ordered[target] = ordered[target], ordered[index]
+        for position, (fid, _) in enumerate(ordered):
             conn.execute(
-                text(
-                    "INSERT INTO folder_items (folder_id, resource_type, resource_key) "
-                    "VALUES (:id, :t, :k) ON CONFLICT DO NOTHING"
-                ),
-                {"id": folder_id, "t": resource_type, "k": key},
+                text("UPDATE folders SET position = :p WHERE id = :id"),
+                {"p": position, "id": fid},
             )
     return True
 
 
-def folders_containing(resource_type: str, key: str) -> list[str]:
-    """Folder names holding this item — shown on list pages so it's obvious
-    which team owns a thing."""
+def set_item_folder(resource_type: str, key: str, folder_id: int | None) -> bool:
+    """Move one item into a folder, or out of every folder with None.
+
+    The only writer of folder_id. Saving a chart, dashboard or report never
+    touches it, so editing a thing cannot silently move it.
+    """
+    table = _FOLDER_TABLE.get(resource_type)
+    if table is None:
+        return False
+    with engine().begin() as conn:
+        if folder_id is not None:
+            exists = conn.execute(
+                text("SELECT 1 FROM folders WHERE id = :id"), {"id": folder_id}
+            ).first()
+            if exists is None:
+                return False
+        result = conn.execute(
+            text(f"UPDATE {table} SET folder_id = :f WHERE slug = :s"),  # noqa: S608 — fixed map
+            {"f": folder_id, "s": key},
+        )
+        return result.rowcount > 0
+
+
+def folder_counts() -> dict[int, int]:
+    """How many items sit in each folder, across all three types.
+
+    Admin-only: it counts everything that exists, ignoring who may see it, and
+    is shown on the folder admin screen so an empty folder is obvious.
+    """
+    union = " UNION ALL ".join(
+        f"SELECT folder_id FROM {t} WHERE folder_id IS NOT NULL" for t in _FOLDER_TABLE.values()
+    )
     with engine().connect() as conn:
-        return [
-            r[0]
-            for r in conn.execute(
-                text(
-                    "SELECT f.name FROM folders f JOIN folder_items fi ON fi.folder_id = f.id "
-                    "WHERE fi.resource_type = :t AND fi.resource_key = :k ORDER BY f.name"
-                ),
-                {"t": resource_type, "k": key},
-            )
-        ]
+        rows = conn.execute(text(f"SELECT folder_id, count(*) FROM ({union}) x GROUP BY 1"))
+        return dict(rows.all())
