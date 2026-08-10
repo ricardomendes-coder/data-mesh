@@ -252,6 +252,15 @@ def _forbidden(
     return templates.TemplateResponse(request, "forbidden.html", context, status_code=status)
 
 
+# ── folder helpers — parked, not dead ──────────────────────────────────────
+#
+# Nothing calls these two right now: the folder UI was built, judged confusing,
+# and unwired on purpose. The schema, the store API and these helpers are kept
+# so bringing it back is a template change rather than a rewrite. Deleting them
+# as "unused" is the one thing that would make that expensive, hence this note.
+# See the folders section further down for the full picture.
+
+
 def _folders() -> list[store.Folder]:
     """Every folder, or none if they can't be read. Never fatal: folders are
     decoration, so losing them costs the headings and nothing else."""
@@ -854,17 +863,11 @@ def charts_index(
         "charts",
         access,
         charts=[],
-        groups=[],
-        folders=[],
         can_build=access.allows(store.FEATURE, "chart_builder"),
     )
     try:
         # Filtered by slug: a chart you can't open shouldn't be listed either.
-        visible = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
-        context["charts"] = visible
-        context["folders"] = _folders()
-        # Grouping comes after the filter above, never before it.
-        context["groups"] = _grouped(visible, context["folders"])
+        context["charts"] = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
     except Exception:
         logger.exception("Could not list charts")
         context["db_ok"] = False
@@ -1164,15 +1167,12 @@ def dashboards_index(
         "dashboards",
         access,
         dashboards=[],
-        groups=[],
-        folders=[],
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
     )
     try:
-        visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
-        context["dashboards"] = visible
-        context["folders"] = _folders()
-        context["groups"] = _grouped(visible, context["folders"])
+        context["dashboards"] = [
+            d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)
+        ]
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False
@@ -1696,14 +1696,11 @@ def reports_index(
     except Exception:
         logger.exception("Could not load reports")
 
-    folders = _folders()
     context = _shell_context(
         user,
         "reports",
         access,
         reports=visible,
-        folders=folders,
-        groups=_grouped(visible, folders),
         can_build=access.allows(store.FEATURE, "report_builder") and store.available(),
     )
     return templates.TemplateResponse(request, "reports.html", context)
@@ -1882,11 +1879,30 @@ def report_delete(
     return RedirectResponse(request.url_for("reports_index"), status_code=303)
 
 
-# ── folders ────────────────────────────────────────────────────────────────
+# ── folders (UNWIRED — kept for a future attempt) ──────────────────────────
 #
 # Folders group the list pages and nothing else. They carry no permission, so
 # these routes are gated on the ordinary builder features rather than on admin:
 # filing a chart is editing a chart. See store.py's folders section.
+#
+# The UI is deliberately switched off: the grouping read as cluttered and the
+# per-card "move to folder" dropdown wasn't obvious enough to earn its place, so
+# the app now behaves exactly as if folders had never been built. What that
+# means concretely:
+#
+#   * no Folders tab in the admin sub-nav (_admin_tabs.html)
+#   * the charts / dashboards / reports pages render one flat list of cards
+#   * nothing reads or writes folder_id in the normal course of using the app
+#
+# Everything underneath survives — migration 0007, the folders table, the
+# folder_id columns, the store API, these routes, admin_folders.html and the
+# _folders.html macros. The routes below still work if you hit the URLs; they
+# are simply unreachable by clicking. Turning it back on means re-adding the tab
+# and the macro calls in the three list templates, not rebuilding any of this.
+#
+# The one rule to keep if it does come back: a folder must never grant anything.
+# That property is pinned by test_folders_are_organisation_only, which still
+# runs — the guarantee is about the schema, not the screens.
 
 # Which feature lets you file each kind of thing — the same one that lets you
 # create it. There is no separate "organise" permission because organising is

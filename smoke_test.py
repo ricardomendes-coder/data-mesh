@@ -595,11 +595,14 @@ def test_dashboard_pages_render():
     print("dashboard pages render: OK")
 
 
-def test_folder_pages_render():
-    """Render every page that grew folder UI.
+def test_list_pages_render_without_folder_ui():
+    """The three list pages render, and show no sign that folders exist.
 
-    Same reason as test_dashboard_pages_render: the folder macros are imported
-    `with context`, and only a real render proves it.
+    Folders are built but deliberately unwired (see main.py's folders section),
+    so a filed item must look exactly like an unfiled one. This renders for real
+    rather than parsing, which is the only way to catch a template that imports
+    the folder macros again — and asserts the absence, so switching the UI back
+    on is always a deliberate act with a failing test to acknowledge.
     """
     from app import store
 
@@ -631,6 +634,9 @@ def test_folder_pages_render():
         store.list_charts,
         store.list_dashboards,
         store.list_folders,
+        store.list_reports,
+        store.list_users,
+        store.list_roles,
         store.folder_counts,
         store.is_admin,
         store.upsert_user,
@@ -640,6 +646,13 @@ def test_folder_pages_render():
     store.list_charts = lambda: [chart, loose]
     store.list_dashboards = lambda: [dash]
     store.list_folders = lambda: [fin]
+    # Every reader the four pages below touch: available() is stubbed True, so
+    # an unstubbed one reaches a real engine instead of rendering.
+    store.list_reports = lambda: []
+    store.list_users = lambda: [
+        store.User(id=1, username="admin", email="a@v360.io", is_admin=True, roles=[])
+    ]
+    store.list_roles = lambda: []
     store.folder_counts = lambda: {1: 2}
     store.is_admin = lambda u: True
     store.upsert_user = _no_op_user
@@ -648,34 +661,47 @@ def test_folder_pages_render():
         with TestClient(app, base_url="https://testserver") as client:
             client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
 
+            # Both charts are listed — the filed one and the unfiled one — and
+            # nothing distinguishes them.
             r = client.get("/charts")
             assert r.status_code == 200, r.text[:400]
-            assert "Financeiro" in r.text, "folder heading missing"
-            assert "Ungrouped" in r.text, "the unfiled chart lost its heading"
-            assert "bi-fileselect" in r.text, "no way to file a chart from its page"
+            assert "Vendas por dia" in r.text and "Gráfico avulso" in r.text
 
             r = client.get("/dashboards")
             assert r.status_code == 200, r.text[:400]
-            assert "Financeiro" in r.text and "Operação" in r.text
+            assert "Operação" in r.text
 
-            r = client.get("/admin/folders")
+            r = client.get("/reports")
             assert r.status_code == 200, r.text[:400]
-            assert "Financeiro" in r.text and "financeiro" in r.text
-            assert "2 items" in r.text, "folder item count missing"
-            # The screen has to say what a folder is not, next to permissions.
-            assert "organisation only" in r.text.lower()
+
+            # Markup only. The folder CSS still ships in the shared stylesheet
+            # — it's parked with the rest of the feature — so asserting on class
+            # names would match base.html rather than anything rendered.
+            for path in ("/charts", "/dashboards", "/reports", "/admin/users"):
+                body = client.get(path).text
+                for trace in (
+                    'name="folder_id"',  # the "move to folder" select
+                    "/folders/file",  # the form it posts to
+                    ">Ungrouped<",  # the leftovers heading, as rendered
+                    "Financeiro",  # this fixture's folder name
+                    "/admin/folders",  # a link to the folders screen
+                ):
+                    assert trace not in body, f"folder UI is back on {path}: {trace!r}"
     finally:
         (
             store.available,
             store.list_charts,
             store.list_dashboards,
             store.list_folders,
+            store.list_reports,
+            store.list_users,
+            store.list_roles,
             store.folder_counts,
             store.is_admin,
             store.upsert_user,
             store.set_user_admin,
         ) = saved
-    print("folder pages render: OK")
+    print("list pages render, no folder UI: OK")
 
 
 def test_folders_are_organisation_only():
@@ -1794,7 +1820,7 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
-    test_folder_pages_render()
+    test_list_pages_render_without_folder_ui()
     test_folders_are_organisation_only()
     test_admin_panel_and_gate()
     test_every_resource_type_is_grantable()
