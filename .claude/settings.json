@@ -23,7 +23,17 @@
       "Bash(QUERY_MAX_ROWS=777 /tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/scratchpad/venv/bin/python -c ' *)",
       "Bash(kill 49986)",
       "Bash(awk 'NR>=1173 && /^# ──/ && NR>1173 {print NR\": \"$0; exit} NR>=1173 && NR<=1400 && /^def |^@dataclass|^class /{print NR\": \"$0}' app/store.py)",
-      "Bash(echo \"single-line, self-closing: $\\(grep -cE '^\\\\s*return _forbidden\\\\\\(request, user, .*\\\\\\)$' app/main.py\\)\")"
+      "Bash(echo \"single-line, self-closing: $\\(grep -cE '^\\\\s*return _forbidden\\\\\\(request, user, .*\\\\\\)$' app/main.py\\)\")",
+      "Bash(xargs -I{} echo \"bashrc vars found: {}\")",
+      "Bash(break)",
+      "Skill(fewer-permission-prompts)",
+      "Skill(fewer-permission-prompts:*)",
+      "Bash(pytest *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format --check *)",
+      "Bash(awk *)",
+      "Bash(node --check *)",
+      "Bash(google-chrome --headless *)"
     ]
   }
 }

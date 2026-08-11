@@ -18,9 +18,18 @@
 {% for w in spec.warnings %}<div class="bi-err">{{ w }}</div>{% endfor %}
 {% endif %}
 
+{% set how = spec.renders_as if spec else 'canvas' %}
+{% if how == 'number' %}
+<div class="bi-chartbox bi-chartbox-lg bi-kpi-box">
+  <div class="bi-kpi bi-kpi-lg">{{ spec.value }}</div>
+  {% if spec.caption %}<div class="bi-kpi-cap">{{ spec.caption }}</div>{% endif %}
+</div>
+{% elif how == 'canvas' %}
 <div class="bi-chartbox bi-chartbox-lg">
   <canvas id="chart" height="360"></canvas>
 </div>
+{% endif %}
+{# A table chart needs no box of its own — the Data pane below *is* the chart. #}
 
 <div class="bi-panel-tabs">
   <button class="bi-ptab active" data-tab="data" type="button">Data</button>
@@ -48,7 +57,7 @@
   <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|urlencode }}">Open in Query</a>
 </section>
 
-<script id="chart-data" type="application/json">{{ spec.to_dict()|tojson if spec else 'null' }}</script>
+<script id="chart-data" type="application/json">{{ spec.to_dict()|tojson if (spec and how == 'canvas') else 'null' }}</script>
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script>

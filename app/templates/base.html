@@ -306,6 +306,43 @@
     .bi-icobtn[disabled]{opacity:.35;cursor:default;}
     .bi-icobtn[disabled]:hover{border-color:var(--border-strong);color:var(--body);background:var(--surface);}
 
+    /* ── dashboard filter bar ── */
+    .bi-filterbar{display:flex;align-items:flex-end;gap:.7rem;flex-wrap:wrap;padding:.7rem .85rem;margin-bottom:.9rem;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--sh-1);}
+    .bi-filter{display:flex;flex-direction:column;gap:.22rem;}
+    .bi-filter label{font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.01em;}
+    .bi-filter select,.bi-filter input{height:30px;min-width:150px;max-width:230px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .4rem;font-size:.78rem;color:var(--title);background:var(--surface);outline:none;}
+    .bi-filter select[multiple]{height:auto;min-height:30px;max-height:96px;}
+    .bi-filter select:focus,.bi-filter input:focus{border-color:var(--orange);box-shadow:var(--ring);}
+    .bi-daterange{display:flex;gap:.3rem;}
+    .bi-daterange input{min-width:130px;}
+    .bi-filter-actions{display:flex;gap:.35rem;margin-left:auto;}
+    .bi-kind-warn{background:#FFF3E8;color:#9A4B00;}
+    .bi-fldrow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.35rem 0;border-bottom:1px solid #F1F2F4;font-size:.78rem;}
+    .bi-filterform{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.6rem;}
+    .bi-filterform .bi-fldinput{min-width:150px;flex:1 1 150px;}
+
+    /* ── dashboard tabs + text tiles ── */
+    .bi-dash-tabs{margin:.2rem 0 1rem;flex-wrap:wrap;}
+    /* A text tile is page furniture, not a card: no border, no shadow. */
+    .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;}
+    .bi-textblock{color:var(--title);font-size:1rem;font-weight:600;line-height:1.4;}
+    .bi-textblock p{margin:.3rem 0;font-weight:400;color:var(--body);font-size:.86rem;}
+    .bi-tile-text .bi-tile-ctl{position:absolute;top:0;right:0;opacity:0;transition:opacity .12s;}
+    .bi-tile-text:hover .bi-tile-ctl{opacity:1;}
+
+    /* ── table and big-number tiles ── */
+    /* Scrolls inside the tile: a 200-row table must not set the row height for
+       every other tile beside it. */
+    .bi-tile-table{overflow:auto;max-height:320px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);}
+    .bi-tile-table .bi-restbl{font-size:.74rem;}
+    .bi-tile-table .bi-restbl th{font-size:.67rem;padding:.4rem .55rem;}
+    .bi-tile-table .bi-restbl td{padding:.34rem .55rem;}
+    .bi-tile-number{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:150px;gap:.3rem;}
+    .bi-kpi{font-size:2.6rem;line-height:1.05;font-weight:650;color:var(--title);letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+    .bi-kpi-lg{font-size:4rem;}
+    .bi-kpi-cap{font-size:.78rem;color:var(--muted);}
+    .bi-kpi-box{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:220px;}
+
     /* ── folders (grouping only — they carry no permission) ── */
     .bi-fld-ic{color:var(--muted);flex:none;}
     .bi-group-tt .bi-fld-ic{margin-right:.1rem;vertical-align:-2px;}

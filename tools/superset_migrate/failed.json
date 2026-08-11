@@ -1,0 +1,3117 @@
+[
+ [
+  15,
+  "filter_inconsistency_active",
+  "filter_box",
+  "analytics",
+  "viz_type 'filter_box' has no Report Hub equivalent"
+ ],
+ [
+  18,
+  "bar_registro_cliente_inconsistency",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  29,
+  "time_captura_months_creation",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  73,
+  "fup_db_filter",
+  "filter_box",
+  "analytics",
+  "viz_type 'filter_box' has no Report Hub equivalent"
+ ],
+ [
+  75,
+  "fup_db_tables_treemap",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  88,
+  "bignumbers_nfs_categoria_tree",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  92,
+  "Target OKR Percentual",
+  "echarts_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"target_q1\" does not exist"
+ ],
+ [
+  198,
+  "TPV por Cliente",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  199,
+  "TPV por Cliente - Composição por Categoria",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  200,
+  "TPV por Cliente - Composição por Categoria %",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  204,
+  "Notas capturadas por estado - Mapa",
+  "country_map",
+  "analytics",
+  "viz_type 'country_map' has no Report Hub equivalent"
+ ],
+ [
+  205,
+  "Tipo de Inserção",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  207,
+  "Provider nulo por cliente e tipo de nota",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  208,
+  "Captura por cliente por tipo de nota",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"origem_nota\" does not exist"
+ ],
+ [
+  212,
+  "bc2. Quantidade de chamados atualmente abertos por cliente por nível de prioridade",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  219,
+  "Percentual automatismo por prefeitura - Serviço",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"origem_nota\" does not exist"
+ ],
+ [
+  220,
+  "Quantidade notas capturadas por prefeitura - Serviço",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"origem_nota\" does not exist"
+ ],
+ [
+  224,
+  "Percentual captura por cliente por tipo de nota",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"origem_nota\" does not exist"
+ ],
+ [
+  229,
+  "pt2.temp. Quant tickets tipo Falta de Leitura-Captura /cliente /mes",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"__timestamp\" does not exist"
+ ],
+ [
+  232,
+  "tsbc3. Quantidade total de chamados abertos por cliente por nível de criticidade",
+  "echarts_timeseries_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  236,
+  "bc1. Média de horas úteis gastas por categoria de ticket e criticidade",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  237,
+  "bc3. Duração média das etapa em dias",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  241,
+  "tsbc1. Quantidade chamados tipo bug por cliente",
+  "echarts_timeseries_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  242,
+  "Notas que poderiam ter sido capturadas",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  244,
+  "Top 10 fornecedores NFs poderiam ter sido capturadas",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  251,
+  "tsbc2. Quantidade de chamados tipo melhoria por cliente e nível de criticidade",
+  "echarts_timeseries_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  257,
+  "bc4. Total de esforço estimado do time dev por cliente / nível de criticidade",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  259,
+  "Tempo médio da diferença entre emissão e captura (dias) - Histórico",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"emissao_pos_inicio\" does not exist"
+ ],
+ [
+  264,
+  "Notas que apresentam algum erro de leitura",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leitura_analytics_validacao\" does not exist"
+ ],
+ [
+  278,
+  "total_por_composicao_titulo",
+  "sunburst",
+  "analytics",
+  "viz_type 'sunburst' has no Report Hub equivalent"
+ ],
+ [
+  281,
+  "total_salvo_mes",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"total_hora\" does not exist"
+ ],
+ [
+  290,
+  "Top 10 clientes com mais erro em robô - Últimos 7 dias",
+  "dist_bar",
+  "robots_api",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  292,
+  "Campos com mais erros de leitura",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leitura_analytics_validacao\" does not exist"
+ ],
+ [
+  294,
+  "Notas com erro x Cidade",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leitura_analytics_validacao\" does not exist"
+ ],
+ [
+  296,
+  "bc5. Total de esforço estimado do time CS por cliente / nível de criticidade",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  302,
+  "Total de BPO x Leitor",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  311,
+  "bc6. Quantidade de chamados por cliente por tipo de chamado",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  314,
+  "qntd_fornecedores_ativos",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.fornecedores\" does not exist"
+ ],
+ [
+  321,
+  "Notas com BPO (%) x Leitor",
+  "dist_bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  330,
+  "Clientes com credencial de serviço (município) com senha inválida",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  336,
+  "Recorrências de último download há mais de 6 dias",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  339,
+  "Qtde NFs de Telecom com nº de contrato não cadastrado - Por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  340,
+  "Qtde NFs de Utilities com nº de instalação não cadastrado - Por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  349,
+  "Clientes com credencial de instalação com senha inválida",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  350,
+  "Clientes com credencial de telecom com senha inválida",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  351,
+  "Clientes com credencial de serviço (município) com senha inválida",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  353,
+  "Clientes com credencial de instalação com senha inválida",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  354,
+  "Clientes com credencial de telecom com senha inválida",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  355,
+  "Requisições de insucesso nos últimos 6 dias - Por origem/fonte",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  356,
+  "Return_status dos robôs nulo - Últimos 7 dias",
+  "dist_bar",
+  "robots_api",
+  "too many series"
+ ],
+ [
+  359,
+  "captura_credentials_last_refresh_at",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  361,
+  "captura_installations_last_refresh_at",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  363,
+  "captura_downloads_last_refresh_at",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  365,
+  "captura_WSreqs_last_refresh_at",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  368,
+  "Clientes com certificados digitais vencidos ou com senha inválida",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  370,
+  "captura_certificate_last_refresh_at",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  372,
+  "Clientes com certificados digitais vencidos ou com senha inválida",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  373,
+  "Clientes com certificados digitais com senha inválida",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  381,
+  "bbc1. Total de esforço estimado do time CS por cliente / nível de criticidade",
+  "bubble",
+  "analytics",
+  "viz_type 'bubble' has no Report Hub equivalent"
+ ],
+ [
+  382,
+  "Nenhuma requisição de Webservice de sucesso há mais de 6 dias - Por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  386,
+  "titulo_tipo_total",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"concat_titulo_tipo\" does not exist"
+ ],
+ [
+  387,
+  "horas_salvas_por_download",
+  "bubble",
+  "analytics",
+  "viz_type 'bubble' has no Report Hub equivalent"
+ ],
+ [
+  391,
+  "Clientes com credencial de serviço (município) com senha inválida - Cidades por cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  392,
+  "25 maiores recorrências em NFs de nº de instalação não cadastrados no portal - Utilities",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  393,
+  "25 maiores recorrências em NFs de contratos de Telecom não cadastrados no portal - Telecom",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  394,
+  "25 maiores recorrências de contrato Telecom sem entrada automática de NF há mais de 35 dias - Telecom",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  395,
+  "25 maiores recorrências de instalação sem entrada automática de NF há mais de 35 dias - Utilities",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  396,
+  "Nenhuma requisição de Webservice há mais de 6 dias - Por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  400,
+  "Sucesso x Insucesso (NULL) em última requisição há mais de 6 dias | Recorte últimos 2 meses",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  405,
+  "mts1. Total de ticket e total cumprido dentro do sla / nível de criticidade",
+  "mixed_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  406,
+  "mts2. Total de ticket e total cumprido dentro do sla / nível de criticidade",
+  "mixed_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  407,
+  "Requisições de insucesso nos últimos 6 dias - Por  cliente e origem/fonte",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  413,
+  "fornecedores_por_time_range",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  414,
+  "Automatismo x Total de Notas",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  415,
+  "Percentual de notas com erro x Mês",
+  "echarts_timeseries_smooth",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leitura_analytics_validacao\" does not exist"
+ ],
+ [
+  417,
+  "BPO(%) x Mês",
+  "echarts_timeseries_smooth",
+  "analytics",
+  "too many series"
+ ],
+ [
+  422,
+  "tm1. Total de tickets abertos",
+  "treemap",
+  "analytics",
+  "viz_type 'treemap' has no Report Hub equivalent"
+ ],
+ [
+  423,
+  "bc6. Horas de esforço por tipo de ticket",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  424,
+  "bc7. Quantidade de tickets por tipo",
+  "dist_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.SyntaxError) zero-length delimited identifier at or near \"\"\"\""
+ ],
+ [
+  427,
+  "Top 10 prefeituras com maior quantidade de captura - Serviço",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  428,
+  "Top 10 prefeituras com maior quantidade de inserção manual - Serviço",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  429,
+  "Visão Mensal de Tipo de Ingresso das Notas",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  430,
+  "Top 30 fornecedores NFs poderiam ter sido capturadas",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  431,
+  "prazo_medio_pagamento",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.fornecedores_prazo_pagamento\" does not exist"
+ ],
+ [
+  433,
+  "Qntd. de processos por cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.processos_cliente\" does not exist"
+ ],
+ [
+  443,
+  "Qntd. de login usuários por cliente e time range",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  444,
+  "Qntd. de login usuários inativos por cliente e time range",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  452,
+  "Qntd. de processos ativos nos ultimos 30 dias por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  462,
+  "lockin- processos ativos, integrações e numero de usuarios",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.processos_cliente\" does not exist"
+ ],
+ [
+  470,
+  "% de Notas que foram inseridas manualmente e automaticamente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  472,
+  "Volume de Notas Canceladas Por Tipo de Nota",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"tipo_para_categoria\" does not exist"
+ ],
+ [
+  473,
+  "Total de usuários ativos e inativos ( acesso em 28 dias)",
+  "dist_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.processos_cliente\" does not exist"
+ ],
+ [
+  476,
+  "Divergências x Cidade",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.view_leitura_validation_errors\" does not exist"
+ ],
+ [
+  477,
+  "Top 50 usuários que inseriram NFs que poderiam ter sido capturadas",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  480,
+  "Top 50 usuários que inseriram NFs que poderiam ter sido capturadas - Por Prefeitura",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  487,
+  "Grau de Automatismo (% de Notas sem nenhuma interação manual) | 2023",
+  "echarts_timeseries_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.automatismo_cs\" does not exist"
+ ],
+ [
+  488,
+  "Grau de Automatismo por Tipo de Interferência Humana",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  489,
+  "Tempo Médio (dias) até a Escrituração",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  490,
+  "Percentual de Notas Escrituradas Dentro do Prazo",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  492,
+  "Top Tarefas Manuais",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  493,
+  "Tempo Médio (dias) por Tarefa Manual",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  494,
+  "Top Usuários que Interagiram - Tarefas Manuais",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  495,
+  "Top Grupos que Interagiram - Tarefas Manuais",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  497,
+  "Percentual de Notas por Faixa de Período de Tempo",
+  "echarts_timeseries_smooth",
+  "analytics",
+  "too many series"
+ ],
+ [
+  498,
+  "Quantidade e Percentual de Notas Capturadas",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"origem_nota\" does not exist"
+ ],
+ [
+  499,
+  "Tempo Médio (dias) até o Fim do Processo V360",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  500,
+  "Volume de Notas por Faixa de Período de Tempo até a Escrituração",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  502,
+  "% de Notas que foram inseridas manualmente e automaticamente (binário)",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  505,
+  "lock-in - CNPJS e usuários cadastrados que inseriram ao menos uma nota",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"cnpjs_com_nota\" does not exist"
+ ],
+ [
+  508,
+  "bn8. Total de horas úteis de esforço dos times de dev e cs (pela data de conclusão)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"c_id\" does not exist"
+ ],
+ [
+  526,
+  "oficial_Total de Notas por Tipo de Inserção",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  531,
+  "dt1. Top 5 tipos de divergencia",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.divergencias_tipo\" does not exist"
+ ],
+ [
+  533,
+  "dt2. Top 5 fornecedores com divergencia",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.divergencias_tipo\" does not exist"
+ ],
+ [
+  535,
+  "dt6- Total de horas, horas úteis, de esforço cs e dev por tipo de ticket",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  545,
+  "dt2. Top 5 fornecedores com divergencia",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  546,
+  "dt4.3. Total de chamados abertos",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  548,
+  "Top 10 Divergências (Visão em %)",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  549,
+  "dt7. Quantidade de horas gastas por tipo de chamado (horas estimadas cs + dev)",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  550,
+  "dt4.4. Chamados atualmente abertos",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  552,
+  "oficial_% Notas por Tipo de Inserção",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  657,
+  "Volume de Notas Processadas - Mês Corrente (Notas Concluidas, Arquivadas e Canceladas) (V1)",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  659,
+  "Valor de Notas Processadas - Mês Corrente (Notas Concluidas, Arquivadas e Canceladas) (V1)",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  662,
+  "Top 10 Divergências (Visão em %)",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.divergencias_tipo\" does not exist"
+ ],
+ [
+  668,
+  "Help360 - SLA Ajustado Suporte",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  669,
+  "Help360 - SLA Ajustado Bug",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  673,
+  "Tempo Médio (dias) por Tarefa Manual (V2)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.tarefas_manuais_cs\" does not exist"
+ ],
+ [
+  674,
+  "Volume de Notas Escrituradas",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leadtime_cs\" does not exist"
+ ],
+ [
+  675,
+  "Percentual de notas escrituradas dentro do período de competência",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leadtime_cs\" does not exist"
+ ],
+ [
+  676,
+  "[Abertos]Vezes Recusado ou Aguardando Info - Chamados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  677,
+  "Valor Total de Notas Escrituradas",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.leadtime_cs\" does not exist"
+ ],
+ [
+  700,
+  "Tempo Médio (dias) por Usuário Atribuido",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.tarefas_manuais_cs\" does not exist"
+ ],
+ [
+  733,
+  "Quantidade de usuários logados por período",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  753,
+  "TPV por Fluxo",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"mes_final\" does not exist"
+ ],
+ [
+  754,
+  "Chamados Abertos X Chamados Fechados (Semana)",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.cs_solutions_base_project\" does not exist"
+ ],
+ [
+  768,
+  "Quantidade de Chamados por Categoria",
+  "echarts_timeseries_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.SyntaxError) zero-length delimited identifier at or near \"\"\"\""
+ ],
+ [
+  769,
+  "Quantidade de Chamados por Categoria - Pizza",
+  "sunburst",
+  "analytics",
+  "viz_type 'sunburst' has no Report Hub equivalent"
+ ],
+ [
+  771,
+  "Chamados em Aberto por Squad",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  790,
+  "Quantidade de Notas por Tipo de Leitor",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  791,
+  "Top 10 Clientes com mais Notas Lidas Nao Automaticamente em Absoluto",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  792,
+  "Quantidade em % de Notas por Cliente - Compoisçao por Colunas Alteradas",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  793,
+  "Help360 - SLA Suporte",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  794,
+  "Help360 - SLA Bug",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  796,
+  "Help360 SLA Analítico",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  803,
+  "gerdau_inconsistency_report_mview",
+  "table",
+  "dw_gerdau",
+  "EXPLAIN: (psycopg2.OperationalError) connection to server at \"127.0.0.1\", port 15432 failed: FATAL:  database \"dw_gerdau\" does not exist"
+ ],
+ [
+  805,
+  "Porcentagem de Notas por Tipo de Leitor",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  806,
+  "Top 10 Clientes com mais Notas Lidas Nao Automaticamente - Porcentagem",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  818,
+  "Aguardando Aprovação Banco - Cliente",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  835,
+  "Quantidade de Notas por Cliente - Composiçao por Colunas Alteradas",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  842,
+  "Quantidade Total de Notas Capturadas por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  848,
+  "Top cidades com notas não automáticas",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  850,
+  "CSAT x Cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.InvalidTextRepresentation) invalid input syntax for type integer: \"null\""
+ ],
+ [
+  854,
+  "Horas Gastas x Clientes Mensal",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  856,
+  "Chamados por Responsável",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  860,
+  "Racional Chamados Detratores",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  864,
+  "Resumo Gastas por Cliente",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"customer_name\" does not exist"
+ ],
+ [
+  865,
+  "Categorias ofensoras de Suporte",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  866,
+  "Squads Ofensoras de Bugs",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  873,
+  "Resumo Qtd Tickets por Cliente",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"customer_name\" does not exist"
+ ],
+ [
+  874,
+  "SLA Big Number",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  876,
+  "CSAT Big Number (Suporte)",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  877,
+  "SLA Geral",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  878,
+  "SLA Suporte",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  879,
+  "Categorias Ofensoras de Suporte Mensal",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  880,
+  "Squads Ofensoras Bug Mensal",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  881,
+  "Clientes Ofensores Mensal",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  882,
+  "Horas Gastas por Cliente Mensal",
+  "partition",
+  "analytics",
+  "viz_type 'partition' has no Report Hub equivalent"
+ ],
+ [
+  883,
+  "Quantidade de Horas Gastas Operação Mensal",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  884,
+  "SLA Bug",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  885,
+  "Chamados Abertos - Mensal",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  886,
+  "Chamados Fechados - Mensal",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  887,
+  "Total de Horas Gastas com Bug",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  888,
+  "Total de Horas Gastas com Suporte",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  889,
+  "Total de Horas Gastas Último Mês",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  890,
+  "Tipo de Chamados (Suporte)",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  891,
+  "Chamados Por Squad",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  893,
+  "Média de horas em chamados por cliente",
+  "pivot_table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  899,
+  "Filtro de Inconsistencias Nova Arquitetura",
+  "filter_box",
+  "analytics",
+  "viz_type 'filter_box' has no Report Hub equivalent"
+ ],
+ [
+  900,
+  "Tabela de Registros pela Nova Arquitetura",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.vinvoice_inconsistency_report_historical_new_architecture\" does not exist"
+ ],
+ [
+  901,
+  "Registros da Nova Arquitetura por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  902,
+  "Registros da Nova Arquitetura por Impact",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.vinvoice_inconsistency_report_historical_new_architecture\" does not exist"
+ ],
+ [
+  906,
+  "oficial_Quantidade de CNPJs por Tipo de Nota - Últimos 12 Meses",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  917,
+  "Big Number SLA",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  918,
+  "Big Number SLA Bug",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  919,
+  "Big Number SLA Suporte",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  921,
+  "oficial_TPV por Tipo de Nota",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  922,
+  "oficial_Quantidade de Notas Processadas por Tipo de Nota",
+  "treemap_v2",
+  "analytics",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  929,
+  "Qtd. Chamados Abertos de Suporte e Bug",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  930,
+  "Chamados em Aberto por Time - Pizza",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  932,
+  "Tempo de vida chamado x Cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  935,
+  "Analítico Chamados Integração",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  937,
+  "Chamados Em Aberto (Pizza)",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  939,
+  "Tempo de Análise Chamados Suporte",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  941,
+  "Média em Horas Tempo Em Análise",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  942,
+  "Média em Min Tempo Primeiro Atendimento",
+  "big_number",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  943,
+  "Racional Chamados Promotores",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  946,
+  "Duração média de horas úteis em chamados",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  949,
+  "oficial_Quantidade de CNPJs por Acesso do Fornecedor",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  951,
+  "Gráfico Taxa de Abandono",
+  "mixed_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  952,
+  "Total de Horas Acumulada em Suporte e Bug",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  953,
+  "Total Horas Acumulada em Melhoria",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  955,
+  "Chamados Abertos Mês a Mês por Tipo",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  961,
+  "Tempo Médio de Atendimento por Tipo",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  963,
+  "Tempo Médio Dias em Aberto por Tipo",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  964,
+  "Chamados Fechados por Tipo",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  968,
+  "Chamados Abertos Suporte",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  969,
+  "Chamados Aberto Bug",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  971,
+  "Horas Suporte e Melhorias por cliente",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  972,
+  "CSAT visual",
+  "gauge_chart",
+  "analytics",
+  "viz_type 'gauge_chart' has no Report Hub equivalent"
+ ],
+ [
+  975,
+  "Comentários do CSAT",
+  "word_cloud",
+  "analytics",
+  "viz_type 'word_cloud' has no Report Hub equivalent"
+ ],
+ [
+  976,
+  "oficial_Valor Antecipado Pago ou Não Pago",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  977,
+  "SLA por Squad",
+  "dist_bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  979,
+  "Variaçao TPV percentual por mes",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  980,
+  "Variaçao TPV absoluta por cliente por mes",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  983,
+  "Variaçao Entrada de Notas absoluta por captura por mes",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  984,
+  "Variaçao Entrada de Notas percentual por Captura por mes",
+  "echarts_timeseries",
+  "analytics",
+  "too many series"
+ ],
+ [
+  992,
+  "[Fechados]Vezes Recusado ou Aguardando Info - Chamados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  993,
+  "Média de vezes recusado ou enviado para o cliente por cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  995,
+  "chat_Quantidade de perguntas por dia",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1002,
+  "Chamados Fechados no Dia Anterior",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1019,
+  "Tempo médio gasto diariamente com atualizações SPICE por Dataset",
+  "echarts_timeseries_bar",
+  "dw_general_info",
+  "too many series"
+ ],
+ [
+  1020,
+  "Tamanho dos Datasets / Mediana do Tempo Gasto por Horário de Atualização",
+  "dist_bar",
+  "dw_general_info",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1024,
+  "Usuário por Cliente",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1025,
+  "Datasets que possuem atualização Incremental mas não Full",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1026,
+  "Datasets que possuem atualização Full mas não Incremental",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1027,
+  "Datasets sem schedule de Atualização",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1028,
+  "Erros no Check Consistency - Última Iteração",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1029,
+  "Minutos médios gastos por Atualização por Semana - Batch",
+  "echarts_timeseries_bar",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1030,
+  "Minutos médios gastos por atualização por semana - Streaming",
+  "echarts_timeseries_bar",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1031,
+  "Média de tempo gasto por atualização por Batch - Última Semana",
+  "big_number_total",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1032,
+  "Média de minutos gastos - Última Semana - Streaming",
+  "big_number_total",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1033,
+  "Clientes que mais demoram - Batch",
+  "table",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1034,
+  "Clientes que mais demoram - Streaming",
+  "table",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1035,
+  "Atualizações com falha hoje",
+  "table",
+  "airflow",
+  "chart has no metric"
+ ],
+ [
+  1036,
+  "Tarefas que mais demoram - Streaming",
+  "table",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1037,
+  "Tarefas que mais demoram - Batch",
+  "table",
+  "airflow",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"time_spent\" does not exist"
+ ],
+ [
+  1038,
+  "Notas Finalizadas com Sucesso e não marcadas como Escrituradas",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1041,
+  "chat_Custo por Agente (Dólar)",
+  "echarts_area",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1043,
+  "Maiores Replication Slots",
+  "table",
+  "dw_general_info",
+  "chart has no metric"
+ ],
+ [
+  1044,
+  "Chamados abertos por semana",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1046,
+  "chat_Chamados Help360",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1047,
+  "HealthScore",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1052,
+  "chart_action_errors",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"message_title\" does not exist"
+ ],
+ [
+  1054,
+  "Regex Analysis",
+  "dist_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.regex_analysis_view\" does not exist"
+ ],
+ [
+  1055,
+  "Legenda Regex",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1058,
+  "Legados",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1059,
+  "Sumario Legados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_api_control_actions\" does not exist"
+ ],
+ [
+  1065,
+  "PO não encontrado na base de validação - % por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1066,
+  "PO não encontrado na nota - % por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1067,
+  "PO não encontrado na Base de Validação - Total por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1068,
+  "PO não encontrado na Nota - Total por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1070,
+  "Notas com Divergência de Pedido e Pedido preenchido - Analítico",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1071,
+  "Pedido não Encontrado na Nota - por Fluxo (Aplicar filtro de cliente)",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1072,
+  "PO não encontrado na base de Validação - por Fluxo (Aplicar filtro de cliente)",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1076,
+  "Qualquer Divergência de PO - Total por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1077,
+  "Qualquer Divergência de PO - % por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1078,
+  "Padrões de PO",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1080,
+  "Relatório Horas Infra",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1082,
+  "Padrões PO - Análise",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1088,
+  "chat_qntd_documentos_por_categoria",
+  "treemap_v2",
+  "llm_app",
+  "viz_type 'treemap_v2' has no Report Hub equivalent"
+ ],
+ [
+  1090,
+  "chat_documentos_mais_utilizados",
+  "table",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"link_document\" does not exist"
+ ],
+ [
+  1091,
+  "chat_documentos_menos_utilizados",
+  "table",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"link_document\" does not exist"
+ ],
+ [
+  1094,
+  "chat_feedbacks_por_exemplos",
+  "table",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"link_document\" does not exist"
+ ],
+ [
+  1096,
+  "Tickets aberto por horário",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1097,
+  "Total Chamados Abertos Fora Horário Comercial",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"completed_at_hour\" does not exist"
+ ],
+ [
+  1102,
+  "Filtro por Criticidade",
+  "filter_box",
+  "analytics",
+  "viz_type 'filter_box' has no Report Hub equivalent"
+ ],
+ [
+  1103,
+  "Chamados Perfeitos",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1104,
+  "Chamados Perfeitos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1109,
+  "chat_documentacoes_sem_revisao",
+  "table",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"link_document\" does not exist"
+ ],
+ [
+  1114,
+  "PO não encontrado na base de Validação - por Fluxo (Aplicar filtro de cliente) - %",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1115,
+  "Pedido não Encontrado na Nota - por Fluxo (Aplicar filtro de cliente) - %",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1127,
+  "oficial_Qntd. Notas por Cliente e Tipo de Inserção",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"nota_captura_ptbr\" does not exist"
+ ],
+ [
+  1128,
+  "Base Analítica de Chamados Fechados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1159,
+  "Últimos tombamentos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1173,
+  "CSAT - Tabela Analítica",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1175,
+  "Últimos Projetos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1180,
+  "Porcentagem de Automatismo por Semana - Utilities",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1181,
+  "Quantidade de Notas por Searcher Reader",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1182,
+  "Top 10 Clientes com mais Notas Lidas Nao Automaticamente em Absoluto - Utilities",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1184,
+  "Help360 - SLA Geral Pós Tombamento",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1186,
+  "chat_Quantidade de Usuários Externos por Semana (Últimos 4 Meses)",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"is_external_user\" does not exist"
+ ],
+ [
+  1189,
+  "Quantidade de chamados por Cliente - Pós tombamento",
+  "partition",
+  "analytics",
+  "viz_type 'partition' has no Report Hub equivalent"
+ ],
+ [
+  1191,
+  "Média de chamados por Plano Contratado Pós Tombamento",
+  "dist_bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1198,
+  "KPIs integração - Evolução no Tempo (D30 Móvel)",
+  "echarts_timeseries_line",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1199,
+  "Rank clientes - KPI integração",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1202,
+  "CSAT por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1203,
+  "CSAT por Feature",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1207,
+  "Clientes dentro da meta - KPI Integração",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"meta_alcancada\" does not exist"
+ ],
+ [
+  1208,
+  "[Bench] Comparativo % de Tipos de Captura por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1209,
+  "[Bench] Comparativo % de Tipos de Nota por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1210,
+  "[Bench] Comparativo % de Tipos de Finalização por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1211,
+  "[Bench] Comparativo % de Notas com Divergência por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1212,
+  "[Bench] Comparativo Tipos de Captura por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1213,
+  "[Bench] Comparativo de Tipos de Finalização por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1214,
+  "[Bench] Comparativo Tipos de Nota por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1215,
+  "[Bench] Comparativo de Notas com Divergência por Cliente",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1216,
+  "[Bench] Comparativo Tempo Gasto em Tarefas por Cliente",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1217,
+  "Produto Integração - Evolução da Média de KPIs no Tempo (30D Móvel)",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1218,
+  "Evolução de Score de Clientes ",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1221,
+  "Feedbacks do Assis por semana",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1223,
+  "[Funcionais PI] Ajudas por quantidade",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1224,
+  "[Funcionais PI] Ajuda por Tipo e Criticidade",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1237,
+  "Rank Clientes por Score",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"score_point\" does not exist"
+ ],
+ [
+  1253,
+  "Cliente x Meta de KPIs alcançada",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"meta_alcancada_int\" does not exist"
+ ],
+ [
+  1265,
+  "Score de qualidade de integração",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"score_point\" does not exist"
+ ],
+ [
+  1268,
+  "Contabilizador de indicadores dentro da meta",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"meta_alcancada_text\" does not exist"
+ ],
+ [
+  1273,
+  "Chamados concluídos por cliente - Legados x Pós tombamento",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.SyntaxError) syntax error at or near \"FILTER\""
+ ],
+ [
+  1274,
+  "Help360 - SLA Geral Clientes Legados",
+  "mixed_timeseries",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1276,
+  "SLA - Legados x Pós tombamento",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1280,
+  "Usuários por Hora por Dia",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1281,
+  "Clientes na meta e fora da meta",
+  "echarts_area",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"meta_alcancada_int\" does not exist"
+ ],
+ [
+  1282,
+  "Porcentagem de Automatismo por Mes - Utilities",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1287,
+  "Percentual de Contribuição de cada cliente nos indicadores - Utilities",
+  "bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1295,
+  "Chamados concluídos por cliente - Legados x Pós tombamento SAP ou Não SAP",
+  "echarts_timeseries_line",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1298,
+  "Analistas de Suporte contabilizados",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1305,
+  "Tabela analítica dos chamados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1306,
+  "Filtro por Time",
+  "filter_box",
+  "analytics",
+  "viz_type 'filter_box' has no Report Hub equivalent"
+ ],
+ [
+  1314,
+  "Quantidade Total de Notas Capturadas por Cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1316,
+  "Total de Ocorrências de Divergência",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1317,
+  "Total de Ocorrência de Divergências por Tipo",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1318,
+  "Divegências em Aberto",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1319,
+  "Divergências Resolvidas",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1320,
+  "Divergências em Aberto por Cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1321,
+  "Divergências Resolvidas por Cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1324,
+  "Aging de Divergências Não Resolvidas",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1328,
+  "Tarefas com divergências",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1329,
+  "Nível da Divergência",
+  "pie",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1339,
+  "Local da Divergência",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1340,
+  "Tipo da Divergência",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1341,
+  "Ações mais Recorrentes",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1342,
+  "- Usuários com mais Ações",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1343,
+  "Quantidade Total de Ações",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.traducao_audits\" does not exist"
+ ],
+ [
+  1344,
+  "ERPs de cada cliente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.po_types\" does not exist"
+ ],
+ [
+  1345,
+  "Tabela Analítica - Divergências",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_divergencias\" does not exist"
+ ],
+ [
+  1368,
+  "CSAT por tipo por mês - Enterprise",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1374,
+  "SLA por tipo por semana - Enterprise",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1375,
+  "Aging por tipo por semana - Enterprise",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1377,
+  "Aging por tipo por mês - Enterprise",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1392,
+  "Tabela Analítica - Lista de Ações",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.traducao_audits\" does not exist"
+ ],
+ [
+  1393,
+  "NPS Assistente (-100 a 100)",
+  "big_number_total",
+  "llm_app",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"nps_score\" does not exist"
+ ],
+ [
+  1401,
+  "Tickets por Cliente X Horário",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1409,
+  "Chamados por Criticidade",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1419,
+  "Quantidade de perguntas por semana",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1420,
+  "Custo por assistente por semana",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1421,
+  "Feedbacks por dia",
+  "echarts_timeseries_bar",
+  "llm_app",
+  "too many series"
+ ],
+ [
+  1428,
+  "Cliente - Tipo de Chamado X Mês",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1431,
+  "[FUNC] Chamado por tipo e criticidade (sem squad pi)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1432,
+  "Média de resolução das divergências (apenas divergências resolvidas)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1433,
+  "Cliente - Tickets com maior esforço",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1435,
+  "Representatividade das divergências (resolvidas e não resolvidas)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1436,
+  "Usuários Ativos (Últimos 7 dias)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"login_at\" does not exist"
+ ],
+ [
+  1437,
+  "Usuários Ativos (Último dia)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"login_at\" does not exist"
+ ],
+ [
+  1438,
+  "Usuários Ativos (Últimos 28 dias)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"login_at\" does not exist"
+ ],
+ [
+  1439,
+  "Total de Usuários pelo Último Login",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_last_login_users_audits\" does not exist"
+ ],
+ [
+  1440,
+  "oficial_Criação de usuários (Cliente/Fornecedor) por mês - Somente com Login",
+  "echarts_timeseries_bar",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.usuarios_login_by_audits\" does not exist"
+ ],
+ [
+  1442,
+  "Quantidade de divergências por categoria",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1443,
+  "Tempo médio de resolução de divergência por categoria (em horas)",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1444,
+  "Divergências por categoria por cliente",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1445,
+  "Porcentagem de divergências por categoria",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1446,
+  "Porcentagem do tempo de resolução por categoria",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1448,
+  "Planejado x Atual",
+  "table",
+  "rocketlane",
+  "chart has no metric"
+ ],
+ [
+  1449,
+  "Total de Divergências",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1450,
+  "Total de Divergências (resolvidas)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1451,
+  "Total de Divergências (Em aberto)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1452,
+  "Total de Horas gastas (Divergências Resolvidas)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1454,
+  "Divergências em aberto",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1455,
+  "Divergências Concluídas",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1456,
+  "Total de divergências (desde 01/04/2025)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1457,
+  "Tabela Analítica",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1458,
+  "Tempo médio de resolução da divergência (horas)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1459,
+  "Soma total de horas gastas para resolução",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1460,
+  "Aging das divergências não resolvidas",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1464,
+  "Representatividade desse caso de divergência nos clientes",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1465,
+  "Evolução do número de divergências por semana",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1470,
+  "Cliente - SLA por Tipo",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1480,
+  "Total de divergências",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1481,
+  "Divergências em Aberto",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1482,
+  "Divergências Concluídas",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1483,
+  "Soma total de horas gastas para resolução das divergências",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1484,
+  "Tempo médio de resolução da divergência (horas)",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1485,
+  "Aging das divergências não resolvidas",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1486,
+  "Tabela Analítica",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.base_divergencias\" does not exist"
+ ],
+ [
+  1501,
+  "SLA Geral",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1502,
+  "SLA Suporte",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1503,
+  "SLA Bug",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1510,
+  "SLA de Parceiros de Integração",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.AmbiguousColumn) column reference \"parceiro_integracao\" is ambiguous"
+ ],
+ [
+  1515,
+  "Chamados Perfeitos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1516,
+  "CSAT visual",
+  "gauge_chart",
+  "analytics",
+  "viz_type 'gauge_chart' has no Report Hub equivalent"
+ ],
+ [
+  1517,
+  "Racional Chamados Promotores",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1518,
+  "Racional Chamados Detratores",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1520,
+  "Comentários do CSAT",
+  "word_cloud",
+  "analytics",
+  "viz_type 'word_cloud' has no Report Hub equivalent"
+ ],
+ [
+  1524,
+  "Aging das Divergências em Aberto",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1525,
+  "Tempo médio de resolução das divergências",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1530,
+  "Taxa de Resolução por Categoria",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.mview_base_divergencias_categorizadas\" does not exist"
+ ],
+ [
+  1531,
+  "Alerta Reforma - Fiscal",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1532,
+  "Alerta Reforma - Cidades",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1534,
+  "SLA x CSAT por atendente",
+  "bubble",
+  "analytics",
+  "viz_type 'bubble' has no Report Hub equivalent"
+ ],
+ [
+  1540,
+  "Usuários por Dia por Hora - Íris",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"dia_nome_ordenado\" does not exist"
+ ],
+ [
+  1541,
+  "Usuários por Dia por Hora - Atlas",
+  "pivot_table_v2",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"dia_nome_ordenado\" does not exist"
+ ],
+ [
+  1543,
+  "Execuções Semanais por Tipo de Teste",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1544,
+  "Medição - Autenticidade",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1547,
+  "Execuções Semanais por Cliente",
+  "echarts_timeseries_line",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1548,
+  "Execuções Mensais por Clientes (Encadeados)",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1554,
+  "Evolução mensal da assertividade (Autênticas + Canceladas)",
+  "echarts_timeseries_line",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_autenticidade\" does not exist"
+ ],
+ [
+  1555,
+  "Ranking de assertividade por cliente (Autênticas + Canceladas)",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_autenticidade\" does not exist"
+ ],
+ [
+  1556,
+  "Distribuição de todos os status por mês",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1557,
+  "% de assertividade",
+  "big_number_total",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedTable) relation \"public.analise_autenticidade\" does not exist"
+ ],
+ [
+  1560,
+  "Grupo Vamos - Evolução da Divergência de Pedido não Encontrado na Nota",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1561,
+  "Dexco - Evolução da Divergência de Pedido não Encontrado na Nota",
+  "bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1566,
+  "Emails por CNPJ Raiz",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1568,
+  "Medição - Boletos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1569,
+  "Medição - Concessionárias",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1570,
+  "Medição - Outros Docs",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1571,
+  "Medição - Pedidos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1606,
+  "Projetos SAP",
+  "big_number_total",
+  "rocketlane",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"Tipo de Projeto\" does not exist"
+ ],
+ [
+  1623,
+  "Projetos por Status",
+  "dist_bar",
+  "rocketlane",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1624,
+  "Healthscore - Onboarding",
+  "table",
+  "rocketlane",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"Tipo de Projeto\" does not exist"
+ ],
+ [
+  1636,
+  "Tabela Analítica - Medição de Boletos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1637,
+  "Relatório Horas Infra - Tipo de Nota",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1640,
+  "Processos que passaram por tarefas de cada categoria",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"processes_with_combination\" does not exist"
+ ],
+ [
+  1645,
+  "Total de processos manuais por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1648,
+  "Percentual de processos manuais por cliente",
+  "dist_bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1661,
+  "Processos manuais por semana",
+  "echarts_area",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1679,
+  "Execuções Mensais por Clientes (Integrados)",
+  "echarts_timeseries_line",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1682,
+  "Média de chamados por Plano Contratado Cliente Legado",
+  "dist_bar",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1683,
+  "Quantidade de chamados por Cliente - Cliente Legado",
+  "partition",
+  "analytics",
+  "viz_type 'partition' has no Report Hub equivalent"
+ ],
+ [
+  1684,
+  "Tabela Analítica Pós-tombamento e Legados",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1689,
+  "TMA por tipo de chamado",
+  "dist_bar",
+  "analytics",
+  "more than one series dimension"
+ ],
+ [
+  1694,
+  "Emails por CNPJ Distintos",
+  "table",
+  "analytics",
+  "chart has no metric"
+ ],
+ [
+  1722,
+  "Fornecedores (CNPJ Raíz) com Nota por Mês",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1723,
+  "Fornecedores (CNPJ Único) com Nota por Mês",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1736,
+  "Tempo de vida chamado x Atendente",
+  "table",
+  "analytics",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
+ ],
+ [
+  1744,
+  "Dados Gerais - Projetos Onboarding",
+  "table",
+  "rocketlane",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"Tipo de Projeto\" does not exist"
+ ],
+ [
+  1756,
+  "Contagem por Tipo de Respondente",
+  "dist_bar",
+  "rocketlane",
+  "too many series"
+ ],
+ [
+  1763,
+  "Voz do Cliente - NPS",
+  "table",
+  "rocketlane",
+  "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"Tipo de Respondente\" does not exist"
+ ],
+ [
+  1772,
+  "Média de Horas Atuação N2",
+  "echarts_timeseries_line",
+  "analytics",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1819,
+  "Por Cliente - Porcentagem",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1828,
+  "Resultado das sugestões de pedido do Assis",
+  "echarts_area",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1829,
+  "Database Sizes",
+  "dist_bar",
+  "dw_general_info",
+  "too many series"
+ ],
+ [
+  1838,
+  "Storage por Banco no Tempo",
+  "echarts_timeseries_line",
+  "dw_general_info",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1841,
+  "Temp Gerado por Banco/Dia",
+  "echarts_timeseries",
+  "dw_general_info",
+  "too many series"
+ ],
+ [
+  1843,
+  "Crescimento de Indexs",
+  "echarts_timeseries_line",
+  "dw_general_info",
+  "cannot pivot this metric expression"
+ ],
+ [
+  1849,
+  "Leitura - Percentual por campo",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1853,
+  "Por Cliente - Quantidade de Não Automático",
+  "dist_bar",
+  "analytics",
+  "time+series chart with multiple metrics"
+ ],
+ [
+  1860,
+  "Métricas de sugestão de pedido (%)",
+  "echarts_area",
+  "analytics",
+  "too many series"
+ ],
+ [
+  1866,
+  "Uso da lupa por cliente",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ]
+]

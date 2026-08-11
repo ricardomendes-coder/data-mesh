@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import IntegrityError
 
 from .config import get_settings
 
@@ -258,6 +259,84 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE INDEX IF NOT EXISTS reports_folder_idx    ON reports (folder_id);
         """,
     ),
+    (
+        "0008_dashboard_sections",
+        """
+        -- Tabs. A dashboard with no sections renders exactly as before, so this
+        -- is additive: existing dashboards keep their flat list of tiles.
+        CREATE TABLE IF NOT EXISTS dashboard_sections (
+            id           bigserial PRIMARY KEY,
+            dashboard_id bigint  NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+            title        text    NOT NULL,
+            position     integer NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS dashboard_sections_dashboard_idx
+            ON dashboard_sections (dashboard_id, position);
+
+        -- SET NULL, not CASCADE: deleting a tab must not delete the charts that
+        -- were on it. They fall back to the dashboard's untabbed area, where
+        -- they are visible and can be re-filed.
+        ALTER TABLE dashboard_items
+            ADD COLUMN IF NOT EXISTS section_id bigint
+            REFERENCES dashboard_sections(id) ON DELETE SET NULL;
+
+        -- A tile is either a chart or a piece of text. Superset dashboards lean
+        -- on markdown and headers to divide a page up, and importing them
+        -- without that leaves an unlabelled wall of charts.
+        ALTER TABLE dashboard_items
+            ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'chart';
+        ALTER TABLE dashboard_items
+            ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '';
+        -- Text tiles have no chart, so the column can no longer be mandatory.
+        ALTER TABLE dashboard_items ALTER COLUMN chart_id DROP NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS dashboard_items_section_idx
+            ON dashboard_items (section_id, position);
+        """,
+    ),
+    (
+        "0009_dashboard_filters",
+        """
+        -- A filter belongs to a dashboard and rewrites the charts on it.
+        --
+        -- The mechanism is a token: a chart's SQL contains {{ filters }} where
+        -- its WHERE clause accepts more terms, and the token is replaced at
+        -- render time with the active filters as *bound parameters*. Values are
+        -- never interpolated — `column` is set by whoever edits the dashboard,
+        -- but the value comes from the viewer's query string.
+        --
+        -- Filtering has to happen inside the chart's own query, not by wrapping
+        -- it: wrapping an aggregate can't filter on a column that was grouped
+        -- away, which is exactly what most of these filters do.
+        CREATE TABLE IF NOT EXISTS dashboard_filters (
+            id            bigserial PRIMARY KEY,
+            dashboard_id  bigint  NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+            -- Used in the URL and as the parameter name, so it must be a plain
+            -- identifier: [a-z0-9_].
+            key           text    NOT NULL,
+            label         text    NOT NULL,
+            -- select | daterange | text
+            filter_type   text    NOT NULL DEFAULT 'select',
+            -- The column (or SQL expression) each chart is filtered on.
+            column_expr   text    NOT NULL,
+            -- For 'select': a query returning one column of options. Runs
+            -- against source_db, which need not be the charts' database.
+            values_sql    text    NOT NULL DEFAULT '',
+            source_db     text    NOT NULL DEFAULT '',
+            default_value text    NOT NULL DEFAULT '',
+            -- Empty list = every chart on the dashboard carrying the token.
+            -- Otherwise the chart slugs this filter is allowed to touch, which
+            -- is how an imported Superset filter keeps its original scope.
+            applies_to    jsonb   NOT NULL DEFAULT '[]'::jsonb,
+            position      integer NOT NULL DEFAULT 0,
+            UNIQUE (dashboard_id, key)
+        );
+
+        CREATE INDEX IF NOT EXISTS dashboard_filters_dashboard_idx
+            ON dashboard_filters (dashboard_id, position);
+        """,
+    ),
 ]
 
 
@@ -458,12 +537,34 @@ DEFAULT_WIDTH = "half"
 
 @dataclass
 class DashboardItem:
-    """One tile: a chart placed on a dashboard at a position and width."""
+    """One tile: a chart, or a block of text, at a position and width.
+
+    `chart` is None for a text tile — the two are one table because they share
+    ordering, width and a tab, and splitting them would mean merging two ordered
+    lists on every render.
+    """
 
     id: int
-    chart: Chart
     position: int
+    chart: Chart | None = None
     width: str = DEFAULT_WIDTH
+    kind: str = "chart"  # chart | text
+    content: str = ""
+    section_id: int | None = None
+
+    @property
+    def is_text(self) -> bool:
+        return self.kind == "text"
+
+
+@dataclass
+class DashboardSection:
+    """A tab. Tiles with a matching section_id belong to it."""
+
+    id: int
+    title: str
+    position: int = 0
+    items: list[DashboardItem] = field(default_factory=list)
 
 
 @dataclass
@@ -474,9 +575,19 @@ class Dashboard:
     created_by: str = ""
     id: int | None = None
     items: list[DashboardItem] = field(default_factory=list)
+    sections: list[DashboardSection] = field(default_factory=list)
     folder_id: int | None = None  # display grouping only
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @property
+    def loose_items(self) -> list[DashboardItem]:
+        """Tiles outside every tab — they render above the tab strip."""
+        return [i for i in self.items if i.section_id is None]
+
+    @property
+    def has_tabs(self) -> bool:
+        return bool(self.sections)
 
 
 _DASH_SELECT = (
@@ -527,49 +638,78 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
         dash = _row_to_dashboard(row)
         if not with_items:
             return dash
-        # One join rather than a query per tile.
+        # LEFT JOIN, not JOIN: a text tile has no chart and must still come back.
         items = conn.execute(
             text(
                 """
-                SELECT i.id, i.position, i.width,
+                SELECT i.id, i.position, i.width, i.kind, i.content, i.section_id,
                        c.id AS c_id, c.slug, c.title, c.description, c.source_db,
                        c.sql, c.chart_type, c.x_column, c.y_columns, c.created_by,
                        c.created_at, c.updated_at
                 FROM dashboard_items i
-                JOIN charts c ON c.id = i.chart_id
+                LEFT JOIN charts c ON c.id = i.chart_id
                 WHERE i.dashboard_id = :id
                 ORDER BY i.position, i.id
                 """
             ),
             {"id": dash.id},
         ).fetchall()
+        sections = conn.execute(
+            text(
+                "SELECT id, title, position FROM dashboard_sections "
+                "WHERE dashboard_id = :id ORDER BY position, id"
+            ),
+            {"id": dash.id},
+        ).fetchall()
 
     for r in items:
         m = r._mapping
-        y = m["y_columns"]
-        if isinstance(y, str):
-            y = json.loads(y)
+        chart = None
+        if m["c_id"] is not None:
+            y = m["y_columns"]
+            if isinstance(y, str):
+                y = json.loads(y)
+            chart = Chart(
+                id=m["c_id"],
+                slug=m["slug"],
+                title=m["title"],
+                description=m["description"],
+                source_db=m["source_db"],
+                sql=m["sql"],
+                chart_type=m["chart_type"],
+                x_column=m["x_column"],
+                y_columns=list(y or []),
+                created_by=m["created_by"],
+                created_at=m["created_at"],
+                updated_at=m["updated_at"],
+            )
         dash.items.append(
             DashboardItem(
                 id=m["id"],
                 position=m["position"],
                 width=m["width"] if m["width"] in WIDTHS else DEFAULT_WIDTH,
-                chart=Chart(
-                    id=m["c_id"],
-                    slug=m["slug"],
-                    title=m["title"],
-                    description=m["description"],
-                    source_db=m["source_db"],
-                    sql=m["sql"],
-                    chart_type=m["chart_type"],
-                    x_column=m["x_column"],
-                    y_columns=list(y or []),
-                    created_by=m["created_by"],
-                    created_at=m["created_at"],
-                    updated_at=m["updated_at"],
-                ),
+                kind=m["kind"] or "chart",
+                content=m["content"] or "",
+                section_id=m["section_id"],
+                chart=chart,
             )
         )
+
+    # Tiles are attached to their tab here rather than in a second query per
+    # section: the whole layout arrives in the two reads above.
+    by_section: dict[int, list[DashboardItem]] = {}
+    for item in dash.items:
+        if item.section_id is not None:
+            by_section.setdefault(item.section_id, []).append(item)
+    dash.sections = [
+        DashboardSection(
+            id=s._mapping["id"],
+            title=s._mapping["title"],
+            position=s._mapping["position"],
+            items=by_section.get(s._mapping["id"], []),
+        )
+        for s in sections
+    ]
     return dash
 
 
@@ -613,7 +753,109 @@ def _touch(conn, dashboard_id: int) -> None:
     )
 
 
-def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH) -> bool:
+def add_section(dashboard_slug: str, title: str) -> int | None:
+    """Append a tab. Returns its id, or None if the dashboard is gone."""
+    title = (title or "").strip()
+    if not title:
+        return None
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return None
+        position = conn.execute(
+            text(
+                "SELECT coalesce(max(position), -1) + 1 FROM dashboard_sections "
+                "WHERE dashboard_id = :id"
+            ),
+            {"id": dash_id},
+        ).scalar()
+        new_id = conn.execute(
+            text(
+                "INSERT INTO dashboard_sections (dashboard_id, title, position) "
+                "VALUES (:d, :t, :p) RETURNING id"
+            ),
+            {"d": dash_id, "t": title[:120], "p": position},
+        ).scalar()
+        _touch(conn, dash_id)
+        return new_id
+
+
+def delete_section(dashboard_slug: str, section_id: int) -> bool:
+    """Drop a tab. Its tiles survive and fall back to the untabbed area."""
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+        result = conn.execute(
+            text("DELETE FROM dashboard_sections WHERE id = :i AND dashboard_id = :d"),
+            {"i": section_id, "d": dash_id},
+        )
+        _touch(conn, dash_id)
+        return result.rowcount > 0
+
+
+def add_text_item(dashboard_slug: str, content: str, section_id: int | None = None,
+                  width: str = "full") -> bool:
+    """Append a block of text — a heading or a note between charts."""
+    if width not in WIDTHS:
+        width = "full"
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+        position = conn.execute(
+            text(
+                "SELECT coalesce(max(position), -1) + 1 FROM dashboard_items "
+                "WHERE dashboard_id = :id"
+            ),
+            {"id": dash_id},
+        ).scalar()
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_items "
+                "(dashboard_id, chart_id, position, width, kind, content, section_id) "
+                "VALUES (:d, NULL, :p, :w, 'text', :c, :s)"
+            ),
+            {"d": dash_id, "p": position, "w": width, "c": content, "s": section_id},
+        )
+        _touch(conn, dash_id)
+        return True
+
+
+def set_item_section(dashboard_slug: str, item_id: int, section_id: int | None) -> bool:
+    """Move one tile onto a tab, or out of every tab with None."""
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+        if section_id is not None:
+            owned = conn.execute(
+                text("SELECT 1 FROM dashboard_sections WHERE id = :i AND dashboard_id = :d"),
+                {"i": section_id, "d": dash_id},
+            ).first()
+            if owned is None:
+                return False  # never file a tile onto another dashboard's tab
+        result = conn.execute(
+            text(
+                "UPDATE dashboard_items SET section_id = :s "
+                "WHERE id = :i AND dashboard_id = :d"
+            ),
+            {"s": section_id, "i": item_id, "d": dash_id},
+        )
+        _touch(conn, dash_id)
+        return result.rowcount > 0
+
+
+def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH,
+             section_id: int | None = None) -> bool:
     """Append a chart to a dashboard. False if either no longer exists.
 
     A chart may appear more than once — the same series at two widths, or
@@ -643,10 +885,11 @@ def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH) -
         ).scalar()
         conn.execute(
             text(
-                "INSERT INTO dashboard_items (dashboard_id, chart_id, position, width) "
-                "VALUES (:d, :c, :p, :w)"
+                "INSERT INTO dashboard_items "
+                "(dashboard_id, chart_id, position, width, kind, section_id) "
+                "VALUES (:d, :c, :p, :w, 'chart', :s)"
             ),
-            {"d": dash_id, "c": chart_id, "p": next_pos, "w": width},
+            {"d": dash_id, "c": chart_id, "p": next_pos, "w": width, "s": section_id},
         )
         _touch(conn, dash_id)
     return True
@@ -1131,6 +1374,116 @@ def access_for(username: str) -> Access:
             return Access(username=username, everything=True)
 
     return Access(username=username, granted=granted)
+
+
+# ── dashboard filters ──────────────────────────────────────────────────────
+
+
+@dataclass
+class DashboardFilter:
+    """One control on a dashboard's filter bar. See app/filters.py."""
+
+    key: str
+    label: str
+    column_expr: str
+    filter_type: str = "select"
+    values_sql: str = ""
+    source_db: str = ""
+    default_value: str = ""
+    applies_to: list[str] = field(default_factory=list)
+    position: int = 0
+    id: int | None = None
+
+
+def _row_to_filter(row: Any) -> DashboardFilter:
+    m = row._mapping
+    scope = m["applies_to"]
+    if isinstance(scope, str):
+        scope = json.loads(scope)
+    return DashboardFilter(
+        id=m["id"],
+        key=m["key"],
+        label=m["label"],
+        filter_type=m["filter_type"],
+        column_expr=m["column_expr"],
+        values_sql=m["values_sql"],
+        source_db=m["source_db"],
+        default_value=m["default_value"],
+        applies_to=list(scope or []),
+        position=m["position"],
+    )
+
+
+_FILTER_SELECT = (
+    "SELECT id, key, label, filter_type, column_expr, values_sql, source_db, "
+    "default_value, applies_to, position FROM dashboard_filters"
+)
+
+
+def list_filters(dashboard_slug: str) -> list[DashboardFilter]:
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                f"{_FILTER_SELECT} WHERE dashboard_id = "
+                "(SELECT id FROM dashboards WHERE slug = :s) ORDER BY position, id"
+            ),
+            {"s": dashboard_slug},
+        ).fetchall()
+    return [_row_to_filter(r) for r in rows]
+
+
+def add_filter(dashboard_slug: str, flt: DashboardFilter) -> bool:
+    """Add a filter. False when the dashboard is gone or the key is taken."""
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+        position = conn.execute(
+            text(
+                "SELECT coalesce(max(position), -1) + 1 FROM dashboard_filters "
+                "WHERE dashboard_id = :id"
+            ),
+            {"id": dash_id},
+        ).scalar()
+        try:
+            conn.execute(
+                text(
+                    "INSERT INTO dashboard_filters "
+                    "(dashboard_id, key, label, filter_type, column_expr, values_sql, "
+                    " source_db, default_value, applies_to, position) "
+                    "VALUES (:d, :k, :l, :t, :c, :v, :db, :def, CAST(:scope AS jsonb), :p)"
+                ),
+                {
+                    "d": dash_id,
+                    "k": flt.key,
+                    "l": flt.label,
+                    "t": flt.filter_type,
+                    "c": flt.column_expr,
+                    "v": flt.values_sql,
+                    "db": flt.source_db,
+                    "def": flt.default_value,
+                    "scope": json.dumps(list(flt.applies_to or [])),
+                    "p": position,
+                },
+            )
+        except IntegrityError:
+            return False  # duplicate key on this dashboard
+        _touch(conn, dash_id)
+        return True
+
+
+def delete_filter(dashboard_slug: str, filter_id: int) -> bool:
+    with engine().begin() as conn:
+        result = conn.execute(
+            text(
+                "DELETE FROM dashboard_filters WHERE id = :i AND dashboard_id = "
+                "(SELECT id FROM dashboards WHERE slug = :s)"
+            ),
+            {"i": filter_id, "s": dashboard_slug},
+        )
+        return result.rowcount > 0
 
 
 # ── reports (authored in the UI) ───────────────────────────────────────────

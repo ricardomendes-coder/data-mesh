@@ -37,10 +37,96 @@
   {% endif %}
 </form>
 
+<div class="bi-toolbar">
+  <form method="post" action="{{ url_for('dashboard_add_section', slug=dashboard.slug) }}">
+    <div class="bi-search bi-search-plain">
+      <input name="title" placeholder="New tab — e.g. Operação" required>
+    </div>
+    <button class="bi-btn sm" type="submit">Add tab</button>
+  </form>
+  <form method="post" action="{{ url_for('dashboard_add_text', slug=dashboard.slug) }}">
+    <div class="bi-search bi-search-plain">
+      <input name="content" placeholder="Heading or note between charts" required>
+    </div>
+    {% if dashboard.sections %}
+    <select name="section_id" aria-label="On which tab">
+      <option value="">— no tab —</option>
+      {% for s in dashboard.sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <button class="bi-btn sm ghost" type="submit">Add text</button>
+  </form>
+</div>
+
+<details class="bi-permsec" {% if dash_filters %}open{% endif %}>
+  <summary>
+    <span class="bi-permsec-tt">Filters</span>
+    <span class="bi-ds-stat">{{ dash_filters|length }}</span>
+  </summary>
+
+  <p class="bi-hint">
+    A filter rewrites the charts on this dashboard. For a chart to receive one,
+    its SQL must contain <code>{{ '{{ filters }}' }}</code> where its
+    <code>WHERE</code> clause accepts more terms — usually right after
+    <code>WHERE 1=1</code>. Charts without it keep running unfiltered and are
+    labelled <em>unfiltered</em> so the difference is visible.
+    Values are always sent as bound parameters; the <b>column</b> you type here
+    goes into the SQL, so only put a column name there.
+  </p>
+
+  {% for f in dash_filters %}
+  <div class="bi-fldrow">
+    <code>{{ f.key }}</code>
+    <span>{{ f.label }}</span>
+    <span class="bi-kind bi-kind-view">{{ f.filter_type }}</span>
+    <code>{{ f.column_expr }}</code>
+    {% if f.applies_to %}<span class="bi-sub">{{ f.applies_to|length }} chart(s)</span>
+    {% else %}<span class="bi-sub">all charts</span>{% endif %}
+    <form method="post" action="{{ url_for('dashboard_delete_filter', slug=dashboard.slug, filter_id=f.id) }}">
+      <button class="bi-icobtn danger" type="submit" title="Delete filter">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </form>
+  </div>
+  {% endfor %}
+
+  <form class="bi-filterform" method="post" action="{{ url_for('dashboard_add_filter', slug=dashboard.slug) }}">
+    <input class="bi-fldinput" name="key" placeholder="key (a-z0-9_)" required pattern="[a-z][a-z0-9_]*">
+    <input class="bi-fldinput" name="label" placeholder="Label shown to people" required>
+    <select class="bi-fldinput" name="filter_type">
+      {% for key, label, hint in filter_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input class="bi-fldinput" name="column_expr" placeholder="column to filter on" required>
+    <select class="bi-fldinput" name="source_db">
+      <option value="">— database for the options query —</option>
+      {% for d in databases %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+    </select>
+    <input class="bi-fldinput" name="values_sql" placeholder="SELECT DISTINCT col FROM t ORDER BY 1">
+    <button class="bi-btn sm" type="submit">Add filter</button>
+  </form>
+</details>
+
+{% if dashboard.sections %}
+<p class="bi-hint">
+  {{ dashboard.sections|length }} tab{{ '' if dashboard.sections|length == 1 else 's' }}.
+  Each tile's <b>tab</b> control below decides where it appears; tiles left on
+  <em>no tab</em> render above the tab strip.
+  Deleting a tab keeps its tiles — they move back out of the tabs.
+</p>
+<div class="bi-toolbar">
+  {% for s in dashboard.sections %}
+  <form method="post" action="{{ url_for('dashboard_delete_section', slug=dashboard.slug, section_id=s.id) }}"
+        onsubmit="return confirm('Delete the {{ s.title }} tab? Its tiles are kept.')">
+    <button class="bi-btn sm ghost" type="submit">{{ s.title }} ✕</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if tiles %}
 <div class="bi-tiles bi-tiles-editing">
   {% for t in tiles %}
-  {{ tile(t, 'tile-' ~ loop.index0, editing=true, widths=widths, dashboard=dashboard) }}
+  {{ tile(t, t.canvas_id, editing=true, widths=widths, dashboard=dashboard) }}
   {% endfor %}
 </div>
 

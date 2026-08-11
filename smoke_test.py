@@ -556,7 +556,7 @@ def test_dashboard_pages_render():
     store.get_dashboard = lambda slug, with_items=True: dash if slug == "ops" else None
     store.list_charts = lambda: [chart]
     store.list_dashboards = lambda: [dash]
-    db_mod.execute = lambda sql, database=None, max_rows=None: db_mod.QueryResult(
+    db_mod.execute = lambda sql, database=None, max_rows=None, params=None: db_mod.QueryResult(
         returns_rows=True,
         columns=["dia", "total"],
         rows=[("2026-07-01", 10), ("2026-07-02", 14)],
@@ -593,6 +593,74 @@ def test_dashboard_pages_render():
             db_mod.execute,
         ) = saved
     print("dashboard pages render: OK")
+
+
+def test_dashboard_filters_bind_values():
+    """Filters reach the SQL as bound parameters, never as text.
+
+    The column is configuration (an editor typed it) and goes into the query;
+    the value is input (a viewer typed it) and must not. This is the one place
+    in the app where a mistake is an injection hole, so it gets its own test.
+    """
+    from app import filters as f
+
+    sql = "SELECT c_id, SUM(v) FROM t WHERE 1=1 {{ filters }} GROUP BY 1"
+
+    # Nothing chosen: the token disappears and the query is unchanged otherwise.
+    out, params = f.apply(sql, f.resolve([], {}), "chart-a")
+    assert "{{" not in out and params == {}, (out, params)
+    assert "WHERE 1=1  GROUP BY 1" in out.replace("\n", " "), out
+
+    class D:
+        def __init__(self, **kw):
+            self.__dict__.update(
+                {"key": "", "label": "", "filter_type": "select", "column_expr": "",
+                 "values_sql": "", "source_db": "", "default_value": "", "applies_to": []}
+            )
+            self.__dict__.update(kw)
+
+    defs = [
+        D(key="cliente", label="Cliente", filter_type="select", column_expr="c_id"),
+        D(key="janela", label="Janela", filter_type="daterange", column_expr="d"),
+        D(key="busca", label="Busca", filter_type="text", column_expr="nome"),
+    ]
+    nasty = "x'; DROP TABLE charts; --"
+    active = f.resolve(defs, {"cliente": [nasty, "acme"], "janela": ["2026-01-01", "2026-02-01"],
+                              "busca": ["ana"]})
+    out, params = f.apply(sql, active, "chart-a")
+
+    # The dangerous string is a *value*, and appears nowhere in the SQL text.
+    assert nasty not in out, "a filter value was interpolated into the SQL"
+    assert "DROP TABLE" not in out
+    assert nasty in params.values(), "the value never made it to the parameters"
+    assert out.count(":flt_cliente_") == 2, out
+    assert ":flt_janela_from" in out and ":flt_janela_to" in out, out
+    assert params["flt_busca"] == "%ana%", params
+    # The column, which is configuration, does appear.
+    assert "c_id IN (" in out and "nome ILIKE" in out, out
+
+    # Scope: a filter naming specific charts leaves the others alone.
+    scoped = f.resolve([D(key="cliente", filter_type="select", column_expr="c_id",
+                          applies_to=["chart-a"])], {"cliente": ["acme"]})
+    hit, hit_params = f.apply(sql, scoped, "chart-a")
+    miss, miss_params = f.apply(sql, scoped, "chart-b")
+    assert "c_id IN" in hit and hit_params
+    assert "c_id IN" not in miss and miss_params == {}, miss
+
+    # A chart with no token is left exactly as it was.
+    plain = "SELECT 1"
+    same, no_params = f.apply(plain, active, "chart-a")
+    assert same == plain and no_params == {}
+    assert not f.accepts_filters(plain) and f.accepts_filters(sql)
+
+    # Bad dates are dropped rather than passed through.
+    bad = f.resolve([D(key="janela", filter_type="daterange", column_expr="d")],
+                    {"janela": ["not-a-date", ""]})
+    out2, params2 = f.apply(sql, bad, "chart-a")
+    assert params2 == {} and "flt_janela" not in out2, (out2, params2)
+
+    assert f.valid_key("cliente_2") and not f.valid_key("Cliente") and not f.valid_key("a b")
+    print("dashboard filters bind values: OK")
 
 
 def test_list_pages_render_without_folder_ui():
@@ -1364,7 +1432,7 @@ def test_enforcement_at_every_route():
     store.list_dashboards = lambda: [ops, secret]
     store.get_dashboard = lambda s, with_items=True: {"ops": ops, "secret": secret}.get(s)
     db_mod.list_databases = lambda: ["analytics", "dw_whirlpool", "keycloak"]
-    db_mod.execute = lambda sql, database=None, max_rows=None: db_mod.QueryResult(
+    db_mod.execute = lambda sql, database=None, max_rows=None, params=None: db_mod.QueryResult(
         returns_rows=True, columns=["a", "b"], rows=[(1, 2)], rowcount=1
     )
     try:
@@ -1820,6 +1888,7 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_dashboard_filters_bind_values()
     test_list_pages_render_without_folder_ui()
     test_folders_are_organisation_only()
     test_admin_panel_and_gate()

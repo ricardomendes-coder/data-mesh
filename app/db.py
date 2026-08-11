@@ -90,7 +90,12 @@ class QueryResult:
         return pd.DataFrame(self.rows, columns=self.columns)
 
 
-def execute(sql: str, database: str | None = None, max_rows: int | None = None) -> QueryResult:
+def execute(
+    sql: str,
+    database: str | None = None,
+    max_rows: int | None = None,
+    params: dict | None = None,
+) -> QueryResult:
     """Run an arbitrary SQL statement against `database`.
 
     Row-returning statements come back as columns + rows; write/DDL statements
@@ -103,13 +108,18 @@ def execute(sql: str, database: str | None = None, max_rows: int | None = None) 
     statements and non-SELECTs, and a user could defeat it anyway. Streaming
     means an unbounded `SELECT *` over a 1.8M-row table transfers only the rows
     we actually take.
+
+    `params` are bound values, never string-formatted in. Dashboard filters use
+    this: the filter's *column* comes from the filter definition (which only an
+    editor sets), while the *value* comes from whoever is looking at the page —
+    so the value has to travel as a parameter or it is an injection point.
     """
     engine = _engine(database)
     try:
         with engine.connect() as conn:
             if max_rows is not None:
                 conn = conn.execution_options(stream_results=True, max_row_buffer=1000)
-            result = conn.execute(text(sql))
+            result = conn.execute(text(sql), params or {})
             if result.returns_rows:
                 columns = list(result.keys())
                 if max_rows is None:

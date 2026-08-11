@@ -3,6 +3,23 @@
 
    `canvas_id` must match the key used in the page's dashboard-data payload. #}
 {% macro tile(t, canvas_id, editing=false, widths=(), dashboard=None) -%}
+{# A text tile is a heading or a note between charts: no frame, no header, no
+   query. It exists because a wall of charts with no dividers is unreadable —
+   which is what importing a Superset dashboard without its markdown gives you. #}
+{% if t.item.kind == 'text' %}
+<div class="bi-tile bi-tile-{{ t.item.width }} bi-tile-text">
+  <div class="bi-textblock">{{ t.item.content }}</div>
+  {% if editing %}
+  <div class="bi-tile-ctl">
+    <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=t.item.id) }}">
+      <button class="bi-icobtn danger" type="submit" title="Remove" aria-label="Remove">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% else %}
 <div class="bi-tile bi-tile-{{ t.item.width }}">
   <div class="bi-tile-hd">
     <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.slug) }}">{{ t.chart.title }}</a>
@@ -27,6 +44,16 @@
           {% endfor %}
         </select>
       </form>
+      {% if dashboard.sections %}
+      <form method="post" action="{{ url_for('dashboard_set_item_section', slug=dashboard.slug, item_id=t.item.id) }}">
+        <select name="section_id" onchange="this.form.submit()" aria-label="Which tab">
+          <option value="" {% if not t.item.section_id %}selected{% endif %}>— no tab —</option>
+          {% for s in dashboard.sections %}
+          <option value="{{ s.id }}" {% if s.id == t.item.section_id %}selected{% endif %}>{{ s.title }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
       <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=t.item.id) }}">
         <button class="bi-icobtn danger" type="submit" title="Remove from dashboard" aria-label="Remove">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
@@ -34,6 +61,12 @@
       </form>
     </div>
     {% else %}
+    {# Says so when a filter is set but this chart's SQL has nowhere to put it,
+       rather than letting a filtered and an unfiltered number sit side by side
+       looking equally authoritative. #}
+    {% if t.unfiltered %}
+    <span class="bi-kind bi-kind-warn" title="This chart's SQL has no {{ '{{ filters }}' }} placeholder, so the dashboard filters don't reach it">unfiltered</span>
+    {% endif %}
     <span class="bi-kind bi-kind-view">{{ t.chart.chart_type }}</span>
     {% endif %}
   </div>
@@ -44,10 +77,32 @@
     <span>{{ t.error }}</span>
   </div>
   {% else %}
+  {# Three shapes of tile. A table and a KPI are HTML, so they never reach the
+     dashboard-data payload and no canvas is emitted for them. #}
+  {% set how = t.spec.renders_as if t.spec else 'canvas' %}
+  {% if how == 'table' %}
+  <div class="bi-tile-table">
+    <table class="bi-restbl">
+      <thead><tr>{% for c in t.spec.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in t.spec.rows %}
+        <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif how == 'number' %}
+  <div class="bi-tile-number">
+    <div class="bi-kpi">{{ t.spec.value }}</div>
+    {% if t.spec.caption %}<div class="bi-kpi-cap">{{ t.spec.caption }}</div>{% endif %}
+  </div>
+  {% else %}
   <div class="bi-tile-canvas"><canvas id="{{ canvas_id }}"></canvas></div>
+  {% endif %}
   {% if t.spec and t.spec.warnings %}
   <div class="bi-tile-warn">{{ t.spec.warnings|join(' ') }}</div>
   {% endif %}
   {% endif %}
 </div>
+{% endif %}
 {%- endmacro %}

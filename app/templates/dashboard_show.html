@@ -19,17 +19,102 @@
 <div class="bi-ds-desc">{{ dashboard.description|inline_code }}</div>
 {% endif %}
 
+{# The bar is a GET form: submitting puts the choices in the URL, so a filtered
+   dashboard is a link somebody can send. #}
+{% if filters %}
+<form class="bi-filterbar" method="get" action="{{ url_for('dashboard_show', slug=dashboard.slug) }}">
+  {% for f in filters %}
+  <div class="bi-filter">
+    <label for="flt-{{ f.key }}">{{ f.label }}</label>
+    {% if f.filter_type == 'select' %}
+    {% set opts = filter_options.get(f.key, []) %}
+    <select id="flt-{{ f.key }}" name="{{ f.key }}" {% if opts|length > 1 %}multiple size="1"{% endif %}>
+      <option value="">All</option>
+      {% for o in opts %}
+      <option value="{{ o }}" {% if o in f.values %}selected{% endif %}>{{ o }}</option>
+      {% endfor %}
+    </select>
+    {% if not opts %}<span class="bi-sub">no options</span>{% endif %}
+    {% elif f.filter_type == 'daterange' %}
+    <span class="bi-daterange">
+      <input type="date" name="{{ f.key }}" value="{{ f.values[0] if f.values|length > 0 else '' }}" aria-label="{{ f.label }} from">
+      <input type="date" name="{{ f.key }}" value="{{ f.values[1] if f.values|length > 1 else '' }}" aria-label="{{ f.label }} to">
+    </span>
+    {% else %}
+    <input id="flt-{{ f.key }}" name="{{ f.key }}" value="{{ f.values[0] if f.values else '' }}" placeholder="contains…">
+    {% endif %}
+  </div>
+  {% endfor %}
+  <div class="bi-filter-actions">
+    <button class="bi-btn sm" type="submit">Apply</button>
+    <a class="bi-btn sm ghost" href="{{ url_for('dashboard_show', slug=dashboard.slug) }}">Clear</a>
+  </div>
+</form>
+{% endif %}
+
 {% if tiles %}
+{% set loose = tiles|selectattr('item.section_id', 'none')|list %}
+
+{# Tiles outside every tab render first, above the strip — Superset allows the
+   same, and a dashboard that opens on a header plus its KPIs reads better than
+   one that opens on a bare row of tab names. #}
+{% if loose %}
 <div class="bi-tiles">
-  {% for t in tiles %}
-  {{ tile(t, 'tile-' ~ loop.index0) }}
+  {% for t in loose %}{{ tile(t, t.canvas_id) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if dashboard.has_tabs %}
+<div class="bi-panel-tabs bi-dash-tabs">
+  {% for s in dashboard.sections %}
+  <button class="bi-ptab {{ 'active' if loop.first else '' }}" data-tab="sec-{{ s.id }}" type="button">{{ s.title }}</button>
   {% endfor %}
 </div>
+{% for s in dashboard.sections %}
+<section class="pane {{ 'active' if loop.first else '' }}" data-pane="sec-{{ s.id }}">
+  {% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
+  {% if in_tab %}
+  <div class="bi-tiles">
+    {% for t in in_tab %}{{ tile(t, t.canvas_id) }}{% endfor %}
+  </div>
+  {% else %}
+  <div class="bi-empty-lg">Nothing on this tab yet.</div>
+  {% endif %}
+</section>
+{% endfor %}
+{% elif not loose %}
+<div class="bi-tiles">
+  {% for t in tiles %}{{ tile(t, t.canvas_id) }}{% endfor %}
+</div>
+{% endif %}
 
 <script id="dashboard-data" type="application/json">{{ tile_specs|tojson }}</script>
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
+{% if dashboard.has_tabs %}
+<script>
+/* Tab switching. Every tile is rendered up front — charts on a hidden pane are
+   drawn too, so switching tabs never waits on a query. */
+(function () {
+  var tabs = document.querySelectorAll('.bi-dash-tabs [data-tab]');
+  function show(name) {
+    tabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
+    document.querySelectorAll('.pane[data-pane]').forEach(function (p) {
+      p.classList.toggle('active', p.getAttribute('data-pane') === name);
+    });
+    try { history.replaceState(null, '', '#' + name); } catch (e) { /* file:// */ }
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
+  });
+  /* Deep links: /dashboards/x#sec-12 opens on that tab, so a link to one tab
+     of a dashboard is shareable. */
+  var wanted = (location.hash || '').replace('#', '');
+  if (wanted && document.querySelector('.pane[data-pane="' + wanted + '"]')) show(wanted);
+})();
+</script>
+{% endif %}
 {% else %}
 <div class="bi-empty-lg">
   This dashboard is empty.

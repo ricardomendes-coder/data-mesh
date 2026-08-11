@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import charts, datasets, db, oidc, reports, store, superset_session, users
+from . import charts, datasets, db, filters, oidc, reports, store, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
@@ -1119,18 +1119,44 @@ def _dashboards_unavailable(request: Request, user: str, status: int = 503):
     return templates.TemplateResponse(request, "dashboards.html", context, status_code=status)
 
 
-def _render_tiles(items: list) -> list[dict]:
+def _render_tiles(items: list, active: list | None = None) -> list[dict]:
     """Run each tile's query and build its spec.
 
     One query per tile, sequentially — fine for the handful of charts a
     dashboard holds, and a failing tile becomes an error card rather than
     taking down the whole page.
+
+    `active` are the dashboard's filters with the viewer's current choices. A
+    chart whose SQL has no {{ filters }} token runs unfiltered, and the tile
+    says so rather than pretending the filter applied.
     """
+    active = active or []
     tiles = []
-    for item in items:
-        tile = {"item": item, "chart": item.chart, "spec": None, "error": None}
+    for index, item in enumerate(items):
+        # The canvas id is fixed here rather than derived from the loop in the
+        # template: with tabs the tiles are rendered in groups, so a per-group
+        # loop index would no longer match the keys in the embedded payload.
+        tile = {
+            "item": item,
+            "chart": item.chart,
+            "spec": None,
+            "error": None,
+            "canvas_id": f"tile-{index}",
+        }
+        # A text tile carries its own content and runs nothing.
+        if getattr(item, "is_text", False) or item.chart is None:
+            tiles.append(tile)
+            continue
+        # Charts that can't take a filter are flagged, so a filtered dashboard
+        # never quietly mixes filtered and unfiltered numbers.
+        tile["unfiltered"] = bool(
+            active
+            and any(f.is_set and f.scopes(item.chart.slug) for f in active)
+            and not filters.accepts_filters(item.chart.sql)
+        )
         try:
-            result = db.execute(item.chart.sql, item.chart.source_db)
+            sql, params = filters.apply(item.chart.sql, active, item.chart.slug)
+            result = db.execute(sql, item.chart.source_db, params=params)
             tile["spec"] = charts.build_spec(
                 result.columns,
                 result.rows,
@@ -1145,13 +1171,60 @@ def _render_tiles(items: list) -> list[dict]:
     return tiles
 
 
+def _dashboard_filters(slug: str) -> list:
+    """A dashboard's filter definitions, or none if they can't be read.
+
+    Non-fatal on purpose: losing the filter bar should degrade a dashboard to
+    its unfiltered self, not to an error page.
+    """
+    if not store.available():
+        return []
+    try:
+        return store.list_filters(slug)
+    except Exception:
+        logger.exception("Could not read filters for dashboard %r", slug)
+        return []
+
+
+def _filter_options(definitions: list, access: store.Access) -> dict[str, list[str]]:
+    """key -> the values a `select` filter offers.
+
+    Each is a query the dashboard's editor wrote, so it runs under the same
+    database grant as anything else: no grant for that database, no options.
+    A failing options query costs one dropdown, never the page.
+    """
+    options: dict[str, list[str]] = {}
+    for d in definitions:
+        if d.filter_type != filters.SELECT or not d.values_sql.strip():
+            continue
+        if d.source_db and not access.allows(store.DATABASE, d.source_db):
+            continue
+        try:
+            result = db.execute(d.values_sql, d.source_db or None, max_rows=1000)
+            options[d.key] = [
+                "" if r[0] is None else str(r[0]) for r in result.rows if r and r[0] is not None
+            ]
+        except Exception:
+            logger.exception("Filter %r options query failed", d.key)
+            options[d.key] = []
+    return options
+
+
 def _tile_specs(tiles: list[dict]) -> dict:
     """canvas id -> spec, for the page's single embedded payload.
 
     Built here rather than in the template: Jinja has no zero-based enumerate,
     and the ids must match what _tile.html renders.
+
+    Only canvas tiles appear. A table or a big number is rendered as HTML by the
+    template and has no canvas, so an entry here would send the renderer looking
+    for an element that was never emitted.
     """
-    return {f"tile-{i}": (t["spec"].to_dict() if t["spec"] else None) for i, t in enumerate(tiles)}
+    return {
+        t["canvas_id"]: t["spec"].to_dict()
+        for t in tiles
+        if t["spec"] is not None and t["spec"].renders_as == "canvas"
+    }
 
 
 @app.get("/dashboards", response_class=HTMLResponse)
@@ -1242,10 +1315,28 @@ def dashboard_show(
         return failure
     # Tiles are filtered by chart grant: holding a dashboard must not become a
     # way to see a chart — or the database behind it — you were never granted.
-    dash.items = [i for i in dash.items if access.allows(store.CHART, i.chart.slug)]
-    tiles = _render_tiles(dash.items)
+    # Text tiles have no chart and are always kept.
+    dash.items = [
+        i for i in dash.items if i.chart is None or access.allows(store.CHART, i.chart.slug)
+    ]
+
+    # Filter state lives in the query string, so a filtered dashboard is a link
+    # you can send to somebody.
+    definitions = _dashboard_filters(slug)
+    chosen = {key: request.query_params.getlist(key) for key in request.query_params}
+    active = filters.resolve(definitions, chosen)
+
+    tiles = _render_tiles(dash.items, active)
     context = _shell_context(
-        user, "dashboards", dashboard=dash, tiles=tiles, tile_specs=_tile_specs(tiles)
+        user,
+        "dashboards",
+        access,
+        dashboard=dash,
+        tiles=tiles,
+        tile_specs=_tile_specs(tiles),
+        filters=active,
+        filter_options=_filter_options(definitions, access),
+        can_build=access.allows(store.FEATURE, "dashboard_builder"),
     )
     return templates.TemplateResponse(request, "dashboard_show.html", context)
 
@@ -1268,13 +1359,21 @@ def dashboard_edit(
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
-    dash.items = [i for i in dash.items if access.allows(store.CHART, i.chart.slug)]
+    dash.items = [
+        i for i in dash.items if i.chart is None or access.allows(store.CHART, i.chart.slug)
+    ]
 
     available_charts = []
     try:
         available_charts = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
     except Exception:
         logger.exception("Could not list charts for the dashboard editor")
+
+    databases: list[str] = []
+    try:
+        databases = [d for d in db.list_databases() if access.allows(store.DATABASE, d)]
+    except Exception:
+        logger.exception("Could not list databases for the dashboard editor")
 
     tiles = _render_tiles(dash.items)
     context = _shell_context(
@@ -1286,8 +1385,73 @@ def dashboard_edit(
         tile_specs=_tile_specs(tiles),
         available_charts=available_charts,
         widths=store.WIDTHS,
+        dash_filters=_dashboard_filters(slug),
+        filter_types=filters.FILTER_TYPES,
+        databases=databases,
     )
     return templates.TemplateResponse(request, "dashboard_edit.html", context)
+
+
+@app.post("/dashboards/{slug}/filters")
+def dashboard_add_filter(
+    request: Request,
+    slug: str,
+    key: str = Form(...),
+    label: str = Form(...),
+    column_expr: str = Form(...),
+    filter_type: str = Form("select"),
+    values_sql: str = Form(""),
+    source_db: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Define a filter. The options query runs under the caller's own grants."""
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    # The key names a bind parameter and a query-string field, so it has to be a
+    # plain identifier — not because of injection (values are bound) but because
+    # anything else produces a filter nobody can address.
+    if not filters.valid_key(key):
+        return _forbidden(
+            request, user, "A filter key must look like lower_snake_case.", access=access
+        )
+    if filter_type not in filters.FILTER_TYPE_KEYS:
+        filter_type = filters.SELECT
+    # You can only point an options query at a database you may read anyway.
+    if source_db and not access.allows(store.DATABASE, source_db):
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
+    if store.available():
+        store.add_filter(
+            slug,
+            store.DashboardFilter(
+                key=key,
+                label=label.strip() or key,
+                column_expr=column_expr.strip(),
+                filter_type=filter_type,
+                values_sql=values_sql.strip(),
+                source_db=source_db,
+            ),
+        )
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/filters/{filter_id}/delete")
+def dashboard_delete_filter(
+    request: Request,
+    slug: str,
+    filter_id: int,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    if store.available():
+        store.delete_filter(slug, filter_id)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
 
 
 @app.post("/dashboards/{slug}/items")
@@ -1307,6 +1471,86 @@ def dashboard_add_item(
         )
     if store.available():
         store.add_item(slug, chart_slug, width)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+def _may_edit_dashboard(access: store.Access, slug: str) -> bool:
+    return access.allows(store.DASHBOARD, slug) and access.allows(
+        store.FEATURE, "dashboard_builder"
+    )
+
+
+@app.post("/dashboards/{slug}/sections")
+def dashboard_add_section(
+    request: Request,
+    slug: str,
+    title: str = Form(...),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Add a tab. Tiles are moved onto it one at a time from their own control."""
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    if store.available():
+        store.add_section(slug, title)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/sections/{section_id}/delete")
+def dashboard_delete_section(
+    request: Request,
+    slug: str,
+    section_id: int,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    if store.available():
+        store.delete_section(slug, section_id)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/items/{item_id}/section")
+def dashboard_set_item_section(
+    request: Request,
+    slug: str,
+    item_id: int,
+    section_id: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    target = int(section_id) if section_id.strip().isdigit() else None
+    if store.available():
+        store.set_item_section(slug, item_id, target)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+
+
+@app.post("/dashboards/{slug}/text")
+def dashboard_add_text(
+    request: Request,
+    slug: str,
+    content: str = Form(...),
+    section_id: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """A heading or note between charts."""
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    target = int(section_id) if section_id.strip().isdigit() else None
+    if store.available():
+        store.add_text_item(slug, content.strip()[:2000], section_id=target)
     return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
 
 

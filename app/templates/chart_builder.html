@@ -46,7 +46,9 @@
       <p class="bi-hint" id="type-hint"></p>
     </div>
 
-    <div class="bi-fld">
+    {# Hidden for a table, which shows the result as it comes back. The JS
+       toggles these, keyed off the selected type. #}
+    <div class="bi-fld" data-cfg="x">
       <label for="x_column">X axis (labels)</label>
       <select id="x_column" name="x_column" form="builder">
         {% for c in columns %}
@@ -55,8 +57,8 @@
       </select>
     </div>
 
-    <div class="bi-fld">
-      <label>Measures (numeric columns)</label>
+    <div class="bi-fld" data-cfg="y">
+      <label id="measure-label">Measures (numeric columns)</label>
       {% if numeric_columns %}
       <div class="bi-checks">
         {% for c in numeric_columns %}
@@ -84,6 +86,9 @@
 
     <div class="bi-chartbox">
       <canvas id="preview" height="300"></canvas>
+      {# A table or a KPI isn't drawn on the canvas; the JS shows one or the
+         other, never both. #}
+      <div id="preview-html" hidden></div>
     </div>
 
     <div id="chart-warnings"></div>

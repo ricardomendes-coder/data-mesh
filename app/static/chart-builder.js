@@ -34,12 +34,39 @@
     return isNaN(n) ? null : n;
   }
 
+  /* Mirrors _format_number() in app/charts.py. Kept in step by eye rather than
+     shared: the preview is a convenience, and the server formats again on save. */
+  function formatNumber(v) {
+    var units = [[1e12, " tri"], [1e9, " bi"], [1e6, " mi"], [1e3, " mil"]];
+    var mag = Math.abs(v);
+    for (var i = 0; i < units.length; i++) {
+      if (mag >= units[i][0]) {
+        var s = v / units[i][0];
+        return (Math.abs(s) < 10 ? s.toFixed(1) : s.toFixed(0)).replace(".", ",") + units[i][1];
+      }
+    }
+    if (v === Math.round(v)) return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return v.toFixed(2).replace(".", ",");
+  }
+
   function buildSpec() {
     var type = typeEl.value;
     var x = xEl.value;
     var measures = selectedMeasures();
     var warnings = [];
     var xi = payload.columns.indexOf(x);
+
+    // The two HTML types don't produce a canvas spec at all.
+    if (type === "table") {
+      return { spec: null, html: "table", warnings: [] };
+    }
+    if (type === "number") {
+      if (!measures.length) {
+        return { spec: null, html: null, warnings: ["Pick the column holding the number."] };
+      }
+      return { spec: null, html: "number", warnings: [] };
+    }
+
     if (xi < 0 || !measures.length) {
       return { spec: null, warnings: ["Pick an x-axis column and at least one measure."] };
     }
@@ -94,8 +121,77 @@
     hintEl.textContent = opt ? opt.getAttribute("data-hint") || "" : "";
   }
 
+  var canvasEl = document.getElementById("preview");
+  var htmlEl = document.getElementById("preview-html");
+  var MAX_TABLE_ROWS = 200;
+
+  function renderTable() {
+    var t = document.createElement("table");
+    t.className = "bi-restbl";
+    var thead = t.createTHead().insertRow();
+    payload.columns.forEach(function (c) {
+      var th = document.createElement("th");
+      th.textContent = c;
+      thead.appendChild(th);
+    });
+    var body = t.createTBody();
+    payload.rows.slice(0, MAX_TABLE_ROWS).forEach(function (r) {
+      var tr = body.insertRow();
+      r.forEach(function (cell) {
+        tr.insertCell().textContent = cell === null || cell === undefined ? "null" : String(cell);
+      });
+    });
+    htmlEl.innerHTML = "";
+    htmlEl.className = "bi-tile-table";
+    htmlEl.appendChild(t);
+  }
+
+  function renderNumber() {
+    var name = selectedMeasures()[0];
+    var ci = payload.columns.indexOf(name);
+    var first = payload.rows[0];
+    var n = first ? toNumber(first[ci]) : null;
+    var xi = payload.columns.indexOf(xEl.value);
+    var caption = first && xi >= 0 && first[xi] != null ? String(first[xi]) : "";
+    htmlEl.className = "bi-tile-number";
+    htmlEl.innerHTML = "";
+    var v = document.createElement("div");
+    v.className = "bi-kpi bi-kpi-lg";
+    v.textContent = n === null ? "—" : formatNumber(n);
+    htmlEl.appendChild(v);
+    if (caption) {
+      var c = document.createElement("div");
+      c.className = "bi-kpi-cap";
+      c.textContent = caption;
+      htmlEl.appendChild(c);
+    }
+  }
+
+  /* The x-axis and measures mean different things per type — or nothing at all
+     for a table — so the sidebar follows the selection rather than offering
+     controls that quietly do nothing. */
+  function syncControls(type) {
+    var xBox = document.querySelector('[data-cfg="x"]');
+    var yBox = document.querySelector('[data-cfg="y"]');
+    var label = document.getElementById("measure-label");
+    if (xBox) xBox.hidden = type === "table";
+    if (yBox) yBox.hidden = type === "table";
+    if (label) {
+      label.textContent = type === "number"
+        ? "Which column holds the number"
+        : "Measures (numeric columns)";
+    }
+    if (xBox && type === "number") {
+      xBox.querySelector("label").textContent = "Caption (optional)";
+    } else if (xBox) {
+      xBox.querySelector("label").textContent = "X axis (labels)";
+    }
+  }
+
   function draw() {
     updateTypeHint();
+    var type = typeEl.value;
+    syncControls(type);
     var built = buildSpec();
     var all = (payload.warnings || []).concat(built.warnings);
     warnEl.innerHTML = "";
@@ -105,8 +201,15 @@
       d.textContent = w;
       warnEl.appendChild(d);
     });
-    if (built.spec) window.renderChart("preview", built.spec);
-    syncSaveFields(typeEl.value, xEl.value, selectedMeasures());
+
+    var isHtml = built.html === "table" || built.html === "number";
+    canvasEl.hidden = isHtml;
+    htmlEl.hidden = !isHtml;
+    if (built.html === "table") renderTable();
+    else if (built.html === "number") renderNumber();
+    else if (built.spec) window.renderChart("preview", built.spec);
+
+    syncSaveFields(type, xEl.value, selectedMeasures());
   }
 
   [typeEl, xEl].concat(checks).forEach(function (el) {
