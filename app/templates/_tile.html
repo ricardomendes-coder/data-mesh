@@ -1,108 +1,113 @@
-{# One dashboard tile. Shared by the view and the editor so the rendered chart
-   looks identical in both — the editor only adds the controls row.
+{# One dashboard tile. Shared by the view and the editor so a tile looks the
+   same in both — the editor only adds the drag handles and controls.
 
-   `canvas_id` must match the key used in the page's dashboard-data payload. #}
+   Tiles are placed on a 12-column grid. A tile the browser will fill in later
+   renders as a skeleton with `data-tile` on it; dashboard-render.js finds those
+   and fetches each one. See app/main.py's dashboard_tile_data. #}
+
+{% macro geometry(item) -%}
+{%- if item.placed -%}
+{# Text keeps its row but not its height: our rendering is far more compact
+   than Superset's, and honouring the original height leaves a dead band. #}
+{# Text height is estimated from its length: the server can't measure the
+   rendered box, and a single 56px row clips anything past one line. #}
+{%- set rows = [2, ((item.content|length / 95) | round(0, 'ceil') | int) + 1] | max if item.kind == 'text' else (item.grid_h or 5) -%}
+grid-column: {{ item.grid_x + 1 }} / span {{ item.span }}; grid-row: {{ item.grid_y + 1 }} / span {{ rows }};
+{%- else -%}
+{# Never placed: flow in order, but still claim a sensible height — without a
+   row span the tile collapses to one 56px grid row and shows only its header. #}
+grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.kind == 'text' else 5) }};
+{%- endif -%}
+{%- endmacro %}
+
 {% macro tile(t, canvas_id, editing=false, widths=(), dashboard=None) -%}
-{# A text tile is a heading or a note between charts: no frame, no header, no
-   query. It exists because a wall of charts with no dividers is unreadable —
-   which is what importing a Superset dashboard without its markdown gives you. #}
-{% if t.item.kind == 'text' %}
-<div class="bi-tile bi-tile-{{ t.item.width }} bi-tile-text">
-  <div class="bi-textblock">{{ t.item.content }}</div>
+{% set item = t.item %}
+
+{% if item.kind == 'text' %}
+<div class="bi-tile bi-tile-text{{ ' bi-draggable' if editing else '' }}"
+     style="{{ geometry(item) }}" data-item="{{ item.id }}"
+     data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
+     data-w="{{ item.span }}" data-h="{{ item.grid_h or 2 }}"
+     data-section="{{ item.section_id or '' }}">
+  <div class="bi-textblock">{{ item.content|markdown_lite }}</div>
   {% if editing %}
   <div class="bi-tile-ctl">
-    <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=t.item.id) }}">
+    <span class="bi-drag" title="Drag to move">⠿</span>
+    <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=item.id) }}">
       <button class="bi-icobtn danger" type="submit" title="Remove" aria-label="Remove">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
     </form>
   </div>
+  <span class="bi-resize" title="Drag to resize"></span>
   {% endif %}
 </div>
+
 {% else %}
-<div class="bi-tile bi-tile-{{ t.item.width }}">
+<div class="bi-tile{{ ' bi-draggable' if editing else '' }}"
+     style="{{ geometry(item) }}" data-item="{{ item.id }}"
+     data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
+     data-w="{{ item.span }}" data-h="{{ item.grid_h or 5 }}"
+     data-section="{{ item.section_id or '' }}">
   <div class="bi-tile-hd">
+    {% if editing %}<span class="bi-drag" title="Drag to move">⠿</span>{% endif %}
     <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.slug) }}">{{ t.chart.title }}</a>
+
     {% if editing %}
     <div class="bi-tile-ctl">
-      <form method="post" action="{{ url_for('dashboard_move_item', slug=dashboard.slug, item_id=t.item.id) }}">
-        <input type="hidden" name="direction" value="up">
-        <button class="bi-icobtn" type="submit" title="Move earlier" aria-label="Move earlier">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>
-        </button>
-      </form>
-      <form method="post" action="{{ url_for('dashboard_move_item', slug=dashboard.slug, item_id=t.item.id) }}">
-        <input type="hidden" name="direction" value="down">
-        <button class="bi-icobtn" type="submit" title="Move later" aria-label="Move later">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
-        </button>
-      </form>
-      <form method="post" action="{{ url_for('dashboard_set_width', slug=dashboard.slug, item_id=t.item.id) }}">
-        <select name="width" onchange="this.form.submit()" aria-label="Tile width">
-          {% for w in widths %}
-          <option value="{{ w }}" {% if w == t.item.width %}selected{% endif %}>{{ w }}</option>
-          {% endfor %}
-        </select>
-      </form>
       {% if dashboard.sections %}
-      <form method="post" action="{{ url_for('dashboard_set_item_section', slug=dashboard.slug, item_id=t.item.id) }}">
+      <form method="post" action="{{ url_for('dashboard_set_item_section', slug=dashboard.slug, item_id=item.id) }}">
         <select name="section_id" onchange="this.form.submit()" aria-label="Which tab">
-          <option value="" {% if not t.item.section_id %}selected{% endif %}>— no tab —</option>
+          <option value="" {% if not item.section_id %}selected{% endif %}>— no tab —</option>
           {% for s in dashboard.sections %}
-          <option value="{{ s.id }}" {% if s.id == t.item.section_id %}selected{% endif %}>{{ s.title }}</option>
+          <option value="{{ s.id }}" {% if s.id == item.section_id %}selected{% endif %}>{{ s.title }}</option>
           {% endfor %}
         </select>
       </form>
       {% endif %}
-      <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=t.item.id) }}">
+      <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=item.id) }}">
         <button class="bi-icobtn danger" type="submit" title="Remove from dashboard" aria-label="Remove">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
         </button>
       </form>
     </div>
+
     {% else %}
-    {# Says so when a filter is set but this chart's SQL has nowhere to put it,
-       rather than letting a filtered and an unfiltered number sit side by side
-       looking equally authoritative. #}
-    {% if t.unfiltered %}
-    <span class="bi-kind bi-kind-warn" title="This chart's SQL has no {{ '{{ filters }}' }} placeholder, so the dashboard filters don't reach it">unfiltered</span>
-    {% endif %}
-    <span class="bi-kind bi-kind-view">{{ t.chart.chart_type }}</span>
+    {# What the chart is, and everything you'd want from it without leaving the
+       dashboard: its SQL, its own page, and the builder. #}
+    <div class="bi-tile-ctl">
+      <span class="bi-kind bi-kind-warn bi-tile-unfiltered" hidden
+            title="This chart's SQL has no {{ '{{ filters }}' }} placeholder, so the dashboard filters don't reach it">unfiltered</span>
+      <span class="bi-kind bi-kind-view">{{ t.chart.chart_type }}</span>
+      <details class="bi-tilemenu">
+        <summary class="bi-icobtn" title="Chart actions" aria-label="Chart actions">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>
+        </summary>
+        <div class="bi-tilemenu-pop">
+          <a href="{{ url_for('chart_detail', slug=t.chart.slug) }}">Open chart</a>
+          <a href="{{ url_for('chart_new') }}?from={{ t.chart.slug }}">Edit chart</a>
+          <a href="{{ url_for('console') }}?tab=query&amp;database={{ t.chart.source_db|urlencode }}&amp;sql={{ t.chart.sql|urlencode }}">Open SQL in Query</a>
+          <button type="button" data-sql-toggle>Show SQL</button>
+          <div class="bi-tile-meta">
+            <code>{{ t.chart.source_db }}</code>
+            {% if t.chart.description %}<p>{{ t.chart.description }}</p>{% endif %}
+          </div>
+        </div>
+      </details>
+    </div>
     {% endif %}
   </div>
 
-  {% if t.error %}
-  <div class="bi-tile-err">
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
-    <span>{{ t.error }}</span>
-  </div>
-  {% else %}
-  {# Three shapes of tile. A table and a KPI are HTML, so they never reach the
-     dashboard-data payload and no canvas is emitted for them. #}
-  {% set how = t.spec.renders_as if t.spec else 'canvas' %}
-  {% if how == 'table' %}
-  <div class="bi-tile-table">
-    <table class="bi-restbl">
-      <thead><tr>{% for c in t.spec.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
-      <tbody>
-        {% for row in t.spec.rows %}
-        <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% elif how == 'number' %}
-  <div class="bi-tile-number">
-    <div class="bi-kpi">{{ t.spec.value }}</div>
-    {% if t.spec.caption %}<div class="bi-kpi-cap">{{ t.spec.caption }}</div>{% endif %}
-  </div>
-  {% else %}
-  <div class="bi-tile-canvas"><canvas id="{{ canvas_id }}"></canvas></div>
+  {% if not editing %}
+  <pre class="bi-tile-sql" hidden>{{ t.chart.sql }}</pre>
   {% endif %}
-  {% if t.spec and t.spec.warnings %}
-  <div class="bi-tile-warn">{{ t.spec.warnings|join(' ') }}</div>
-  {% endif %}
-  {% endif %}
+
+  {# Filled in by the browser. `data-tile` is what the loader looks for. #}
+  <div class="bi-tile-body" data-tile="{{ item.id }}" data-canvas="{{ canvas_id }}">
+    <div class="bi-tile-skel"><span></span><span></span><span></span></div>
+  </div>
+  <div class="bi-tile-warn" hidden></div>
+  {% if editing %}<span class="bi-resize" title="Drag to resize"></span>{% endif %}
 </div>
 {% endif %}
 {%- endmacro %}

@@ -337,6 +337,25 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON dashboard_filters (dashboard_id, position);
         """,
     ),
+    (
+        "0010_tile_geometry",
+        """
+        -- Free placement on a 12-column grid, replacing the third/half/full
+        -- width. Superset uses a 12-column grid too, which is what makes an
+        -- imported dashboard able to keep its original layout exactly.
+        --
+        -- NULL grid_x means "not placed yet": those tiles flow in `position`
+        -- order at their old width, so every dashboard that existed before this
+        -- migration renders unchanged until someone moves a tile.
+        ALTER TABLE dashboard_items ADD COLUMN IF NOT EXISTS grid_x integer;
+        ALTER TABLE dashboard_items ADD COLUMN IF NOT EXISTS grid_y integer;
+        ALTER TABLE dashboard_items ADD COLUMN IF NOT EXISTS grid_w integer;
+        ALTER TABLE dashboard_items ADD COLUMN IF NOT EXISTS grid_h integer;
+
+        CREATE INDEX IF NOT EXISTS dashboard_items_grid_idx
+            ON dashboard_items (dashboard_id, grid_y, grid_x);
+        """,
+    ),
 ]
 
 
@@ -535,13 +554,24 @@ WIDTHS = ("third", "half", "full")
 DEFAULT_WIDTH = "half"
 
 
+# The grid every dashboard is laid out on. Twelve columns because that divides
+# cleanly into halves, thirds and quarters — and because Superset uses twelve,
+# so an imported layout maps across without rescaling.
+GRID_COLUMNS = 12
+ROW_HEIGHT_PX = 56  # one grid_h unit
+DEFAULT_TILE = (6, 5)  # w, h — half width, a readable chart height
+
+
 @dataclass
 class DashboardItem:
-    """One tile: a chart, or a block of text, at a position and width.
+    """One tile: a chart, or a block of text, placed on the dashboard grid.
 
     `chart` is None for a text tile — the two are one table because they share
-    ordering, width and a tab, and splitting them would mean merging two ordered
-    lists on every render.
+    ordering, geometry and a tab, and splitting them would mean merging two
+    ordered lists on every render.
+
+    Geometry is nullable. A tile that has never been placed falls back to the
+    old `width` flow, so dashboards built before the grid keep working.
     """
 
     id: int
@@ -551,10 +581,30 @@ class DashboardItem:
     kind: str = "chart"  # chart | text
     content: str = ""
     section_id: int | None = None
+    grid_x: int | None = None
+    grid_y: int | None = None
+    grid_w: int | None = None
+    grid_h: int | None = None
 
     @property
     def is_text(self) -> bool:
         return self.kind == "text"
+
+    @property
+    def placed(self) -> bool:
+        return self.grid_x is not None and self.grid_y is not None
+
+    @property
+    def span(self) -> int:
+        """Columns this tile occupies, falling back to the old width names."""
+        if self.grid_w:
+            return max(1, min(GRID_COLUMNS, self.grid_w))
+        return {"third": 4, "half": 6, "full": 12}.get(self.width, 6)
+
+    @property
+    def height_px(self) -> int:
+        units = self.grid_h or (2 if self.is_text else DEFAULT_TILE[1])
+        return max(1, units) * ROW_HEIGHT_PX
 
 
 @dataclass
@@ -643,13 +693,17 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
             text(
                 """
                 SELECT i.id, i.position, i.width, i.kind, i.content, i.section_id,
+                       i.grid_x, i.grid_y, i.grid_w, i.grid_h,
                        c.id AS c_id, c.slug, c.title, c.description, c.source_db,
                        c.sql, c.chart_type, c.x_column, c.y_columns, c.created_by,
                        c.created_at, c.updated_at
                 FROM dashboard_items i
                 LEFT JOIN charts c ON c.id = i.chart_id
                 WHERE i.dashboard_id = :id
-                ORDER BY i.position, i.id
+                -- Placed tiles first, in grid order; the rest keep their old
+                -- flow order underneath.
+                ORDER BY coalesce(i.grid_y, 9999), coalesce(i.grid_x, 9999),
+                         i.position, i.id
                 """
             ),
             {"id": dash.id},
@@ -691,6 +745,10 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
                 kind=m["kind"] or "chart",
                 content=m["content"] or "",
                 section_id=m["section_id"],
+                grid_x=m["grid_x"],
+                grid_y=m["grid_y"],
+                grid_w=m["grid_w"],
+                grid_h=m["grid_h"],
                 chart=chart,
             )
         )
@@ -798,9 +856,13 @@ def delete_section(dashboard_slug: str, section_id: int) -> bool:
         return result.rowcount > 0
 
 
-def add_text_item(dashboard_slug: str, content: str, section_id: int | None = None,
-                  width: str = "full") -> bool:
-    """Append a block of text — a heading or a note between charts."""
+def add_text_item(
+    dashboard_slug: str, content: str, section_id: int | None = None, width: str = "full"
+) -> int | None:
+    """Append a block of text — a heading or a note between charts.
+
+    Returns the new tile's id, so an importer can place it on the grid.
+    """
     if width not in WIDTHS:
         width = "full"
     with engine().begin() as conn:
@@ -808,7 +870,7 @@ def add_text_item(dashboard_slug: str, content: str, section_id: int | None = No
             text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
         ).scalar()
         if dash_id is None:
-            return False
+            return None
         position = conn.execute(
             text(
                 "SELECT coalesce(max(position), -1) + 1 FROM dashboard_items "
@@ -816,16 +878,76 @@ def add_text_item(dashboard_slug: str, content: str, section_id: int | None = No
             ),
             {"id": dash_id},
         ).scalar()
-        conn.execute(
+        new_id = conn.execute(
             text(
                 "INSERT INTO dashboard_items "
                 "(dashboard_id, chart_id, position, width, kind, content, section_id) "
-                "VALUES (:d, NULL, :p, :w, 'text', :c, :s)"
+                "VALUES (:d, NULL, :p, :w, 'text', :c, :s) RETURNING id"
             ),
             {"d": dash_id, "p": position, "w": width, "c": content, "s": section_id},
-        )
+        ).scalar()
         _touch(conn, dash_id)
-        return True
+        return new_id
+
+
+def save_layout(dashboard_slug: str, placements: list[dict]) -> int:
+    """Write the grid geometry for a whole dashboard in one go.
+
+    `placements` is [{id, x, y, w, h, section_id}, ...] straight from the
+    editor. One transaction: a half-applied layout would leave tiles on top of
+    each other. Ids that don't belong to this dashboard are ignored rather than
+    trusted, since they arrive from the browser.
+    """
+    if not placements:
+        return 0
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return 0
+        mine = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT id FROM dashboard_items WHERE dashboard_id = :d"), {"d": dash_id}
+            )
+        }
+        sections = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT id FROM dashboard_sections WHERE dashboard_id = :d"), {"d": dash_id}
+            )
+        }
+        written = 0
+        for order, p in enumerate(placements):
+            try:
+                item_id = int(p["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if item_id not in mine:
+                continue
+            section_id = p.get("section_id")
+            section_id = int(section_id) if str(section_id or "").isdigit() else None
+            if section_id is not None and section_id not in sections:
+                section_id = None
+            conn.execute(
+                text(
+                    "UPDATE dashboard_items SET grid_x = :x, grid_y = :y, grid_w = :w, "
+                    "grid_h = :h, position = :p, section_id = :s WHERE id = :i"
+                ),
+                {
+                    "x": max(0, min(GRID_COLUMNS - 1, int(p.get("x", 0) or 0))),
+                    "y": max(0, int(p.get("y", 0) or 0)),
+                    "w": max(1, min(GRID_COLUMNS, int(p.get("w", 6) or 6))),
+                    "h": max(1, int(p.get("h", 5) or 5)),
+                    "p": order,
+                    "s": section_id,
+                    "i": item_id,
+                },
+            )
+            written += 1
+        _touch(conn, dash_id)
+        return written
 
 
 def set_item_section(dashboard_slug: str, item_id: int, section_id: int | None) -> bool:
@@ -844,19 +966,19 @@ def set_item_section(dashboard_slug: str, item_id: int, section_id: int | None) 
             if owned is None:
                 return False  # never file a tile onto another dashboard's tab
         result = conn.execute(
-            text(
-                "UPDATE dashboard_items SET section_id = :s "
-                "WHERE id = :i AND dashboard_id = :d"
-            ),
+            text("UPDATE dashboard_items SET section_id = :s WHERE id = :i AND dashboard_id = :d"),
             {"s": section_id, "i": item_id, "d": dash_id},
         )
         _touch(conn, dash_id)
         return result.rowcount > 0
 
 
-def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH,
-             section_id: int | None = None) -> bool:
-    """Append a chart to a dashboard. False if either no longer exists.
+def add_item(
+    dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH, section_id: int | None = None
+) -> int | None:
+    """Append a chart to a dashboard. None if either no longer exists.
+
+    Returns the new tile's id so an importer can place it on the grid.
 
     A chart may appear more than once — the same series at two widths, or
     alongside a variant — so there's no uniqueness constraint to trip over.
@@ -875,7 +997,7 @@ def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH,
         ).first()
         dash_id, chart_id = ids[0], ids[1]
         if dash_id is None or chart_id is None:
-            return False
+            return None
         next_pos = conn.execute(
             text(
                 "SELECT coalesce(max(position), -1) + 1 FROM dashboard_items "
@@ -883,16 +1005,16 @@ def add_item(dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH,
             ),
             {"id": dash_id},
         ).scalar()
-        conn.execute(
+        new_id = conn.execute(
             text(
                 "INSERT INTO dashboard_items "
                 "(dashboard_id, chart_id, position, width, kind, section_id) "
-                "VALUES (:d, :c, :p, :w, 'chart', :s)"
+                "VALUES (:d, :c, :p, :w, 'chart', :s) RETURNING id"
             ),
             {"d": dash_id, "c": chart_id, "p": next_pos, "w": width, "s": section_id},
-        )
+        ).scalar()
         _touch(conn, dash_id)
-    return True
+    return new_id
 
 
 def remove_item(dashboard_slug: str, item_id: int) -> bool:
@@ -1472,6 +1594,29 @@ def add_filter(dashboard_slug: str, flt: DashboardFilter) -> bool:
             return False  # duplicate key on this dashboard
         _touch(conn, dash_id)
         return True
+
+
+def update_filter(dashboard_slug: str, filter_id: int, **fields) -> bool:
+    """Edit a filter in place.
+
+    The key is deliberately not editable: it appears in the query string, so
+    changing it would break every link somebody has already shared.
+    """
+    allowed = ("label", "column_expr", "filter_type", "values_sql", "source_db", "default_value")
+    sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if not sets:
+        return False
+    assignments = ", ".join(f"{k} = :{k}" for k in sets)
+    with engine().begin() as conn:
+        result = conn.execute(
+            text(
+                f"UPDATE dashboard_filters SET {assignments} "  # noqa: S608 — fixed key list
+                "WHERE id = :fid AND dashboard_id = "
+                "(SELECT id FROM dashboards WHERE slug = :slug)"
+            ),
+            {**sets, "fid": filter_id, "slug": dashboard_slug},
+        )
+        return result.rowcount > 0
 
 
 def delete_filter(dashboard_slug: str, filter_id: int) -> bool:

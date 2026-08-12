@@ -59,7 +59,7 @@
    same, and a dashboard that opens on a header plus its KPIs reads better than
    one that opens on a bare row of tab names. #}
 {% if loose %}
-<div class="bi-tiles">
+<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.slug) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
   {% for t in loose %}{{ tile(t, t.canvas_id) }}{% endfor %}
 </div>
 {% endif %}
@@ -74,7 +74,7 @@
 <section class="pane {{ 'active' if loop.first else '' }}" data-pane="sec-{{ s.id }}">
   {% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
   {% if in_tab %}
-  <div class="bi-tiles">
+  <div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.slug) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
     {% for t in in_tab %}{{ tile(t, t.canvas_id) }}{% endfor %}
   </div>
   {% else %}
@@ -83,12 +83,11 @@
 </section>
 {% endfor %}
 {% elif not loose %}
-<div class="bi-tiles">
+<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.slug) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
   {% for t in tiles %}{{ tile(t, t.canvas_id) }}{% endfor %}
 </div>
 {% endif %}
 
-<script id="dashboard-data" type="application/json">{{ tile_specs|tojson }}</script>
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>

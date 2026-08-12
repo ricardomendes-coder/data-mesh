@@ -17,30 +17,54 @@ import re
 FILTER_TOKEN = "{{ filters }}"
 
 GRAIN = {
-    "PT1S": "second", "PT1M": "minute", "PT1H": "hour",
-    "P1D": "day", "P1W": "week", "P1M": "month",
-    "P3M": "quarter", "P1Y": "year", "P0.25Y": "quarter", "P1DT0H": "day",
+    "PT1S": "second",
+    "PT1M": "minute",
+    "PT1H": "hour",
+    "P1D": "day",
+    "P1W": "week",
+    "P1M": "month",
+    "P3M": "quarter",
+    "P1Y": "year",
+    "P0.25Y": "quarter",
+    "P1DT0H": "day",
 }
 
 # Superset viz_type -> Report Hub chart_type.
 VIZ = {
-    "echarts_timeseries_line": "line", "echarts_timeseries": "line",
-    "echarts_timeseries_smooth": "line", "line": "line", "dual_line": "line",
+    "echarts_timeseries_line": "line",
+    "echarts_timeseries": "line",
+    "echarts_timeseries_smooth": "line",
+    "line": "line",
+    "dual_line": "line",
     "mixed_timeseries": "line",
-    "echarts_area": "area", "area": "area",
-    "echarts_timeseries_bar": "bar", "dist_bar": "bar", "bar": "bar",
+    "echarts_area": "area",
+    "area": "area",
+    "echarts_timeseries_bar": "bar",
+    "dist_bar": "bar",
+    "bar": "bar",
     "pie": "pie",
     # Tabular and single-value charts, which Report Hub now has tiles for.
-    "table": "table", "pivot_table_v2": "table", "pivot_table": "table",
+    "table": "table",
+    "pivot_table_v2": "table",
+    "pivot_table": "table",
     "time_table": "table",
-    "big_number_total": "number", "big_number": "number",
+    "big_number_total": "number",
+    "big_number": "number",
 }
 
 OPS = {
-    "==": "=", "EQUALS": "=", "!=": "<>", "NOT_EQUALS": "<>",
-    ">": ">", "GREATER_THAN": ">", "<": "<", "LESS_THAN": "<",
-    ">=": ">=", "GREATER_THAN_OR_EQUAL": ">=",
-    "<=": "<=", "LESS_THAN_OR_EQUAL": "<=",
+    "==": "=",
+    "EQUALS": "=",
+    "!=": "<>",
+    "NOT_EQUALS": "<>",
+    ">": ">",
+    "GREATER_THAN": ">",
+    "<": "<",
+    "LESS_THAN": "<",
+    ">=": ">=",
+    "GREATER_THAN_OR_EQUAL": ">=",
+    "<=": "<=",
+    "LESS_THAN_OR_EQUAL": "<=",
 }
 
 
@@ -154,8 +178,9 @@ def _assemble(select, source, where, group_terms, order, limit) -> str:
     return sql
 
 
-def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
-              series_values=None) -> dict:
+def translate(
+    slice_row: dict, dataset: dict, saved_metrics: dict[str, str], series_values=None
+) -> dict:
     params = json.loads(slice_row["params"] or "{}")
     viz = slice_row["viz_type"]
     if viz not in VIZ:
@@ -182,9 +207,15 @@ def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
             select.append(f"{expression} AS {qi(label)}")
             labels.append(label)
         sql = _assemble(select, source, where, [], None, limit)
-        return {"sql": sql, "chart_type": "table", "x_column": labels[0],
-                "y_columns": labels, "needs_series": False, "series_expr": None,
-                "where": where}
+        return {
+            "sql": sql,
+            "chart_type": "table",
+            "x_column": labels[0],
+            "y_columns": labels,
+            "needs_series": False,
+            "series_expr": None,
+            "where": where,
+        }
 
     # ── metrics ──
     raw_metrics = params.get("metrics")
@@ -201,9 +232,15 @@ def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
         expression, label = metrics[0]
         select = [f"{expression} AS {qi(label)}"]
         sql = _assemble(select, source, where, [], None, 1)
-        return {"sql": sql, "chart_type": "number", "x_column": "",
-                "y_columns": [label], "needs_series": False, "series_expr": None,
-                "where": where}
+        return {
+            "sql": sql,
+            "chart_type": "number",
+            "x_column": "",
+            "y_columns": [label],
+            "needs_series": False,
+            "series_expr": None,
+            "where": where,
+        }
 
     # ── dimensions ──
     time_expr = time_label = None
@@ -224,7 +261,7 @@ def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
     for key in ("groupbyRows", "groupbyColumns"):
         groupby += [g for g in (params.get(key) or []) if g]
     dims = [_column_sql(g) for g in groupby]
-    for extra in (params.get("columns") or []):
+    for extra in params.get("columns") or []:
         if extra:
             dims.append(_column_sql(extra))
 
@@ -265,9 +302,15 @@ def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
             select.append(f"{pivoted} AS {qi(str(value))}")
             y_columns.append(str(value))
         sql = _assemble(select, source, where, [time_expr], "1 ASC", limit)
-        return {"sql": sql, "chart_type": kind, "x_column": time_label,
-                "y_columns": y_columns, "needs_series": True,
-                "series_expr": series_expr, "where": where}
+        return {
+            "sql": sql,
+            "chart_type": kind,
+            "x_column": time_label,
+            "y_columns": y_columns,
+            "needs_series": True,
+            "series_expr": series_expr,
+            "where": where,
+        }
 
     # ── one dimension (or a flat table) ──
     select, group_terms, y_columns = [], [], []
@@ -287,11 +330,21 @@ def translate(slice_row: dict, dataset: dict, saved_metrics: dict[str, str],
         select.append(f"{expression} AS {qi(label)}")
         y_columns.append(label)
 
-    order = "1 ASC" if time_expr else f"{len(select)} {'DESC' if params.get('order_desc', True) else 'ASC'}"
+    order = (
+        "1 ASC"
+        if time_expr
+        else f"{len(select)} {'DESC' if params.get('order_desc', True) else 'ASC'}"
+    )
     sql = _assemble(select, source, where, group_terms, order, limit)
-    return {"sql": sql, "chart_type": kind, "x_column": x_column,
-            "y_columns": y_columns, "needs_series": False, "series_expr": None,
-            "where": where}
+    return {
+        "sql": sql,
+        "chart_type": kind,
+        "x_column": x_column,
+        "y_columns": y_columns,
+        "needs_series": False,
+        "series_expr": None,
+        "where": where,
+    }
 
 
 # ── dashboard layout ────────────────────────────────────────────────────────
@@ -331,9 +384,12 @@ def tabs_of(position_json: str) -> tuple[dict[int, str], list[str]]:
         for child in node.get("children") or []:
             walk(child, tab)
 
-    for root in ("ROOT_ID", "GRID_ID"):
-        if root in nodes:
-            walk(root, None)
+    # Exactly one root. ROOT_ID *contains* GRID_ID, so walking both visits every
+    # node twice — which for geometry() meant the cursor accumulated a second
+    # time and every tile landed a full dashboard-height below where it belongs.
+    root = "ROOT_ID" if "ROOT_ID" in nodes else "GRID_ID"
+    if root in nodes:
+        walk(root, None)
     # Some layouts hang tabs off the header rather than the grid.
     for node_id, node in nodes.items():
         if isinstance(node, dict) and node.get("type") == "TABS":
@@ -341,15 +397,161 @@ def tabs_of(position_json: str) -> tuple[dict[int, str], list[str]]:
     return of_chart, order
 
 
-def markdown_blocks(position_json: str) -> list[tuple[str | None, str]]:
-    """(tab title, text) for each markdown/header block, in reading order."""
+# Superset's grid is 12 columns wide and its height unit is 8px; Report Hub's
+# row is 56px. Dividing by 7 converts one to the other, so a chart Superset drew
+# at height 50 (400px) becomes 7 rows (392px) — the same size on screen.
+SUPERSET_ROW_UNITS = 7
+DEFAULT_SUPERSET_HEIGHT = 50
+
+
+def geometry(position_json: str) -> dict:
+    """node key -> (x, y, w, h) on a 12-column grid, mirroring the original.
+
+    Superset stores a tree of TABS > TAB > ROW > CHART, where a ROW lays its
+    children out left to right and each child carries its own width. Walking it
+    in order and accumulating x within a row, y between rows, reproduces the
+    layout exactly — which is the point: an imported dashboard should look like
+    the one people already know.
+
+    Keys are `chart:<id>` for charts and `node:<id>` for markdown and headers,
+    because a markdown block has no chart id to key on.
+    """
+    try:
+        nodes = json.loads(position_json or "{}")
+    except Exception:
+        return {}
+    if not isinstance(nodes, dict):
+        return {}
+
+    out: dict[str, tuple[int, int, int, int]] = {}
+    # y is tracked per tab: every tab starts at the top of its own pane.
+    cursor: dict[str | None, int] = {}
+
+    def key_of(node_id: str, node: dict) -> str | None:
+        meta = node.get("meta") or {}
+        if node.get("type") == "CHART" and isinstance(meta.get("chartId"), int):
+            return f"chart:{meta['chartId']}"
+        if node.get("type") in ("MARKDOWN", "HEADER"):
+            return f"node:{node_id}"
+        return None
+
+    def height_units(meta: dict) -> int:
+        raw = meta.get("height") or DEFAULT_SUPERSET_HEIGHT
+        try:
+            return max(1, round(float(raw) / SUPERSET_ROW_UNITS))
+        except (TypeError, ValueError):
+            return 7
+
+    def walk(node_id: str, tab: str | None):
+        node = nodes.get(node_id)
+        if not isinstance(node, dict):
+            return
+        kind = node.get("type")
+        meta = node.get("meta") or {}
+        children = node.get("children") or []
+
+        if kind == "TAB":
+            tab = (meta.get("text") or meta.get("defaultText") or "Tab").strip() or "Tab"
+            cursor.setdefault(tab, 0)
+            for child in children:
+                walk(child, tab)
+            return
+
+        if kind == "ROW":
+            x = 0
+            y = cursor.get(tab, 0)
+            tallest = 0
+            for child in children:
+                child_node = nodes.get(child)
+                if not isinstance(child_node, dict):
+                    continue
+                child_meta = child_node.get("meta") or {}
+                width = child_meta.get("width") or 4
+                try:
+                    width = max(1, min(12, int(width)))
+                except (TypeError, ValueError):
+                    width = 4
+                # Text is stored short on purpose. Superset reserves a tall
+                # block for markdown; we render it in a line or two and let the
+                # tile size to its content, so keeping the original height would
+                # only reserve rows that stay empty. The stored value is what
+                # decides occupancy, and therefore what _compact() can reclaim.
+                if child_node.get("type") in ("MARKDOWN", "HEADER"):
+                    height = 2
+                else:
+                    height = height_units(child_meta)
+                # A row wider than the grid wraps rather than overflowing.
+                if x + width > 12:
+                    x = 0
+                    y += tallest or height
+                    tallest = 0
+                child_key = key_of(child, child_node)
+                if child_key:
+                    out[child_key] = (x, y, width, height)
+                x += width
+                tallest = max(tallest, height)
+                # Nested rows/columns: recurse so nothing is silently dropped.
+                if child_node.get("type") not in ("CHART", "MARKDOWN", "HEADER"):
+                    walk(child, tab)
+            cursor[tab] = y + (tallest or 1)
+            return
+
+        for child in children:
+            walk(child, tab)
+
+    cursor.setdefault(None, 0)
+    # Exactly one root. ROOT_ID *contains* GRID_ID, so walking both visits every
+    # node twice — which for geometry() meant the cursor accumulated a second
+    # time and every tile landed a full dashboard-height below where it belongs.
+    root = "ROOT_ID" if "ROOT_ID" in nodes else "GRID_ID"
+    if root in nodes:
+        walk(root, None)
+    return _compact(out)
+
+
+def _compact(boxes: dict) -> dict:
+    """Squeeze out bands of empty rows, keeping every relative position.
+
+    Superset reserves generous height for markdown and headers; Report Hub
+    renders those far more compactly, which leaves a dead band where the text
+    used to be. Collapsing runs of unoccupied rows to a single blank row keeps
+    side-by-side tiles together and the reading order intact, while removing
+    space that only existed because the original block was taller.
+    """
+    if not boxes:
+        return boxes
+    occupied: set[int] = set()
+    for _x, y, _w, h in boxes.values():
+        occupied.update(range(y, y + max(1, h)))
+
+    mapping: dict[int, int] = {}
+    cursor = 0
+    blank_run = 0
+    for row in range(max(occupied) + 1):
+        if row in occupied:
+            mapping[row] = cursor
+            cursor += 1
+            blank_run = 0
+        else:
+            blank_run += 1
+            if blank_run == 1:  # keep one row of breathing space, drop the rest
+                cursor += 1
+    return {key: (x, mapping.get(y, y), w, h) for key, (x, y, w, h) in boxes.items()}
+
+
+def markdown_blocks(position_json: str) -> list[tuple[str | None, str, str]]:
+    """(tab title, text, node id) for each markdown/header block, in order.
+
+    The node id is what `geometry()` keys those blocks by, so the importer can
+    place them exactly where Superset had them.
+    """
     try:
         nodes = json.loads(position_json or "{}")
     except Exception:
         return []
     if not isinstance(nodes, dict):
         return []
-    out: list[tuple[str | None, str]] = []
+    out: list[tuple[str | None, str, str]] = []
 
     def walk(node_id: str, tab: str | None):
         node = nodes.get(node_id)
@@ -362,13 +564,16 @@ def markdown_blocks(position_json: str) -> list[tuple[str | None, str]]:
         elif kind in ("MARKDOWN", "HEADER"):
             text_value = (meta.get("code") or meta.get("text") or "").strip()
             if text_value:
-                out.append((tab, text_value))
+                out.append((tab, text_value, node_id))
         for child in node.get("children") or []:
             walk(child, tab)
 
-    for root in ("ROOT_ID", "GRID_ID"):
-        if root in nodes:
-            walk(root, None)
+    # Exactly one root. ROOT_ID *contains* GRID_ID, so walking both visits every
+    # node twice — which for geometry() meant the cursor accumulated a second
+    # time and every tile landed a full dashboard-height below where it belongs.
+    root = "ROOT_ID" if "ROOT_ID" in nodes else "GRID_ID"
+    if root in nodes:
+        walk(root, None)
     return out
 
 
@@ -425,13 +630,15 @@ def filters_of(json_metadata: str) -> list[dict]:
         elif isinstance(mask, (str, int, float)):
             default = str(mask)
         scope = f.get("scope") or {}
-        out.append({
-            "key": _slug_key(name, taken),
-            "label": str(name)[:120],
-            "filter_type": kind,
-            "column_expr": column,
-            "default_value": default,
-            "excluded": [c for c in (scope.get("excluded") or []) if isinstance(c, int)],
-            "superset_id": f.get("id"),
-        })
+        out.append(
+            {
+                "key": _slug_key(name, taken),
+                "label": str(name)[:120],
+                "filter_type": kind,
+                "column_expr": column,
+                "default_value": default,
+                "excluded": [c for c in (scope.get("excluded") or []) if isinstance(c, int)],
+                "superset_id": f.get("id"),
+            }
+        )
     return out

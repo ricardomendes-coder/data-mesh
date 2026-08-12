@@ -570,17 +570,42 @@ def test_dashboard_pages_render():
             assert r.status_code == 200, r.text[:300]
             assert "Operação diária" in r.text
 
+            # The page itself runs no queries: it ships tile shells, and each
+            # tile fetches its own data. That's what makes a big dashboard
+            # appear immediately instead of after every query on it.
+            ran = []
+            real_execute = db_mod.execute
+
+            def _counting(sql, database=None, max_rows=None, params=None):
+                ran.append(sql)
+                return real_execute(sql, database, max_rows, params)
+
+            db_mod.execute = _counting
             r = client.get("/dashboards/ops")
             assert r.status_code == 200, r.text[:400]
             assert "Capturas por dia" in r.text
-            assert 'id="tile-0"' in r.text, "tile canvas missing"
-            assert '"tile-0"' in r.text, "chart spec payload missing"
-            assert "bi-tile-full" in r.text, "tile width not applied to the grid"
+            assert 'data-tile="11"' in r.text, "tile shell missing"
+            assert "bi-tile-skel" in r.text, "no skeleton while the tile loads"
+            assert not ran, f"the dashboard page ran {len(ran)} quer(ies) before painting"
+
+            # …and the tile endpoint is what actually runs it.
+            r = client.get("/dashboards/ops/tiles/11")
+            assert r.status_code == 200, r.text[:300]
+            body = r.json()
+            assert body["renders_as"] == "canvas", body
+            assert body["spec"]["labels"] == ["2026-07-01", "2026-07-02"], body["spec"]
+            assert ran, "the tile endpoint didn't run the chart's query"
+            db_mod.execute = real_execute
+
+            # A tile is a real endpoint, so it re-checks access for itself.
+            r = client.get("/dashboards/ops/tiles/999")
+            assert r.status_code == 404, r.status_code
 
             r = client.get("/dashboards/ops/edit")
             assert r.status_code == 200, r.text[:400]
-            assert "Move earlier" in r.text, "editor controls missing"
             assert "/items/11/remove" in r.text, "remove action missing"
+            assert "bi-drag" in r.text, "no drag handle in the editor"
+            assert "dashboard-layout.js" in r.text, "layout editor not loaded"
 
             r = client.get("/dashboards/nope", follow_redirects=False)
             assert r.status_code == 404, r.status_code
@@ -614,8 +639,16 @@ def test_dashboard_filters_bind_values():
     class D:
         def __init__(self, **kw):
             self.__dict__.update(
-                {"key": "", "label": "", "filter_type": "select", "column_expr": "",
-                 "values_sql": "", "source_db": "", "default_value": "", "applies_to": []}
+                {
+                    "key": "",
+                    "label": "",
+                    "filter_type": "select",
+                    "column_expr": "",
+                    "values_sql": "",
+                    "source_db": "",
+                    "default_value": "",
+                    "applies_to": [],
+                }
             )
             self.__dict__.update(kw)
 
@@ -625,8 +658,9 @@ def test_dashboard_filters_bind_values():
         D(key="busca", label="Busca", filter_type="text", column_expr="nome"),
     ]
     nasty = "x'; DROP TABLE charts; --"
-    active = f.resolve(defs, {"cliente": [nasty, "acme"], "janela": ["2026-01-01", "2026-02-01"],
-                              "busca": ["ana"]})
+    active = f.resolve(
+        defs, {"cliente": [nasty, "acme"], "janela": ["2026-01-01", "2026-02-01"], "busca": ["ana"]}
+    )
     out, params = f.apply(sql, active, "chart-a")
 
     # The dangerous string is a *value*, and appears nowhere in the SQL text.
@@ -640,8 +674,10 @@ def test_dashboard_filters_bind_values():
     assert "c_id IN (" in out and "nome ILIKE" in out, out
 
     # Scope: a filter naming specific charts leaves the others alone.
-    scoped = f.resolve([D(key="cliente", filter_type="select", column_expr="c_id",
-                          applies_to=["chart-a"])], {"cliente": ["acme"]})
+    scoped = f.resolve(
+        [D(key="cliente", filter_type="select", column_expr="c_id", applies_to=["chart-a"])],
+        {"cliente": ["acme"]},
+    )
     hit, hit_params = f.apply(sql, scoped, "chart-a")
     miss, miss_params = f.apply(sql, scoped, "chart-b")
     assert "c_id IN" in hit and hit_params
@@ -654,8 +690,9 @@ def test_dashboard_filters_bind_values():
     assert not f.accepts_filters(plain) and f.accepts_filters(sql)
 
     # Bad dates are dropped rather than passed through.
-    bad = f.resolve([D(key="janela", filter_type="daterange", column_expr="d")],
-                    {"janela": ["not-a-date", ""]})
+    bad = f.resolve(
+        [D(key="janela", filter_type="daterange", column_expr="d")], {"janela": ["not-a-date", ""]}
+    )
     out2, params2 = f.apply(sql, bad, "chart-a")
     assert params2 == {} and "flt_janela" not in out2, (out2, params2)
 

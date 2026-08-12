@@ -17,7 +17,9 @@ import argparse
 import json
 import os
 import sys
+import threading
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -52,45 +54,111 @@ def superset_url(db: str) -> str:
 
 
 _engines: dict[str, object] = {}
+_engine_lock = threading.Lock()
+
+# Connections are kept open per (thread, database) for the whole run. Opening
+# one across the SSH tunnel costs ~1.4s, which dwarfs the queries themselves —
+# connect-per-query made this script four times slower than it needed to be and
+# turned a five-minute job into an hour.
+_local = threading.local()
+
+WORKERS = 8  # concurrent probes; the warehouse is shared, so not more
 
 
 def engine(db: str):
-    if db not in _engines:
-        _engines[db] = create_engine(superset_url(db), pool_pre_ping=True)
-    return _engines[db]
+    with _engine_lock:
+        if db not in _engines:
+            _engines[db] = create_engine(
+                superset_url(db), pool_pre_ping=True, pool_size=WORKERS + 2, max_overflow=4
+            )
+        return _engines[db]
+
+
+def conn_for(db: str):
+    """This thread's long-lived connection to `db`, opened once."""
+    cache = getattr(_local, "conns", None)
+    if cache is None:
+        cache = _local.conns = {}
+    c = cache.get(db)
+    if c is None or c.closed:
+        c = cache[db] = engine(db).connect()
+        c.execute(text("SET statement_timeout = '25s'"))
+        c.commit()
+    return c
+
+
+def close_connections():
+    for c in getattr(_local, "conns", {}).values():
+        try:
+            c.close()
+        except Exception:
+            pass
 
 
 def q(sql: str, db: str = "superset", **params):
-    with engine(db).connect() as c:
-        return c.execute(text(sql), params).fetchall()
+    return conn_for(db).execute(text(sql), params).fetchall()
 
 
-def explain(db: str, sql: str) -> str | None:
-    """None if the query plans, else the first line of the error."""
-    # The token is Report Hub's, not SQL — strip it before asking the planner.
+def _timed_out(message: str) -> bool:
+    return "statement timeout" in message or "canceling statement" in message
+
+
+def explain(db: str, sql: str) -> tuple[str | None, bool]:
+    """(error or None, timed_out).
+
+    A timeout is reported separately from a real failure: the query might be
+    perfectly good and the warehouse just busy, and treating the two the same
+    silently drops charts whenever the database is under load.
+    """
     sql = app_filters.strip_token(sql)
     try:
-        with engine(db).connect() as c:
-            c.execute(text("SET statement_timeout = '20s'"))
-            c.execute(text("EXPLAIN " + sql))
-        return None
+        c = conn_for(db)
+        c.execute(text("EXPLAIN " + sql))
+        return None, False
     except Exception as exc:
-        return str(exc).split("\n")[0][:180]
+        message = str(exc).split("\n")[0][:180]
+        # A failed statement poisons the transaction; start a clean one.
+        try:
+            conn_for(db).rollback()
+        except Exception:
+            _local.conns.pop(db, None)
+        return message, _timed_out(message)
+
+
+# Many charts sit on the same dataset and split by the same column, so the same
+# probe is asked for over and over. Caching it is the difference between one
+# GROUP BY per dataset and one per chart.
+_probe_cache: dict[tuple, list | None] = {}
+_probe_lock = threading.Lock()
 
 
 def series_values(db: str, source: str, expr: str, where: list[str]):
+    key = (db, source, expr, tuple(where))
+    with _probe_lock:
+        if key in _probe_cache:
+            return _probe_cache[key]
+
     sql = f"SELECT {expr} AS v, count(*) FROM {source}"
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += f" GROUP BY 1 ORDER BY 2 DESC LIMIT {SERIES_CAP + 1}"
     try:
-        with engine(db).connect() as c:
-            c.execute(text("SET statement_timeout = '10s'"))
-            rows = c.execute(text(sql)).fetchall()
-    except Exception:
-        return None
-    values = [r[0] for r in rows if r[0] is not None]
-    return values if values and len(values) <= SERIES_CAP else None
+        rows = conn_for(db).execute(text(sql)).fetchall()
+        values = [r[0] for r in rows if r[0] is not None]
+        result = values if values and len(values) <= SERIES_CAP else None
+    except Exception as exc:
+        try:
+            conn_for(db).rollback()
+        except Exception:
+            _local.conns.pop(db, None)
+        # Don't cache a timeout as "no values": the next run should try again.
+        if _timed_out(str(exc)):
+            return None
+        result = None
+
+    with _probe_lock:
+        _probe_cache[key] = result
+    return result
 
 
 def load_charts(pivot: bool):
@@ -114,9 +182,12 @@ def load_charts(pivot: bool):
 
     ok, failed, reasons = [], [], Counter()
     total = len(rows)
-    for i, row in enumerate(rows, 1):
-        if i % 50 == 0:
-            print(f"  ...{i}/{total}  ok={len(ok)} failed={len(failed)}", flush=True)
+    timeouts = []
+    done = [0]
+    progress_lock = threading.Lock()
+
+    def handle(row):
+        """Translate and verify one chart. Runs on a worker thread."""
         sid, name, viz, params, ds_id, table_name, schema, dataset_sql, dbname = row
         db = DB_MAP.get(dbname, dbname)
         slice_row = {"params": params, "viz_type": viz}
@@ -125,40 +196,85 @@ def load_charts(pivot: bool):
             spec = T.translate(slice_row, dataset, saved.get(ds_id, {}))
         except T.Unsupported as exc:
             if "needs its series values resolved" not in str(exc):
-                reasons[str(exc)[:70]] += 1
-                failed.append((sid, name, viz, db, str(exc)[:110]))
-                continue
+                return ("fail", sid, name, viz, db, str(exc)[:110], str(exc)[:70], False)
             if not pivot:
-                reasons["time+series (pivot pass skipped)"] += 1
-                failed.append((sid, name, viz, db, "needs pivot"))
-                continue
+                return (
+                    "fail",
+                    sid,
+                    name,
+                    viz,
+                    db,
+                    "needs pivot",
+                    "time+series (pivot pass skipped)",
+                    False,
+                )
             try:
                 probe = T.translate(slice_row, dataset, saved.get(ds_id, {}), series_values=["_"])
                 values = series_values(
                     db, T.source_sql(dataset), probe["series_expr"], probe["where"]
                 )
             except T.Unsupported as exc2:
-                reasons[str(exc2)[:70]] += 1
-                failed.append((sid, name, viz, db, str(exc2)[:110]))
-                continue
+                return ("fail", sid, name, viz, db, str(exc2)[:110], str(exc2)[:70], False)
             if not values:
-                reasons["too many series to pivot"] += 1
-                failed.append((sid, name, viz, db, "too many series"))
-                continue
+                return (
+                    "fail",
+                    sid,
+                    name,
+                    viz,
+                    db,
+                    "too many series",
+                    "too many series to pivot",
+                    False,
+                )
             try:
                 spec = T.translate(slice_row, dataset, saved.get(ds_id, {}), series_values=values)
             except T.Unsupported as exc3:
-                reasons[str(exc3)[:70]] += 1
-                failed.append((sid, name, viz, db, str(exc3)[:110]))
-                continue
+                return ("fail", sid, name, viz, db, str(exc3)[:110], str(exc3)[:70], False)
 
-        error = explain(db, spec["sql"])
+        error, timed_out = explain(db, spec["sql"])
         if error:
-            reasons["did not plan: " + error.split(":")[0][:38]] += 1
-            failed.append((sid, name, viz, db, "EXPLAIN: " + error))
-            continue
-        ok.append({"id": sid, "name": name, "viz": viz, "db": db,
-                   "dataset_id": ds_id, "source": T.source_sql(dataset), **spec})
+            label = (
+                "timed out (warehouse busy)"
+                if timed_out
+                else ("did not plan: " + error.split(":")[0][:38])
+            )
+            return ("fail", sid, name, viz, db, "EXPLAIN: " + error, label, timed_out)
+        return ("ok", sid, name, viz, db, ds_id, dataset, spec, False)
+
+    # The work is almost entirely waiting on the warehouse, so threads help even
+    # though this is Python. Each worker keeps its own connection.
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for result in pool.map(handle, rows):
+            with progress_lock:
+                done[0] += 1
+                if done[0] % 100 == 0:
+                    print(f"  ...{done[0]}/{total}  ok={len(ok)} failed={len(failed)}", flush=True)
+            if result[0] == "fail":
+                _, sid, name, viz, db, detail, label, timed_out = result
+                reasons[label] += 1
+                failed.append((sid, name, viz, db, detail))
+                if timed_out:
+                    timeouts.append(sid)
+                continue
+            _, sid, name, viz, db, ds_id, dataset, spec, _t = result
+            ok.append(
+                {
+                    "id": sid,
+                    "name": name,
+                    "viz": viz,
+                    "db": db,
+                    "dataset_id": ds_id,
+                    "source": T.source_sql(dataset),
+                    **spec,
+                }
+            )
+
+    if timeouts:
+        print(
+            f"\n  NOTE: {len(timeouts)} chart(s) failed only because the warehouse "
+            "was busy, not because the query is wrong. Re-run to pick them up.",
+            flush=True,
+        )
     return ok, failed, reasons
 
 
@@ -173,9 +289,7 @@ def dataset_columns() -> dict[int, set[str]]:
 def wipe():
     with store.engine().begin() as c:
         for table in ("dashboards", "charts"):
-            n = c.execute(
-                text(f"DELETE FROM {table} WHERE created_by = :s"), {"s": STAMP}
-            ).rowcount
+            n = c.execute(text(f"DELETE FROM {table} WHERE created_by = :s"), {"s": STAMP}).rowcount
             print(f"  removed {n} from {table}")
 
 
@@ -223,17 +337,19 @@ def main():
     slug_of: dict[int, str] = {}
     for n, c in enumerate(charts, 1):
         slug = store.unique_slug(c["name"] or f"chart-{c['id']}", exists=store.get_chart)
-        saved = store.save_chart(store.Chart(
-            slug=slug,
-            title=(c["name"] or f"Chart {c['id']}")[:200],
-            description=f"Migrated from Superset chart #{c['id']} ({c['viz']}).",
-            source_db=c["db"],
-            sql=c["sql"],
-            chart_type=c["chart_type"],
-            x_column=c["x_column"],
-            y_columns=c["y_columns"],
-            created_by=STAMP,
-        ))
+        saved = store.save_chart(
+            store.Chart(
+                slug=slug,
+                title=(c["name"] or f"Chart {c['id']}")[:200],
+                description=f"Migrated from Superset chart #{c['id']} ({c['viz']}).",
+                source_db=c["db"],
+                sql=c["sql"],
+                chart_type=c["chart_type"],
+                x_column=c["x_column"],
+                y_columns=c["y_columns"],
+                created_by=STAMP,
+            )
+        )
         slug_of[c["id"]] = saved.slug
         if n % 50 == 0:
             print(f"  ...{n}/{len(charts)} charts", flush=True)
@@ -243,19 +359,26 @@ def main():
     # Every write is its own round trip, and over an SSH tunnel that is the slow
     # part of the run — so this reports per dashboard rather than going quiet
     # for twenty minutes.
-    made = tiles = tabs = texts = filters_made = 0
+    made = tiles = tabs = texts = filters_made = placed = 0
     total_dash = len(live)
     for dash_id, (_, title, position_json, json_metadata) in live.items():
         title = (title or f"Dashboard {dash_id}")[:200]
         slug = store.unique_slug(title, exists=store.get_dashboard)
-        store.save_dashboard(store.Dashboard(
-            slug=slug, title=title,
-            description=f"Migrated from Superset dashboard #{dash_id}.",
-            created_by=STAMP,
-        ))
+        store.save_dashboard(
+            store.Dashboard(
+                slug=slug,
+                title=title,
+                description=f"Migrated from Superset dashboard #{dash_id}.",
+                created_by=STAMP,
+            )
+        )
         made += 1
 
         tab_of_chart, tab_order = T.tabs_of(position_json)
+        # Where Superset drew each thing, on the same 12-column grid.
+        boxes = T.geometry(position_json)
+        placements: list[dict] = []
+
         section_id: dict[str, int] = {}
         for tab_title in tab_order:
             new_id = store.add_section(slug, tab_title)
@@ -264,23 +387,58 @@ def main():
                 tabs += 1
 
         # Headings and notes, so an imported dashboard keeps its structure.
-        for tab_title, body in T.markdown_blocks(position_json):
-            if store.add_text_item(slug, body[:2000], section_id=section_id.get(tab_title)):
-                texts += 1
+        for tab_title, body, node_id in T.markdown_blocks(position_json):
+            item_id = store.add_text_item(slug, body[:2000], section_id=section_id.get(tab_title))
+            if not item_id:
+                continue
+            texts += 1
+            box = boxes.get(f"node:{node_id}")
+            if box:
+                placements.append(
+                    {
+                        "id": item_id,
+                        "x": box[0],
+                        "y": box[1],
+                        "w": box[2],
+                        "h": box[3],
+                        "section_id": section_id.get(tab_title),
+                    }
+                )
 
         mine = [s for s in links.get(dash_id, []) if s in slug_of]
         width = "half" if len(mine) > 1 else "full"
         for slice_id in mine:
             tab_title = tab_of_chart.get(slice_id)
-            if store.add_item(slug, slug_of[slice_id], width=width,
-                              section_id=section_id.get(tab_title)):
-                tiles += 1
+            item_id = store.add_item(
+                slug, slug_of[slice_id], width=width, section_id=section_id.get(tab_title)
+            )
+            if not item_id:
+                continue
+            tiles += 1
+            box = boxes.get(f"chart:{slice_id}")
+            if box:
+                placements.append(
+                    {
+                        "id": item_id,
+                        "x": box[0],
+                        "y": box[1],
+                        "w": box[2],
+                        "h": box[3],
+                        "section_id": section_id.get(tab_title),
+                    }
+                )
+
+        # One write for the whole layout, so the dashboard opens looking like
+        # the Superset one rather than as a generic two-column flow.
+        if placements:
+            placed += store.save_layout(slug, placements)
 
         # A filter only reaches charts whose dataset actually has that column —
         # pointing one at a chart without it would just break that tile.
         for f in T.filters_of(json_metadata):
             scope = [
-                slug_of[s] for s in mine
+                slug_of[s]
+                for s in mine
                 if s not in f["excluded"]
                 and f["column_expr"] in columns_of.get(by_slice[s]["dataset_id"], set())
             ]
@@ -289,8 +447,11 @@ def main():
             # Offer the options from the dataset the filter targets, so the
             # dropdown lists what the charts can actually be filtered to.
             target = next(
-                (by_slice[s] for s in mine
-                 if f["column_expr"] in columns_of.get(by_slice[s]["dataset_id"], set())),
+                (
+                    by_slice[s]
+                    for s in mine
+                    if f["column_expr"] in columns_of.get(by_slice[s]["dataset_id"], set())
+                ),
                 by_slice[mine[0]],
             )
             column = T.qi(f["column_expr"])
@@ -300,12 +461,19 @@ def main():
                     f"SELECT DISTINCT {column} FROM {target['source']} "
                     f"WHERE {column} IS NOT NULL ORDER BY 1 LIMIT 1000"
                 )
-            filters_made += store.add_filter(slug, store.DashboardFilter(
-                key=f["key"], label=f["label"], column_expr=f["column_expr"],
-                filter_type=f["filter_type"], values_sql=values_sql,
-                source_db=target["db"], default_value=f["default_value"],
-                applies_to=scope,
-            ))
+            filters_made += store.add_filter(
+                slug,
+                store.DashboardFilter(
+                    key=f["key"],
+                    label=f["label"],
+                    column_expr=f["column_expr"],
+                    filter_type=f["filter_type"],
+                    values_sql=values_sql,
+                    source_db=target["db"],
+                    default_value=f["default_value"],
+                    applies_to=scope,
+                ),
+            )
 
         print(
             f"  [{made}/{total_dash}] {title[:44]:46} "
@@ -318,15 +486,21 @@ def main():
     # worse than not being there, because it looks like the data is missing
     # rather than the chart. The tiles it would have held are in failed.json.
     with store.engine().begin() as c:
-        dropped = c.execute(text("""
+        dropped = c.execute(
+            text("""
             DELETE FROM dashboard_sections s
             WHERE s.dashboard_id IN (SELECT id FROM dashboards WHERE created_by = :stamp)
               AND NOT EXISTS (SELECT 1 FROM dashboard_items i WHERE i.section_id = s.id)
-        """), {"stamp": STAMP}).rowcount
+        """),
+            {"stamp": STAMP},
+        ).rowcount
     tabs -= dropped
 
-    print(f"created {made} dashboards, {tabs} tabs ({dropped} empty ones dropped), "
-          f"{tiles} tiles, {texts} text blocks, {filters_made} filters")
+    print(
+        f"created {made} dashboards, {tabs} tabs ({dropped} empty ones dropped), "
+        f"{tiles} tiles, {texts} text blocks, {filters_made} filters; "
+        f"{placed} tiles placed at their Superset coordinates"
+    )
 
     with open(os.path.join(os.path.dirname(__file__), "failed.json"), "w") as fh:
         json.dump(failed, fh, ensure_ascii=False, indent=1)

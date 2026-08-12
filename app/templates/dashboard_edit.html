@@ -75,19 +75,43 @@
   </p>
 
   {% for f in dash_filters %}
-  <div class="bi-fldrow">
-    <code>{{ f.key }}</code>
-    <span>{{ f.label }}</span>
-    <span class="bi-kind bi-kind-view">{{ f.filter_type }}</span>
-    <code>{{ f.column_expr }}</code>
-    {% if f.applies_to %}<span class="bi-sub">{{ f.applies_to|length }} chart(s)</span>
-    {% else %}<span class="bi-sub">all charts</span>{% endif %}
-    <form method="post" action="{{ url_for('dashboard_delete_filter', slug=dashboard.slug, filter_id=f.id) }}">
-      <button class="bi-icobtn danger" type="submit" title="Delete filter">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-      </button>
+  <details class="bi-filteredit">
+    <summary>
+      <code>{{ f.key }}</code>
+      <span>{{ f.label }}</span>
+      <span class="bi-kind bi-kind-view">{{ f.filter_type }}</span>
+      <code>{{ f.column_expr }}</code>
+      {% if f.applies_to %}<span class="bi-sub">{{ f.applies_to|length }} chart(s)</span>
+      {% else %}<span class="bi-sub">all charts</span>{% endif %}
+    </summary>
+    <form class="bi-filterform" method="post"
+          action="{{ url_for('dashboard_update_filter', slug=dashboard.slug, filter_id=f.id) }}">
+      {# The key is fixed: it's the query-string field, so changing it would
+         break every filtered link already shared. #}
+      <input class="bi-fldinput" name="label" value="{{ f.label }}" required aria-label="Label">
+      <select class="bi-fldinput" name="filter_type" aria-label="Type">
+        {% for key, label, hint in filter_types %}
+        <option value="{{ key }}" {% if key == f.filter_type %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input class="bi-fldinput" name="column_expr" value="{{ f.column_expr }}" required aria-label="Column">
+      <select class="bi-fldinput" name="source_db" aria-label="Options database">
+        <option value="">— database for the options query —</option>
+        {% for d in databases %}
+        <option value="{{ d }}" {% if d == f.source_db %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+      <input class="bi-fldinput" name="values_sql" value="{{ f.values_sql }}"
+             placeholder="SELECT DISTINCT col FROM t ORDER BY 1" aria-label="Options query">
+      <input class="bi-fldinput" name="default_value" value="{{ f.default_value }}"
+             placeholder="default (optional)" aria-label="Default value">
+      <button class="bi-btn sm" type="submit">Save</button>
     </form>
-  </div>
+    <form method="post" action="{{ url_for('dashboard_delete_filter', slug=dashboard.slug, filter_id=f.id) }}"
+          onsubmit="return confirm('Delete the {{ f.label }} filter?')">
+      <button class="bi-btn sm ghost" type="submit">Delete this filter</button>
+    </form>
+  </details>
   {% endfor %}
 
   <form class="bi-filterform" method="post" action="{{ url_for('dashboard_add_filter', slug=dashboard.slug) }}">
@@ -124,16 +148,16 @@
 {% endif %}
 
 {% if tiles %}
-<div class="bi-tiles bi-tiles-editing">
+<div class="bi-tiles bi-tiles-editing" data-tiles="{{ url_for('dashboard_show', slug=dashboard.slug) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}" data-save="{{ url_for('dashboard_save_layout', slug=dashboard.slug) }}">
   {% for t in tiles %}
   {{ tile(t, t.canvas_id, editing=true, widths=widths, dashboard=dashboard) }}
   {% endfor %}
 </div>
 
-<script id="dashboard-data" type="application/json">{{ tile_specs|tojson }}</script>
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard-layout.js') }}"></script>
 {% else %}
 <div class="bi-empty-lg">Nothing on this dashboard yet. Add a chart above.</div>
 {% endif %}

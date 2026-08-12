@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
@@ -43,7 +43,54 @@ def _inline_code(value: str) -> Markup:
     return Markup(re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped))
 
 
+def _markdown_lite(value: str) -> Markup:
+    """The small slice of Markdown that dashboard text blocks actually use.
+
+    Superset's text tiles are Markdown, and importing them raw left `###` and
+    `**bold**` on screen as literal characters. This handles headings, bold,
+    italics, links and paragraphs — not a Markdown implementation, just the
+    parts that appear in these dashboards.
+
+    Escaped first, so imported text can never inject markup: only the tags
+    added afterwards are live, and links are restricted to http(s) so no
+    `javascript:` URL can come through.
+    """
+    text_value = str(escape(value or "")).strip()
+    if not text_value:
+        return Markup("")
+
+    def link(match: re.Match) -> str:
+        label, url = match.group(1), match.group(2)
+        if not re.match(r"^https?://", url):
+            return label
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+
+    out = []
+    for block in re.split(r"\n\s*\n", text_value):
+        block = block.strip()
+        if not block:
+            continue
+        heading = re.match(r"^(#{1,4})\s+(.*)$", block, flags=re.S)
+        if heading:
+            level = min(4, len(heading.group(1)) + 1)  # h1 is the page title
+            body = heading.group(2).replace("\n", " ")
+            out.append(f"<h{level}>{body}</h{level}>")
+            continue
+        if re.match(r"^-{3,}$", block):
+            out.append("<hr>")
+            continue
+        out.append("<p>" + block.replace("\n", "<br>") + "</p>")
+
+    html = "".join(out)
+    html = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", html)
+    html = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", html)
+    html = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", html)
+    html = re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", link, html)
+    return Markup(html)
+
+
 templates.env.filters["inline_code"] = _inline_code
+templates.env.filters["markdown_lite"] = _markdown_lite
 
 
 def _row_limit(requested: str | int | None) -> int:
@@ -1210,21 +1257,25 @@ def _filter_options(definitions: list, access: store.Access) -> dict[str, list[s
     return options
 
 
-def _tile_specs(tiles: list[dict]) -> dict:
-    """canvas id -> spec, for the page's single embedded payload.
+def _tile_shells(items: list) -> list[dict]:
+    """Tiles with no data in them, for the page's first paint.
 
-    Built here rather than in the template: Jinja has no zero-based enumerate,
-    and the ids must match what _tile.html renders.
-
-    Only canvas tiles appear. A table or a big number is rendered as HTML by the
-    template and has no canvas, so an entry here would send the renderer looking
-    for an element that was never emitted.
+    The dashboard page runs **no** queries: it sends the layout, and each tile
+    fetches its own data from dashboard_tile_data. That is the whole reason a
+    dashboard now appears instantly instead of after the sum of every query on
+    it. Text tiles carry their content and never fetch.
     """
-    return {
-        t["canvas_id"]: t["spec"].to_dict()
-        for t in tiles
-        if t["spec"] is not None and t["spec"].renders_as == "canvas"
-    }
+    return [
+        {
+            "item": item,
+            "chart": item.chart,
+            "spec": None,
+            "error": None,
+            "unfiltered": False,
+            "canvas_id": f"tile-{index}",
+        }
+        for index, item in enumerate(items)
+    ]
 
 
 @app.get("/dashboards", response_class=HTMLResponse)
@@ -1326,19 +1377,79 @@ def dashboard_show(
     chosen = {key: request.query_params.getlist(key) for key in request.query_params}
     active = filters.resolve(definitions, chosen)
 
-    tiles = _render_tiles(dash.items, active)
+    tiles = _tile_shells(dash.items)
     context = _shell_context(
         user,
         "dashboards",
         access,
         dashboard=dash,
         tiles=tiles,
-        tile_specs=_tile_specs(tiles),
         filters=active,
         filter_options=_filter_options(definitions, access),
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
+        grid_columns=store.GRID_COLUMNS,
+        row_height=store.ROW_HEIGHT_PX,
     )
     return templates.TemplateResponse(request, "dashboard_show.html", context)
+
+
+@app.get("/dashboards/{slug}/tiles/{item_id}")
+def dashboard_tile_data(
+    request: Request,
+    slug: str,
+    item_id: int,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """One tile's data, fetched by the browser after the page has painted.
+
+    Dashboards used to run every query before sending a single byte, so a page
+    with twenty tiles waited on the slowest of twenty sequential queries. Now
+    the page arrives immediately and each tile fills itself in, in parallel.
+
+    Permission is re-checked here in full: this is a real endpoint, and "the
+    page already checked" is not a check.
+    """
+    if not store.available():
+        return JSONResponse({"error": "The app database is not configured."}, status_code=503)
+    if not access.allows(store.DASHBOARD, slug):
+        return JSONResponse({"error": "No access to that dashboard."}, status_code=403)
+    try:
+        dash = store.get_dashboard(slug)
+    except Exception:
+        logger.exception("Could not load dashboard %r for tile %s", slug, item_id)
+        return JSONResponse({"error": "Could not load the dashboard."}, status_code=502)
+    if dash is None:
+        return JSONResponse({"error": "Unknown dashboard."}, status_code=404)
+
+    item = next((i for i in dash.items if i.id == item_id), None)
+    if item is None or item.chart is None:
+        return JSONResponse({"error": "Unknown tile."}, status_code=404)
+    if not access.allows(store.CHART, item.chart.slug):
+        return JSONResponse({"error": "No access to that chart."}, status_code=403)
+
+    definitions = _dashboard_filters(slug)
+    chosen = {key: request.query_params.getlist(key) for key in request.query_params}
+    active = filters.resolve(definitions, chosen)
+
+    tile = _render_tiles([item], active)[0]
+    if tile["error"]:
+        return JSONResponse({"error": tile["error"]}, status_code=200)
+    spec = tile["spec"]
+    payload = {
+        "renders_as": spec.renders_as,
+        "warnings": spec.warnings,
+        "unfiltered": tile["unfiltered"],
+    }
+    if spec.renders_as == "canvas":
+        payload["spec"] = spec.to_dict()
+    elif spec.renders_as == "table":
+        payload["columns"] = spec.columns
+        payload["rows"] = [["" if v is None else str(v) for v in r] for r in spec.rows]
+    else:
+        payload["value"] = spec.value
+        payload["caption"] = spec.caption
+    return JSONResponse(payload)
 
 
 @app.get("/dashboards/{slug}/edit", response_class=HTMLResponse)
@@ -1375,21 +1486,83 @@ def dashboard_edit(
     except Exception:
         logger.exception("Could not list databases for the dashboard editor")
 
-    tiles = _render_tiles(dash.items)
+    tiles = _tile_shells(dash.items)
     context = _shell_context(
         user,
         "dashboards",
         access,
         dashboard=dash,
         tiles=tiles,
-        tile_specs=_tile_specs(tiles),
         available_charts=available_charts,
         widths=store.WIDTHS,
         dash_filters=_dashboard_filters(slug),
         filter_types=filters.FILTER_TYPES,
         databases=databases,
+        grid_columns=store.GRID_COLUMNS,
+        row_height=store.ROW_HEIGHT_PX,
     )
     return templates.TemplateResponse(request, "dashboard_edit.html", context)
+
+
+@app.post("/dashboards/{slug}/layout")
+async def dashboard_save_layout(
+    request: Request,
+    slug: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Persist the grid after a drag or resize. Sent as JSON by the editor."""
+    if not _may_edit_dashboard(access, slug):
+        return JSONResponse({"error": "No access to edit that dashboard."}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Expected JSON."}, status_code=400)
+    placements = body.get("tiles") if isinstance(body, dict) else None
+    if not isinstance(placements, list):
+        return JSONResponse({"error": "Expected {tiles: [...]}"}, status_code=400)
+    if not store.available():
+        return JSONResponse({"error": "The app database is not configured."}, status_code=503)
+    written = store.save_layout(slug, placements)
+    logger.info("Dashboard %r layout saved by %s (%s tiles)", slug, user, written)
+    return JSONResponse({"saved": written})
+
+
+@app.post("/dashboards/{slug}/filters/{filter_id}")
+def dashboard_update_filter(
+    request: Request,
+    slug: str,
+    filter_id: int,
+    label: str = Form(...),
+    column_expr: str = Form(...),
+    filter_type: str = Form("select"),
+    values_sql: str = Form(""),
+    source_db: str = Form(""),
+    default_value: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Edit a filter in place. The key never changes — it's in shared URLs."""
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, "You don't have access to edit that dashboard.", access=access
+        )
+    if filter_type not in filters.FILTER_TYPE_KEYS:
+        filter_type = filters.SELECT
+    if source_db and not access.allows(store.DATABASE, source_db):
+        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
+    if store.available():
+        store.update_filter(
+            slug,
+            filter_id,
+            label=label.strip(),
+            column_expr=column_expr.strip(),
+            filter_type=filter_type,
+            values_sql=values_sql.strip(),
+            source_db=source_db,
+            default_value=default_value.strip(),
+        )
+    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
 
 
 @app.post("/dashboards/{slug}/filters")

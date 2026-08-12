@@ -61,6 +61,12 @@
       --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
     }
     *{box-sizing:border-box;margin:0;padding:0;}
+    /* The `hidden` attribute is only a UA `display:none`, so ANY author rule
+       that sets display beats it — .bi-kind, .bi-pager and .bi-tile-sql all do.
+       That made "hidden" elements render anyway (every tile claiming to be
+       unfiltered, the pager showing on a single page). Author-level !important
+       is the standard fix and keeps `hidden` meaning what it says. */
+    [hidden]{display:none !important;}
     html,body{height:100%;font-family:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--title);background:var(--page);font-size:14px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
     code{font-family:var(--mono);font-size:.86em;background:var(--purple-soft);padding:.08rem .34rem;border-radius:var(--r-sm);color:var(--purple);}
     a{color:var(--orange);text-decoration:none;}
@@ -306,6 +312,52 @@
     .bi-icobtn[disabled]{opacity:.35;cursor:default;}
     .bi-icobtn[disabled]:hover{border-color:var(--border-strong);color:var(--body);background:var(--surface);}
 
+    /* ── dashboard grid ── */
+    /* 12 columns, explicit rows. auto-rows rather than a fixed template so a
+       tile dropped at row 40 doesn't force 39 empty rows to be painted. */
+    .bi-tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:56px;gap:14px;align-items:stretch;}
+    @media(max-width:900px){
+      /* One column on a phone: a 12-col drag layout is meaningless there, and
+         honouring grid-row would leave holes. */
+      .bi-tiles{display:flex;flex-direction:column;}
+      .bi-tiles .bi-tile{grid-column:auto !important;grid-row:auto !important;min-height:230px;}
+    }
+    .bi-tile{min-width:0;overflow:hidden;display:flex;flex-direction:column;}
+    .bi-tile-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;}
+    .bi-tile-body>*{flex:1;min-height:0;}
+    .bi-tile-canvas{position:relative;min-height:0;}
+
+    /* Skeleton while a tile fetches its own data. */
+    .bi-tile-skel{display:flex;flex-direction:column;justify-content:flex-end;gap:.5rem;height:100%;padding:.6rem .2rem;}
+    .bi-tile-skel span{display:block;border-radius:3px;background:linear-gradient(90deg,#F1F2F4 25%,#E7E9EC 37%,#F1F2F4 63%);background-size:400% 100%;animation:bi-shimmer 1.3s ease infinite;}
+    .bi-tile-skel span:nth-child(1){height:38%;}
+    .bi-tile-skel span:nth-child(2){height:62%;}
+    .bi-tile-skel span:nth-child(3){height:48%;}
+    @keyframes bi-shimmer{0%{background-position:100% 50%;}100%{background-position:0 50%;}}
+    @media(prefers-reduced-motion:reduce){.bi-tile-skel span{animation:none;}}
+
+    /* Drag + resize, editor only. */
+    .bi-tiles-editing .bi-tile{cursor:default;}
+    .bi-drag{cursor:grab;color:var(--muted);font-size:.9rem;line-height:1;user-select:none;padding:0 .15rem;}
+    .bi-drag:active{cursor:grabbing;}
+    .bi-dragging{opacity:.75;outline:2px solid var(--orange);z-index:5;}
+    .bi-resize{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:nwse-resize;
+               background:linear-gradient(135deg,transparent 50%,var(--g-300) 50%,var(--g-300) 70%,transparent 70%);}
+    .bi-tile{position:relative;}
+    .bi-dirty{color:var(--danger);font-weight:600;}
+
+    /* Per-tile menu: SQL, the chart's page, the builder. */
+    .bi-tilemenu{position:relative;}
+    .bi-tilemenu>summary{list-style:none;cursor:pointer;}
+    .bi-tilemenu>summary::-webkit-details-marker{display:none;}
+    .bi-tilemenu-pop{position:absolute;right:0;top:26px;z-index:20;min-width:210px;display:flex;flex-direction:column;gap:.1rem;
+                     padding:.35rem;border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface);box-shadow:var(--sh-2,0 6px 20px rgba(16,24,40,.12));}
+    .bi-tilemenu-pop a,.bi-tilemenu-pop button{text-align:left;font-size:.78rem;padding:.35rem .45rem;border:none;background:none;color:var(--body);cursor:pointer;border-radius:var(--r-sm);text-decoration:none;}
+    .bi-tilemenu-pop a:hover,.bi-tilemenu-pop button:hover{background:var(--orange-50);color:var(--title);}
+    .bi-tile-meta{border-top:1px solid var(--border);margin-top:.25rem;padding:.35rem .45rem;font-size:.7rem;color:var(--muted);}
+    .bi-tile-meta p{margin:.25rem 0 0;}
+    .bi-tile-sql{max-height:170px;overflow:auto;margin:.3rem 0;padding:.5rem .6rem;border-radius:var(--r);background:#F7F8F9;border:1px solid var(--border);font-family:var(--mono);font-size:.7rem;white-space:pre-wrap;}
+
     /* ── dashboard filter bar ── */
     .bi-filterbar{display:flex;align-items:flex-end;gap:.7rem;flex-wrap:wrap;padding:.7rem .85rem;margin-bottom:.9rem;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--sh-1);}
     .bi-filter{display:flex;flex-direction:column;gap:.22rem;}
@@ -318,14 +370,20 @@
     .bi-filter-actions{display:flex;gap:.35rem;margin-left:auto;}
     .bi-kind-warn{background:#FFF3E8;color:#9A4B00;}
     .bi-fldrow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.35rem 0;border-bottom:1px solid #F1F2F4;font-size:.78rem;}
+    .bi-filteredit{border-bottom:1px solid #F1F2F4;padding:.3rem 0;}
+    .bi-filteredit>summary{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;cursor:pointer;font-size:.78rem;padding:.25rem 0;}
     .bi-filterform{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.6rem;}
     .bi-filterform .bi-fldinput{min-width:150px;flex:1 1 150px;}
 
     /* ── dashboard tabs + text tiles ── */
     .bi-dash-tabs{margin:.2rem 0 1rem;flex-wrap:wrap;}
     /* A text tile is page furniture, not a card: no border, no shadow. */
-    .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;}
-    .bi-textblock{color:var(--title);font-size:1rem;font-weight:600;line-height:1.4;}
+    .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;overflow:visible;align-self:start;}
+    .bi-textblock{color:var(--body);font-size:.86rem;line-height:1.5;}
+    .bi-textblock h2,.bi-textblock h3,.bi-textblock h4{color:var(--title);letter-spacing:-.01em;margin:.1rem 0 .3rem;}
+    .bi-textblock h2{font-size:1.05rem;} .bi-textblock h3{font-size:.94rem;} .bi-textblock h4{font-size:.86rem;}
+    .bi-textblock hr{border:none;border-top:1px solid var(--border);margin:.5rem 0;}
+    .bi-textblock strong{color:var(--title);}
     .bi-textblock p{margin:.3rem 0;font-weight:400;color:var(--body);font-size:.86rem;}
     .bi-tile-text .bi-tile-ctl{position:absolute;top:0;right:0;opacity:0;transition:opacity .12s;}
     .bi-tile-text:hover .bi-tile-ctl{opacity:1;}

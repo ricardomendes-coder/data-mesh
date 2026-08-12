@@ -154,6 +154,13 @@
   "more than one series dimension"
  ],
  [
+  239,
+  "tsbc4. Quantidade de erros de captura e leitura",
+  "echarts_timeseries_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
   241,
   "tsbc1. Quantidade chamados tipo bug por cliente",
   "echarts_timeseries_bar",
@@ -550,7 +557,7 @@
   "bc7. Quantidade de tickets por tipo",
   "dist_bar",
   "analytics",
-  "EXPLAIN: (psycopg2.errors.SyntaxError) zero-length delimited identifier at or near \"\"\"\""
+  "too many series"
  ],
  [
   427,
@@ -563,13 +570,6 @@
   428,
   "Top 10 prefeituras com maior quantidade de inserção manual - Serviço",
   "dist_bar",
-  "analytics",
-  "too many series"
- ],
- [
-  429,
-  "Visão Mensal de Tipo de Ingresso das Notas",
-  "echarts_timeseries_bar",
   "analytics",
   "too many series"
  ],
@@ -942,7 +942,7 @@
   "Quantidade de Chamados por Categoria",
   "echarts_timeseries_bar",
   "analytics",
-  "EXPLAIN: (psycopg2.errors.SyntaxError) zero-length delimited identifier at or near \"\"\"\""
+  "too many series"
  ],
  [
   769,
@@ -1316,6 +1316,13 @@
   "EXPLAIN: (psycopg2.errors.UndefinedColumn) column \"categoria_label_ticket\" does not exist"
  ],
  [
+  931,
+  "Chamados em Abertos por cliente",
+  "dist_bar",
+  "analytics",
+  "too many series"
+ ],
+ [
   932,
   "Tempo de vida chamado x Cliente",
   "table",
@@ -1486,20 +1493,6 @@
  [
   980,
   "Variaçao TPV absoluta por cliente por mes",
-  "echarts_timeseries",
-  "analytics",
-  "too many series"
- ],
- [
-  983,
-  "Variaçao Entrada de Notas absoluta por captura por mes",
-  "echarts_timeseries",
-  "analytics",
-  "too many series"
- ],
- [
-  984,
-  "Variaçao Entrada de Notas percentual por Captura por mes",
   "echarts_timeseries",
   "analytics",
   "too many series"
@@ -2139,7 +2132,7 @@
   "Chamados concluídos por cliente - Legados x Pós tombamento",
   "echarts_timeseries_line",
   "analytics",
-  "EXPLAIN: (psycopg2.errors.SyntaxError) syntax error at or near \"FILTER\""
+  "too many series"
  ],
  [
   1274,
@@ -2945,13 +2938,6 @@
   "dist_bar",
   "analytics",
   "cannot pivot this metric expression"
- ],
- [
-  1661,
-  "Processos manuais por semana",
-  "echarts_area",
-  "analytics",
-  "too many series"
  ],
  [
   1679,
