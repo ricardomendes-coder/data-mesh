@@ -1450,6 +1450,112 @@ def test_admin_panel_and_gate():
     print("admin panel + gate: OK")
 
 
+def test_tag_management():
+    """Creating and deleting tags, and the sweep that must never come back.
+
+    Tagging stays free-text on the listings — this screen is for defining the
+    vocabulary up front and for cleaning it up, which is admin-only because a
+    delete reaches across everybody's screens at once.
+    """
+    import inspect
+
+    from app import store
+
+    # A tag nobody uses yet: it belongs on this screen (that's the point of
+    # being able to create one) even though the listing filter bars skip it.
+    tags = [
+        store.Tag(id=1, name="Financeiro", slug="financeiro", count=14, chart_count=12,
+                  dashboard_count=2),
+        store.Tag(id=2, name="Diretoria", slug="diretoria", count=0),
+    ]
+    admin_flag = {"value": True}
+    calls: dict = {"created": None, "deleted": None}
+
+    saved = (
+        store.available,
+        store.is_admin,
+        store.list_tags,
+        store.create_tag,
+        store.delete_tag,
+        store.list_roles,
+        store.upsert_user,
+        store.set_user_admin,
+    )
+    store.available = lambda: True
+    store.upsert_user = _no_op_user
+    store.set_user_admin = lambda u, v: True
+    store.is_admin = lambda u: admin_flag["value"] and u == "admin"
+    store.list_roles = list  # the roles page, only to prove it links here
+    store.list_tags = lambda resource_type=None: list(tags)
+    store.create_tag = lambda name, created_by="": (
+        calls.__setitem__("created", (name, created_by))
+        or (None if name.strip().lower() == "financeiro" else store.Tag(id=3, name=name, slug="x"))
+    )
+    store.delete_tag = lambda slug: calls.__setitem__("deleted", slug) or True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            r = client.get("/admin/tags")
+            assert r.status_code == 200, r.text[:300]
+            assert "Financeiro" in r.text and "Diretoria" in r.text, "tags not listed"
+            # The split counts are what make a delete an informed decision.
+            assert ">12<" in r.text and ">2<" in r.text, "per-type usage counts missing"
+            assert "/admin/tags/financeiro/delete" in r.text, "no delete action"
+
+            # Reachable from the rest of admin. The folders screen was built,
+            # worked, and was linked from nowhere — so it may as well not have
+            # existed. A tab on a sibling page is what makes this real.
+            assert "/admin/tags" in client.get("/admin/roles").text, (
+                "nothing links to /admin/tags — the screen is orphaned"
+            )
+
+            r = client.post(
+                "/admin/tags", data={"name": "  Operação  "}, follow_redirects=False
+            )
+            assert r.status_code == 303
+            assert calls["created"] == ("  Operação  ", "admin"), calls["created"]
+
+            # A name already taken is not an error: the wanted end state holds.
+            r = client.post("/admin/tags", data={"name": "Financeiro"}, follow_redirects=False)
+            assert r.status_code == 303, "a duplicate name blew up instead of no-opping"
+
+            r = client.post("/admin/tags/financeiro/delete", follow_redirects=False)
+            assert r.status_code == 303
+            assert calls["deleted"] == "financeiro", calls["deleted"]
+
+            # Same live gate as the rest of admin: the session is not trusted.
+            admin_flag["value"] = False
+            assert client.get("/admin/tags", follow_redirects=False).status_code == 403
+            r = client.post("/admin/tags", data={"name": "x"}, follow_redirects=False)
+            assert r.status_code == 403, "create is not gated"
+            r = client.post("/admin/tags/financeiro/delete", follow_redirects=False)
+            assert r.status_code == 403, "delete is not gated"
+    finally:
+        (
+            store.available,
+            store.is_admin,
+            store.list_tags,
+            store.create_tag,
+            store.delete_tag,
+            store.list_roles,
+            store.upsert_user,
+            store.set_user_admin,
+        ) = saved
+
+    # set_tags used to delete every tag no resource carried, on the grounds
+    # that an unused tag is noise in the filter bar. With a management screen
+    # that is now destructive: a tag created there starts unused, and this runs
+    # on every tag edit anywhere, so the next person to retag a chart would
+    # silently wipe the vocabulary somebody had just defined.
+    assert "DELETE FROM tags" not in inspect.getsource(store.set_tags), (
+        "set_tags sweeps unused tags again — that deletes tags created on "
+        "/admin/tags before anyone gets to use them. Deletion is explicit now, "
+        "via delete_tag()."
+    )
+    print("tag management: OK")
+
+
 def test_every_resource_type_is_grantable():
     """Each permission type must offer checkboxes on the roles screen.
 
@@ -2352,6 +2458,7 @@ if __name__ == "__main__":
     test_list_pages_render_without_folder_ui()
     test_folders_are_organisation_only()
     test_admin_panel_and_gate()
+    test_tag_management()
     test_every_resource_type_is_grantable()
     test_user_detail_page()
     test_nav_hides_what_you_cannot_reach()

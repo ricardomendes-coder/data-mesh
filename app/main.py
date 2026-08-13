@@ -2381,6 +2381,39 @@ def admin_delete_role(request: Request, role_id: int, user: str = Depends(requir
     return RedirectResponse(request.url_for("admin_roles"), status_code=303)
 
 
+# ── tags ───────────────────────────────────────────────────────────────────
+#
+# Curating the vocabulary. Anyone who can build still creates a tag just by
+# typing it onto a chart — that stays, because making people declare a word
+# before using it is friction on something whose only job is findability.
+# What lives here is the other half: defining the words up front, and the
+# delete, which is admin-only because it reaches across everybody's screens.
+
+
+@app.get("/admin/tags", response_class=HTMLResponse)
+def admin_tags(request: Request, user: str = Depends(require_admin)):
+    context = _shell_context(user, "admin", admin_tab="tags", tags=store.list_tags(), is_admin=True)
+    return templates.TemplateResponse(request, "admin_tags.html", context)
+
+
+@app.post("/admin/tags")
+def admin_create_tag(request: Request, name: str = Form(...), user: str = Depends(require_admin)):
+    if store.create_tag(name, created_by=user) is None:
+        # Already there, or nothing left after trimming. Neither is an error
+        # worth a red box: the wanted end state — a tag by that name — holds.
+        logger.info("Tag %r not created for %s: empty or already exists", name, user)
+    else:
+        logger.info("Tag %r created by %s", name, user)
+    return RedirectResponse(request.url_for("admin_tags"), status_code=303)
+
+
+@app.post("/admin/tags/{slug}/delete")
+def admin_delete_tag(request: Request, slug: str, user: str = Depends(require_admin)):
+    if store.delete_tag(slug):
+        logger.info("Tag %r deleted by %s", slug, user)
+    return RedirectResponse(request.url_for("admin_tags"), status_code=303)
+
+
 # ── reports ────────────────────────────────────────────────────────────────
 
 

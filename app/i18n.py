@@ -105,6 +105,32 @@ CATALOG: dict[str, dict[str, str]] = {
         "Edit tags": "Editar tags",
         "comma, separated, tags": "tags, separadas, por vírgula",
         "Nothing tagged {tag}.": "Nada com a tag {tag}.",
+        # ── managing the tag vocabulary ──
+        "Tag": "Tag",
+        "{n} tags": "{n} tags",
+        "New tag name…": "Nome da nova tag…",
+        "Create tag": "Criar tag",
+        "Delete the tag {name}? It comes off {n} item(s). Nothing else changes.": (
+            "Excluir a tag {name}? Ela sai de {n} item(ns). Nada mais muda."
+        ),
+        "No tags yet. Create one above, or just type one onto a chart.": (
+            "Nenhuma tag ainda. Crie uma acima, ou simplesmente escreva uma num gráfico."
+        ),
+        (
+            "A tag is a label for finding things, and nothing else: tagging a chart "
+            "never changes who can see it. Access comes from roles."
+        ): (
+            "Uma tag é um rótulo para encontrar as coisas, e nada além disso: marcar "
+            "um gráfico nunca muda quem pode vê-lo. O acesso vem dos papéis."
+        ),
+        (
+            "A tag with nothing on it stays here, ready to be used, but is left out of "
+            "the filter bars on the Charts and Dashboards pages — a chip that filters "
+            "to nothing is just furniture."
+        ): (
+            "Uma tag sem nada continua aqui, pronta para uso, mas fica fora das barras "
+            "de filtro em Gráficos e Painéis — um chip que filtra para nada é só enfeite."
+        ),
         "just now": "agora",
         "{n} min ago": "há {n} min",
         "{n} h ago": "há {n} h",

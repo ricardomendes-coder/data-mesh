@@ -40,7 +40,11 @@
       "Bash(cat /tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/tasks/bcvzfrd5k.output)",
       "Bash(awk '{print \"  \", $NF, $5, \"bytes\"}')",
       "Read(//usr/bin/**)",
-      "Bash(python3 -V)"
+      "Bash(python3 -V)",
+      "Bash(cd /home/marcelo/trabalho/data-mesh *)"
+    ],
+    "additionalDirectories": [
+      "/home/marcelo/trabalho/data-mesh/app"
     ]
   }
 }

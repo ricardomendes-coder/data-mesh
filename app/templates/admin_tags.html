@@ -1,0 +1,61 @@
+{% extends "_shell.html" %}
+{% from "_admin_tabs.html" import admin_tabs with context %}
+{% block page_title %}{{ _('Administration') }}{% endblock %}
+{% block page_sub %}{{ _('{n} tags', n=tags|length) }}{% endblock %}
+
+{% block content %}
+{{ admin_tabs('tags') }}
+
+<form class="bi-toolbar" method="post" action="{{ url_for('admin_create_tag') }}">
+  <div class="bi-search bi-search-plain">
+    <input name="name" placeholder="{{ _('New tag name…') }}" required maxlength="60">
+  </div>
+  <button class="bi-btn" type="submit">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+    {{ _('Create tag') }}
+  </button>
+</form>
+
+{% if tags %}
+<div class="bi-restbl-wrap">
+  <table class="bi-restbl bi-listtbl">
+    <thead>
+      <tr>
+        <th>{{ _('Tag') }}</th>
+        <th>{{ _('Charts') }}</th>
+        <th>{{ _('Dashboards') }}</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in tags %}
+      <tr>
+        <td><span class="bi-tag">{{ g.name }}</span></td>
+        <td>{{ g.chart_count }}</td>
+        <td>{{ g.dashboard_count }}</td>
+        <td class="bi-listact">
+          {# tojson rather than quoting by hand: a tag named "Diretoria's" would
+             otherwise close the JS string and break the confirm. #}
+          <form method="post" action="{{ url_for('admin_delete_tag', slug=g.slug) }}"
+                onsubmit="return confirm({{ _('Delete the tag {name}? It comes off {n} item(s). Nothing else changes.', name=g.name, n=g.count)|tojson }})">
+            <button class="bi-icobtn danger" type="submit" title="{{ _('Delete') }}">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="bi-empty-lg">{{ _('No tags yet. Create one above, or just type one onto a chart.') }}</div>
+{% endif %}
+
+<p class="bi-hint">
+  {{ _('A tag is a label for finding things, and nothing else: tagging a chart never changes who can see it. Access comes from roles.') }}
+</p>
+<p class="bi-hint">
+  {{ _('A tag with nothing on it stays here, ready to be used, but is left out of the filter bars on the Charts and Dashboards pages — a chip that filters to nothing is just furniture.') }}
+</p>
+{% endblock %}

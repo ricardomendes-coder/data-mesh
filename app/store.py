@@ -1653,25 +1653,77 @@ class Tag:
     slug: str
     id: int | None = None
     count: int = 0  # how many things carry it, for the filter bar
+    # Split by kind, so the management screen can say what a delete will strip
+    # before it strips it. Only filled in by list_tags() over every type.
+    chart_count: int = 0
+    dashboard_count: int = 0
 
 
 def list_tags(resource_type: str | None = None) -> list[Tag]:
-    """Every tag, with a usage count. Ordered by use, then name."""
+    """Every tag, with a usage count. Ordered by use, then name.
+
+    Narrowed to a resource type, a tag nothing carries drops out — the WHERE
+    lands after the join, so the filter bar on a listing never offers a chip
+    that would filter to nothing. Called with no type, every tag comes back
+    including the unused ones, which is what the management screen wants.
+    """
     where = "WHERE rt.resource_type = :t" if resource_type else ""
+    params = {"chart": CHART, "dash": DASHBOARD}
+    if resource_type:
+        params["t"] = resource_type
     with engine().connect() as conn:
         rows = conn.execute(
             text(
                 f"""
-                SELECT g.id, g.name, g.slug, count(rt.tag_id) AS n
+                SELECT g.id, g.name, g.slug, count(rt.tag_id) AS n,
+                       count(*) FILTER (WHERE rt.resource_type = :chart)  AS charts,
+                       count(*) FILTER (WHERE rt.resource_type = :dash)   AS dashboards
                 FROM tags g
                 LEFT JOIN resource_tags rt ON rt.tag_id = g.id {where}
                 GROUP BY g.id, g.name, g.slug
                 ORDER BY n DESC, lower(g.name)
                 """  # noqa: S608 — `where` is a fixed literal, not input
             ),
-            {"t": resource_type} if resource_type else {},
+            params,
         ).fetchall()
-    return [Tag(id=r[0], name=r[1], slug=r[2], count=r[3]) for r in rows]
+    return [
+        Tag(id=r[0], name=r[1], slug=r[2], count=r[3], chart_count=r[4], dashboard_count=r[5])
+        for r in rows
+    ]
+
+
+def create_tag(name: str, created_by: str = "") -> Tag | None:
+    """A tag with nothing on it yet. None when the name is empty or taken.
+
+    Tags also come into being by being typed onto a chart; this is for setting
+    up the vocabulary first, so people pick from words the team agreed on
+    rather than inventing a fourth spelling of "financeiro".
+    """
+    name = " ".join(str(name or "").split())[:60]
+    slug = slugify(name)
+    if not name or not slug:
+        return None
+    with engine().begin() as conn:
+        row = conn.execute(
+            text(
+                "INSERT INTO tags (name, slug, created_by) VALUES (:n, :s, :c) "
+                "ON CONFLICT (slug) DO NOTHING RETURNING id, name, slug"
+            ),
+            {"n": name, "s": slug, "c": created_by},
+        ).first()
+    return None if row is None else Tag(id=row[0], name=row[1], slug=row[2])
+
+
+def delete_tag(slug: str) -> bool:
+    """Delete a tag and take it off everything carrying it.
+
+    resource_tags cascades on the foreign key, so the taggings go with it. That
+    is the whole blast radius: a tag was never part of who-can-see-what, so no
+    chart, dashboard or role changes hands here — they just lose a label.
+    """
+    with engine().begin() as conn:
+        deleted = conn.execute(text("DELETE FROM tags WHERE slug = :s"), {"s": slug}).rowcount
+    return bool(deleted)
 
 
 def tags_for(resource_type: str, keys: list[str]) -> dict[str, list[Tag]]:
@@ -1756,13 +1808,13 @@ def set_tags(resource_type: str, key: str, names: list[str], created_by: str = "
                 ),
                 {"g": tag_id, "t": resource_type, "k": key},
             )
-        # A tag nobody uses is noise in the filter bar.
-        conn.execute(
-            text(
-                "DELETE FROM tags WHERE NOT EXISTS "
-                "(SELECT 1 FROM resource_tags rt WHERE rt.tag_id = tags.id)"
-            )
-        )
+        # Untagging the last chart used to delete the tag itself, on the
+        # grounds that an unused tag is noise. It can't now: a tag created on
+        # the management screen starts with nothing on it, and this runs on
+        # every tag edit anywhere — so the sweep would delete the vocabulary
+        # somebody had just sat down and defined. Unused tags are removed
+        # deliberately, by delete_tag(), and they stay out of the filter bars
+        # on their own because list_tags(resource_type) doesn't return them.
     return True
 
 
