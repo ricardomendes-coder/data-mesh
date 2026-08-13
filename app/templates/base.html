@@ -312,6 +312,13 @@
     .bi-icobtn[disabled]{opacity:.35;cursor:default;}
     .bi-icobtn[disabled]:hover{border-color:var(--border-strong);color:var(--body);background:var(--surface);}
 
+    /* ── language switcher ── */
+    .bi-lang{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--r-sm);overflow:hidden;}
+    .bi-langbtn{border:none;background:var(--surface);color:var(--muted);font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.04em;padding:.34rem .5rem;cursor:pointer;transition:background .12s,color .12s;}
+    .bi-langbtn:hover{background:var(--orange-50);color:var(--title);}
+    .bi-langbtn.active{background:var(--orange);color:#fff;}
+    .bi-lang form + form .bi-langbtn{border-left:1px solid var(--border-strong);}
+
     /* ── dashboard grid ── */
     /* 12 columns, explicit rows. auto-rows rather than a fixed template so a
        tile dropped at row 40 doesn't force 39 empty rows to be painted. */
@@ -378,7 +385,10 @@
     /* ── dashboard tabs + text tiles ── */
     .bi-dash-tabs{margin:.2rem 0 1rem;flex-wrap:wrap;}
     /* A text tile is page furniture, not a card: no border, no shadow. */
-    .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;overflow:visible;align-self:start;}
+    /* Scrolls rather than overlapping: the grid rows are fixed, so text that
+       renders taller than its allocation has nowhere to push. Scrolling keeps
+       every word reachable without disturbing the charts around it. */
+    .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;overflow:auto;}
     .bi-textblock{color:var(--body);font-size:.86rem;line-height:1.5;}
     .bi-textblock h2,.bi-textblock h3,.bi-textblock h4{color:var(--title);letter-spacing:-.01em;margin:.1rem 0 .3rem;}
     .bi-textblock h2{font-size:1.05rem;} .bi-textblock h3{font-size:.94rem;} .bi-textblock h4{font-size:.86rem;}

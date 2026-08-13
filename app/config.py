@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # ---- App ----
     session_secret: str = "change-me-in-production"
     app_title: str = "Report Hub"
+    # Interface language. Portuguese by default because that's what the people
+    # using this speak; English stays available per user. See app/i18n.py.
+    default_locale: str = "pt"
 
     # Session cookie name. MUST NOT be "session": this app is served from the
     # same origin as Superset (bi.v360.io/report vs bi.v360.io/), and Flask's

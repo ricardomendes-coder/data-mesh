@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import charts, datasets, db, filters, oidc, reports, store, superset_session, users
+from . import charts, datasets, db, filters, i18n, oidc, reports, store, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
@@ -89,6 +89,12 @@ def _markdown_lite(value: str) -> Markup:
     html = re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", link, html)
     return Markup(html)
 
+
+# `_` rather than `t`: _tile.html's macro takes a parameter called `t`,
+# and a global of the same name is shadowed inside it.
+templates.env.globals["_"] = i18n.t
+templates.env.globals["locales"] = i18n.LOCALE_NAMES
+templates.env.globals["current_locale"] = i18n.get_locale
 
 templates.env.filters["inline_code"] = _inline_code
 templates.env.filters["markdown_lite"] = _markdown_lite
@@ -172,6 +178,30 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def set_request_locale(request: Request, call_next):
+    """Pin the interface language for the duration of one request.
+
+    Order matters: an explicit ?lang= wins (so a link can be shared in a given
+    language), then the session, then the configured default. The value lands in
+    a ContextVar, which is what lets a message produced deep in charts.py come
+    back translated without every function taking a locale argument.
+    """
+    chosen = request.query_params.get("lang")
+    if not chosen:
+        # SessionMiddleware is added after this one, so it wraps it and the
+        # session is populated by the time we get here. Guarded anyway: a route
+        # mounted outside the session stack would otherwise 500 on language.
+        try:
+            chosen = request.session.get("lang")
+        except (AssertionError, KeyError):
+            chosen = None
+    i18n.set_locale(chosen or settings.default_locale)
+    return await call_next(request)
+
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret,
@@ -228,6 +258,11 @@ def _register_login(request: Request, username: str, claims: dict | None, via: s
         # Cached for the nav only; every admin action re-checks against the
         # database, so a revoked admin can't act on a stale session.
         request.session["is_admin"] = bool(user.is_admin)
+        # Their language choice follows them to a new browser: the session is
+        # fresh here, so seed it from what they picked last time.
+        stored = store.get_user_locale(username)
+        if stored:
+            request.session["lang"] = i18n.set_locale(stored)
     except Exception:
         logger.exception("Could not record the login for %r", username)
 
@@ -682,7 +717,7 @@ def datasets_index(
     """Everything in the analytics schema, grouped by the manifest's folders."""
     if not _may_browse_datasets(access):
         return _forbidden(
-            request, user, "You don't have access to the dataset catalog.", access=access
+            request, user, i18n.t("You don't have access to the dataset catalog."), access=access
         )
     context = _shell_context(user, "datasets", access, q=q, kind=kind, groups=[], total=0, shown=0)
     try:
@@ -723,12 +758,14 @@ def dataset_detail(
     """Preview, catalog, description and example queries for one dataset."""
     if not _may_browse_datasets(access):
         return _forbidden(
-            request, user, "You don't have access to the dataset catalog.", access=access
+            request, user, i18n.t("You don't have access to the dataset catalog."), access=access
         )
     # 403 before the catalog lookup, so an ungranted name can't be probed for
     # existence by telling 403 apart from 404.
     if not access.allows(store.DATASET, name):
-        return _forbidden(request, user, "You don't have access to that dataset.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that dataset."), access=access
+        )
 
     def _catalog_failure(message: str, status: int):
         context = _shell_context(
@@ -801,7 +838,7 @@ def run_query(
     # filtered means nothing when the target is a posted form field.
     if not access.allows(store.FEATURE, "sql_console"):
         return _forbidden(
-            request, user, "You don't have access to the query console.", access=access
+            request, user, i18n.t("You don't have access to the query console."), access=access
         )
     if not access.allows(store.DATABASE, database):
         logger.warning("%s attempted a query against ungranted database %r", user, database)
@@ -858,7 +895,7 @@ def export_query(
     # enforcing only on /query would leave the door open here.
     if not access.allows(store.FEATURE, "sql_console"):
         return _forbidden(
-            request, user, "You don't have access to the query console.", access=access
+            request, user, i18n.t("You don't have access to the query console."), access=access
         )
     if not access.allows(store.DATABASE, database):
         logger.warning("%s attempted an export from ungranted database %r", user, database)
@@ -906,7 +943,9 @@ def export_report(
     # grant — being able to run it is not implied by console access.
     if not access.allows(store.REPORT, key):
         logger.warning("%s attempted ungranted report %r", user, key)
-        return _forbidden(request, user, "You don't have access to that report.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that report."), access=access
+        )
     try:
         df = reports.get_report_df(key, max_rows=settings.query_max_rows)
     except KeyError:
@@ -1019,7 +1058,7 @@ def chart_new(
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
         return _forbidden(
-            request, user, "You don't have access to the chart builder.", access=access
+            request, user, i18n.t("You don't have access to the chart builder."), access=access
         )
     return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user, access))
 
@@ -1041,7 +1080,7 @@ def chart_run(
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
         return _forbidden(
-            request, user, "You don't have access to the chart builder.", access=access
+            request, user, i18n.t("You don't have access to the chart builder."), access=access
         )
     # The builder runs arbitrary SQL, so it needs the same database gate as the
     # console — otherwise it is a way around it.
@@ -1115,7 +1154,7 @@ def chart_save(
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
         return _forbidden(
-            request, user, "You don't have access to the chart builder.", access=access
+            request, user, i18n.t("You don't have access to the chart builder."), access=access
         )
     if not access.allows(store.DATABASE, source_db):
         return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
@@ -1147,7 +1186,9 @@ def chart_detail(
         return _charts_unavailable(request, user)
     # 403 before the lookup, so an ungranted slug can't be probed for existence.
     if not access.allows(store.CHART, slug):
-        return _forbidden(request, user, "You don't have access to that chart.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that chart."), access=access
+        )
 
     try:
         chart = store.get_chart(slug)
@@ -1188,7 +1229,9 @@ def chart_delete(
     access: store.Access = Depends(access_for),
 ):
     if not (access.allows(store.CHART, slug) and access.allows(store.FEATURE, "chart_builder")):
-        return _forbidden(request, user, "You don't have access to that chart.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that chart."), access=access
+        )
     if store.available():
         store.delete_chart(slug)
         logger.info("Chart %r deleted by %s", slug, user)
@@ -1361,7 +1404,7 @@ def dashboard_create(
         return _dashboards_unavailable(request, user)
     if not access.allows(store.FEATURE, "dashboard_builder"):
         return _forbidden(
-            request, user, "You don't have access to the dashboard builder.", access=access
+            request, user, i18n.t("You don't have access to the dashboard builder."), access=access
         )
     title = title.strip() or "Untitled dashboard"
     dash = store.save_dashboard(
@@ -1406,7 +1449,9 @@ def dashboard_show(
     if not store.available():
         return _dashboards_unavailable(request, user)
     if not access.allows(store.DASHBOARD, slug):
-        return _forbidden(request, user, "You don't have access to that dashboard.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that dashboard."), access=access
+        )
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
         return failure
@@ -1511,7 +1556,7 @@ def dashboard_edit(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     dash, failure = _load_dashboard(request, user, slug)
     if failure is not None:
@@ -1591,7 +1636,7 @@ def dashboard_update_filter(
     """Edit a filter in place. The key never changes — it's in shared URLs."""
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if filter_type not in filters.FILTER_TYPE_KEYS:
         filter_type = filters.SELECT
@@ -1627,14 +1672,14 @@ def dashboard_add_filter(
     """Define a filter. The options query runs under the caller's own grants."""
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     # The key names a bind parameter and a query-string field, so it has to be a
     # plain identifier — not because of injection (values are bound) but because
     # anything else produces a filter nobody can address.
     if not filters.valid_key(key):
         return _forbidden(
-            request, user, "A filter key must look like lower_snake_case.", access=access
+            request, user, i18n.t("A filter key must look like lower_snake_case."), access=access
         )
     if filter_type not in filters.FILTER_TYPE_KEYS:
         filter_type = filters.SELECT
@@ -1666,7 +1711,7 @@ def dashboard_delete_filter(
 ):
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.delete_filter(slug, filter_id)
@@ -1686,7 +1731,7 @@ def dashboard_add_item(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.add_item(slug, chart_slug, width)
@@ -1710,7 +1755,7 @@ def dashboard_add_section(
     """Add a tab. Tiles are moved onto it one at a time from their own control."""
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.add_section(slug, title)
@@ -1727,7 +1772,7 @@ def dashboard_delete_section(
 ):
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.delete_section(slug, section_id)
@@ -1745,7 +1790,7 @@ def dashboard_set_item_section(
 ):
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     target = int(section_id) if section_id.strip().isdigit() else None
     if store.available():
@@ -1765,7 +1810,7 @@ def dashboard_add_text(
     """A heading or note between charts."""
     if not _may_edit_dashboard(access, slug):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     target = int(section_id) if section_id.strip().isdigit() else None
     if store.available():
@@ -1785,7 +1830,7 @@ def dashboard_remove_item(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.remove_item(slug, item_id)
@@ -1805,7 +1850,7 @@ def dashboard_set_width(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.set_item_width(slug, item_id, width)
@@ -1825,7 +1870,7 @@ def dashboard_move_item(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.move_item(slug, item_id, -1 if direction == "up" else 1)
@@ -1843,7 +1888,7 @@ def dashboard_delete(
         access.allows(store.DASHBOARD, slug) and access.allows(store.FEATURE, "dashboard_builder")
     ):
         return _forbidden(
-            request, user, "You don't have access to edit that dashboard.", access=access
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
         store.delete_dashboard(slug)
@@ -2200,9 +2245,13 @@ def report_new(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
+        return _forbidden(
+            request, user, i18n.t("The app database is not configured."), 503, access=access
+        )
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to create reports."), access=access
+        )
     return templates.TemplateResponse(
         request, "report_builder.html", _report_form_context(user, access)
     )
@@ -2221,7 +2270,9 @@ def report_preview(
 ):
     """Run the report's SQL so you can see it before saving."""
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to create reports."), access=access
+        )
     if not access.allows(store.DATABASE, source_db):
         return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
@@ -2264,9 +2315,13 @@ def report_save(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
+        return _forbidden(
+            request, user, i18n.t("The app database is not configured."), 503, access=access
+        )
     if not access.allows(store.FEATURE, "report_builder"):
-        return _forbidden(request, user, "You don't have access to create reports.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to create reports."), access=access
+        )
     if not access.allows(store.DATABASE, source_db):
         return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
 
@@ -2300,16 +2355,20 @@ def report_edit(
     access: store.Access = Depends(access_for),
 ):
     if not store.available():
-        return _forbidden(request, user, "The app database is not configured.", 503, access=access)
+        return _forbidden(
+            request, user, i18n.t("The app database is not configured."), 503, access=access
+        )
     if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
-        return _forbidden(request, user, "You don't have access to that report.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that report."), access=access
+        )
     saved = store.get_report(slug)
     if saved is None:
         # Either unknown, or a reports.toml report — those are edited in git.
         return _forbidden(
             request,
             user,
-            "That report is defined in reports.toml and is edited in git, not here.",
+            i18n.t("That report is defined in reports.toml and is edited in git, not here."),
             404,
         )
     return templates.TemplateResponse(
@@ -2335,7 +2394,9 @@ def report_delete(
     access: store.Access = Depends(access_for),
 ):
     if not (access.allows(store.FEATURE, "report_builder") and access.allows(store.REPORT, slug)):
-        return _forbidden(request, user, "You don't have access to that report.", access=access)
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that report."), access=access
+        )
     if store.available():
         store.delete_report(slug)
         logger.info("Report %r deleted by %s", slug, user)
@@ -2396,12 +2457,12 @@ def folder_file_item(
     feature = _FILE_FEATURE.get(resource_type)
     if feature is None:
         return _forbidden(
-            request, user, "That kind of thing can't be filed in a folder.", access=access
+            request, user, i18n.t("That kind of thing can't be filed in a folder."), access=access
         )
     # Both checks matter: the feature says you may organise this kind of thing,
     # the key says you may see this particular one. Neither implies the other.
     if not (access.allows(store.FEATURE, feature) and access.allows(resource_type, resource_key)):
-        return _forbidden(request, user, "You don't have access to that.", access=access)
+        return _forbidden(request, user, i18n.t("You don't have access to that."), access=access)
 
     target = int(folder_id) if folder_id.strip().isdigit() else None
     if store.available():
@@ -2476,6 +2537,26 @@ def admin_delete_folder(request: Request, folder_id: int, user: str = Depends(re
     store.delete_folder(folder_id)
     logger.info("Folder %s deleted by %s (contents kept, now ungrouped)", folder_id, user)
     return RedirectResponse(request.url_for("admin_folders"), status_code=303)
+
+
+@app.post("/lang/{code}")
+def set_language(request: Request, code: str, user: str = Depends(signed_in_user)):
+    """Switch the interface language.
+
+    Stored on the session so it applies immediately, and on the user row so it
+    follows them to another browser. Never fatal: if the app database is down
+    the session alone still carries the choice for this visit.
+    """
+    chosen = i18n.set_locale(code)
+    request.session["lang"] = chosen
+    if store.available():
+        try:
+            store.set_user_locale(user, chosen)
+        except Exception:
+            logger.exception("Could not store the language for %s", user)
+    # Back where they were, so switching language doesn't lose the page.
+    back = request.headers.get("referer") or str(request.url_for("console"))
+    return RedirectResponse(back, status_code=303)
 
 
 @app.get("/healthz")

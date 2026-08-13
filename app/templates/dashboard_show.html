@@ -5,12 +5,12 @@
 {% block page_title %}{{ dashboard.title }}{% endblock %}
 {% block page_sub %}
   <a href="{{ url_for('dashboards_index') }}">Dashboards</a> /
-  {{ tiles|length }} chart{{ '' if tiles|length == 1 else 's' }}
+  {{ _('{n} chart', n=tiles|length) if tiles|length == 1 else _('{n} charts', n=tiles|length) }}
 {% endblock %}
 {% block topbar_extra %}
 <a class="bi-btn ghost" href="{{ url_for('dashboard_edit', slug=dashboard.id) }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>
-  Edit
+  {{ _('Edit') }}
 </a>
 {% endblock %}
 
@@ -29,12 +29,12 @@
     {% if f.filter_type == 'select' %}
     {% set opts = filter_options.get(f.key, []) %}
     <select id="flt-{{ f.key }}" name="{{ f.key }}" {% if opts|length > 1 %}multiple size="1"{% endif %}>
-      <option value="">All</option>
+      <option value="">{{ _('All') }}</option>
       {% for o in opts %}
       <option value="{{ o }}" {% if o in f.values %}selected{% endif %}>{{ o }}</option>
       {% endfor %}
     </select>
-    {% if not opts %}<span class="bi-sub">no options</span>{% endif %}
+    {% if not opts %}<span class="bi-sub">{{ _('no options') }}</span>{% endif %}
     {% elif f.filter_type == 'daterange' %}
     <span class="bi-daterange">
       <input type="date" name="{{ f.key }}" value="{{ f.values[0] if f.values|length > 0 else '' }}" aria-label="{{ f.label }} from">
@@ -46,8 +46,8 @@
   </div>
   {% endfor %}
   <div class="bi-filter-actions">
-    <button class="bi-btn sm" type="submit">Apply</button>
-    <a class="bi-btn sm ghost" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">Clear</a>
+    <button class="bi-btn sm" type="submit">{{ _('Apply') }}</button>
+    <a class="bi-btn sm ghost" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">{{ _('Clear') }}</a>
   </div>
 </form>
 {% endif %}
@@ -78,7 +78,7 @@
     {% for t in in_tab %}{{ tile(t, t.canvas_id) }}{% endfor %}
   </div>
   {% else %}
-  <div class="bi-empty-lg">Nothing on this tab yet.</div>
+  <div class="bi-empty-lg">{{ _('Nothing on this tab yet.') }}</div>
   {% endif %}
 </section>
 {% endfor %}
@@ -116,7 +116,7 @@
 {% endif %}
 {% else %}
 <div class="bi-empty-lg">
-  This dashboard is empty.
+  {{ _('This dashboard is empty.') }}
   <a href="{{ url_for('dashboard_edit', slug=dashboard.id) }}">Add a chart</a>.
 </div>
 {% endif %}

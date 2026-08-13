@@ -15,27 +15,27 @@
         {% if nav_query %}<a class="bi-nav-item {{ 'active' if active_nav == 'query' else '' }}"
            data-tab="query" href="{{ url_for('console') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l3 3-3 3M9 11h4"/></svg>
-          <span>Query</span>
+          <span>{{ _('Query') }}</span>
         </a>{% endif %}
         {% if nav_reports %}<a class="bi-nav-item {{ 'active' if active_nav == 'reports' else '' }}"
            href="{{ url_for('reports_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l2.5 2.5V14H4z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
-          <span>Reports</span>
+          <span>{{ _('Reports') }}</span>
         </a>{% endif %}
         {% if nav_dashboards %}<a class="bi-nav-item {{ 'active' if active_nav == 'dashboards' else '' }}"
            href="{{ url_for('dashboards_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="5.5" height="5"/><rect x="8.5" y="2.5" width="5.5" height="5"/><rect x="2" y="8.5" width="5.5" height="5"/><rect x="8.5" y="8.5" width="5.5" height="5"/></svg>
-          <span>Dashboards</span>
+          <span>{{ _('Dashboards') }}</span>
         </a>{% endif %}
         {% if nav_charts %}<a class="bi-nav-item {{ 'active' if active_nav == 'charts' else '' }}"
            href="{{ url_for('charts_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14h12"/><rect x="3" y="8" width="2.6" height="5"/><rect x="7" y="4.5" width="2.6" height="8.5"/><rect x="11" y="6.5" width="2.6" height="6.5"/></svg>
-          <span>Charts</span>
+          <span>{{ _('Charts') }}</span>
         </a>{% endif %}
         {% if nav_datasets %}<a class="bi-nav-item {{ 'active' if active_nav == 'datasets' else '' }}"
            href="{{ url_for('datasets_index') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>
-          <span>Datasets</span>
+          <span>{{ _('Datasets') }}</span>
         </a>{% endif %}
         {# Read straight off the session: it's cached at login purely so the nav
            doesn't cost a query per page. Every admin route re-checks against
@@ -44,7 +44,7 @@
         <a class="bi-nav-item {{ 'active' if active_nav == 'admin' else '' }}"
            href="{{ url_for('admin_users') }}">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5" r="2.5"/><path d="M3 13.5c0-2.5 2.24-4 5-4s5 1.5 5 4"/></svg>
-          <span>Admin</span>
+          <span>{{ _('Administration') }}</span>
         </a>
         {% endif %}
       </nav>
@@ -59,15 +59,27 @@
     <div class="bi-topbar">
       <div class="bi-topbar-tt">
         <div class="bi-topbar-title">{% block page_title %}{{ title }}{% endblock %}</div>
-        <div class="bi-topbar-sub">{% block page_sub %}Signed in as {{ user }}{% endblock %}</div>
+        <div class="bi-topbar-sub">{% block page_sub %}{{ _('Signed in as {user}', user=user) }}{% endblock %}</div>
       </div>
       <div class="bi-topbar-actions">
         {% block topbar_extra %}{% endblock %}
+
+        {# Language. Two codes, so a segmented pair beats a dropdown. #}
+        <div class="bi-lang" role="group" aria-label="{{ _('Language') }}">
+          {% for code, name in locales.items() %}
+          <form method="post" action="{{ url_for('set_language', code=code) }}">
+            <button class="bi-langbtn {{ 'active' if code == current_locale() else '' }}"
+                    type="submit" title="{{ name }}" aria-label="{{ name }}"
+                    {% if code == current_locale() %}aria-current="true"{% endif %}>{{ code|upper }}</button>
+          </form>
+          {% endfor %}
+        </div>
+
         <div class="bi-avatar" title="{{ user }}">{{ user[:2] }}</div>
         <form method="post" action="{{ url_for('logout') }}">
           <button class="bi-btn ghost" type="submit">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6"/></svg>
-            Log out
+            {{ _('Log out') }}
           </button>
         </form>
       </div>

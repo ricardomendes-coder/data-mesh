@@ -122,12 +122,15 @@
     for (var i = 0; i < CONCURRENCY; i++) next();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", run);
-  } else {
+  function start() {
     run();
   }
 
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
   /* Per-tile "Show SQL", so you can see what a chart does without leaving. */
   document.addEventListener("click", function (event) {
     var button = event.target.closest("[data-sql-toggle]");

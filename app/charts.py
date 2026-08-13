@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from .i18n import t
+
 # Validated order — see the module docstring before changing it.
 SERIES_COLORS = [
     "#FF5A00",  # V360 orange (brand primary)
@@ -170,10 +172,10 @@ def build_spec(
         if measure is None:
             measure = next((c for c in numeric_columns(columns, rows) if c != x_column), None)
         if measure is None:
-            spec.warnings.append("Pick the column holding the number.")
+            spec.warnings.append(t("Pick the column holding the number."))
             return spec
         if not rows:
-            spec.warnings.append("The query returned no rows.")
+            spec.warnings.append(t("The query returned no rows."))
             return spec
         raw = rows[0][columns.index(measure)]
         number = _numeric(raw)
@@ -199,13 +201,13 @@ def build_spec(
             "Dropped from the chart (not in the result): " + ", ".join(missing) + "."
         )
     if not usable:
-        spec.warnings.append("Pick at least one numeric column to plot.")
+        spec.warnings.append(t("Pick at least one numeric column to plot."))
         return spec
 
     if chart_type == "pie" and len(usable) > 1:
         # A pie encodes one whole. Several measures on one pie is meaningless.
         usable = usable[:1]
-        spec.warnings.append("A pie shows one measure — charting only the first.")
+        spec.warnings.append(t("A pie shows one measure — charting only the first."))
 
     if len(usable) > MAX_SERIES:
         dropped = usable[MAX_SERIES:]

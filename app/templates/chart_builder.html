@@ -32,15 +32,15 @@
 {% if ran and columns %}
 <div class="bi-chart-grid">
   <div class="bi-chart-cfg">
-    <h2 class="bi-group-tt">Configure</h2>
+    <h2 class="bi-group-tt">{{ _('Configure') }}</h2>
 
     <div class="bi-fld">
-      <label for="chart_type">Chart type</label>
+      <label for="chart_type">{{ _('Chart type') }}</label>
       {# Name only in the option: the hint doesn't fit the sidebar width and
          gets clipped mid-word. It renders below the select instead. #}
       <select id="chart_type" name="chart_type" form="builder">
         {% for key, label, hint in chart_types %}
-        <option value="{{ key }}" data-hint="{{ hint }}" {% if key == chart_type %}selected{% endif %}>{{ label }}</option>
+        <option value="{{ key }}" data-hint="{{ _(hint) }}" {% if key == chart_type %}selected{% endif %}>{{ _(label) }}</option>
         {% endfor %}
       </select>
       <p class="bi-hint" id="type-hint"></p>
@@ -49,7 +49,7 @@
     {# Hidden for a table, which shows the result as it comes back. The JS
        toggles these, keyed off the selected type. #}
     <div class="bi-fld" data-cfg="x">
-      <label for="x_column">X axis (labels)</label>
+      <label for="x_column">{{ _('X axis (labels)') }}</label>
       <select id="x_column" name="x_column" form="builder">
         {% for c in columns %}
         <option value="{{ c }}" {% if c == x_column %}selected{% endif %}>{{ c }}</option>
@@ -58,7 +58,7 @@
     </div>
 
     <div class="bi-fld" data-cfg="y">
-      <label id="measure-label">Measures (numeric columns)</label>
+      <label id="measure-label">{{ _('Measures (numeric columns)') }}</label>
       {% if numeric_columns %}
       <div class="bi-checks">
         {% for c in numeric_columns %}
@@ -70,16 +70,16 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="bi-hint">No numeric columns in this result — a chart needs at least one.</p>
+      <p class="bi-hint">{{ _('No numeric columns in this result — a chart needs at least one.') }}</p>
       {% endif %}
     </div>
 
-    <p class="bi-hint">Changes preview instantly. Run again after editing the SQL.</p>
+    <p class="bi-hint">{{ _('Changes preview instantly. Run again after editing the SQL.') }}</p>
   </div>
 
   <div class="bi-chart-main">
     <div class="bi-fld">
-      <label for="title">Title</label>
+      <label for="title">{{ _('Title') }}</label>
       <input id="title" name="title" form="builder" value="{{ title }}"
              placeholder="e.g. Capturas por dia" required>
     </div>
@@ -100,7 +100,7 @@
       <input type="hidden" name="chart_type" id="save-type">
       <input type="hidden" name="x_column" id="save-x">
       <div id="save-y"></div>
-      <button class="bi-btn" type="submit">Save chart</button>
+      <button class="bi-btn" type="submit">{{ _('Save chart') }}</button>
     </form>
   </div>
 </div>

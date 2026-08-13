@@ -356,6 +356,15 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON dashboard_items (dashboard_id, grid_y, grid_x);
         """,
     ),
+    (
+        "0011_user_locale",
+        """
+        -- Interface language, per person. Kept on the user rather than in a
+        -- cookie so the choice follows them to another browser, and NULL means
+        -- "whatever the server default is" rather than pinning English.
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS locale text;
+        """,
+    ),
 ]
 
 
@@ -538,6 +547,24 @@ def save_chart(chart: Chart) -> Chart:
             params,
         ).first()
     return _row_to_chart(row)
+
+
+def set_user_locale(username: str, locale: str | None) -> bool:
+    """Remember someone's interface language."""
+    with engine().begin() as conn:
+        result = conn.execute(
+            text("UPDATE users SET locale = :l WHERE username = :u"),
+            {"l": locale, "u": username},
+        )
+        return result.rowcount > 0
+
+
+def get_user_locale(username: str) -> str | None:
+    """Their stored language, or None to mean "use the server default"."""
+    with engine().connect() as conn:
+        return conn.execute(
+            text("SELECT locale FROM users WHERE username = :u"), {"u": username}
+        ).scalar()
 
 
 def slug_for(table: str, ident: str) -> str | None:

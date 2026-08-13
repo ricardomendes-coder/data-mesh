@@ -33,7 +33,9 @@
       "Bash(ruff format --check *)",
       "Bash(awk *)",
       "Bash(node --check *)",
-      "Bash(google-chrome --headless *)"
+      "Bash(google-chrome --headless *)",
+      "Bash(node --check app/static/dashboard-render.js)",
+      "Bash(xargs -I{} echo \"leftover references: {}\")"
     ]
   }
 }

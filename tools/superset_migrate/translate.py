@@ -552,6 +552,7 @@ def markdown_blocks(position_json: str) -> list[tuple[str | None, str, str]]:
     if not isinstance(nodes, dict):
         return []
     out: list[tuple[str | None, str, str]] = []
+    seen: set[str] = set()
 
     def walk(node_id: str, tab: str | None):
         node = nodes.get(node_id)
@@ -563,7 +564,10 @@ def markdown_blocks(position_json: str) -> list[tuple[str | None, str, str]]:
             tab = (meta.get("text") or meta.get("defaultText") or "Tab").strip() or "Tab"
         elif kind in ("MARKDOWN", "HEADER"):
             text_value = (meta.get("code") or meta.get("text") or "").strip()
-            if text_value:
+            # A node reachable from two branches would otherwise be emitted
+            # twice and land as two stacked copies on the dashboard.
+            if text_value and node_id not in seen:
+                seen.add(node_id)
                 out.append((tab, text_value, node_id))
         for child in node.get("children") or []:
             walk(child, tab)

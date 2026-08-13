@@ -1,11 +1,11 @@
 {% extends "_shell.html" %}
-{% block page_title %}Reports{% endblock %}
-{% block page_sub %}{{ reports|length }} available{% endblock %}
+{% block page_title %}{{ _('Reports') }}{% endblock %}
+{% block page_sub %}{{ _('{n} available', n=reports|length) }}{% endblock %}
 {% block topbar_extra %}
 {% if can_build %}
 <a class="bi-btn" href="{{ url_for('report_new') }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
-  New report
+  {{ _('New report') }}
 </a>
 {% endif %}
 {% endblock %}
@@ -23,7 +23,7 @@
       <code>{{ r.database }}</code>
       {# A file report is under git review and can't be edited here — worth
          showing, so nobody hunts for an edit button that shouldn't exist. #}
-      {% if not r.editable %}<span class="bi-kind bi-kind-view" title="Defined in reports.toml">in git</span>{% endif %}
+      {% if not r.editable %}<span class="bi-kind bi-kind-view" title="Defined in reports.toml">{{ _('in git') }}</span>{% endif %}
       {% if r.description %}<div class="bi-sub">{{ r.description|inline_code }}</div>{% endif %}
     </div>
     <div class="bi-card-meta">
@@ -33,10 +33,10 @@
       </a>
       <a class="bi-btn sm ghost" href="{{ url_for('export_report', key=r.key) }}?format=xlsx">Excel</a>
       {% if can_build and r.editable %}
-      <a class="bi-btn sm ghost" href="{{ url_for('report_edit', slug=r.key) }}">Edit</a>
+      <a class="bi-btn sm ghost" href="{{ url_for('report_edit', slug=r.key) }}">{{ _('Edit') }}</a>
       <form method="post" action="{{ url_for('report_delete', slug=r.key) }}"
             onsubmit="return confirm('Delete the {{ r.title }} report?')">
-        <button class="bi-btn sm ghost" type="submit">Delete</button>
+        <button class="bi-btn sm ghost" type="submit">{{ _('Delete') }}</button>
       </form>
       {% endif %}
     </div>
@@ -45,7 +45,7 @@
 </div>
 {% else %}
 <div class="bi-empty-lg">
-  No reports you can reach.
+  {{ _('No reports you can reach.') }}
   {% if can_build %}<a href="{{ url_for('report_new') }}">Create one</a> from a SQL query.{% endif %}
 </div>
 {% endif %}

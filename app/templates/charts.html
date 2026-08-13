@@ -1,10 +1,10 @@
 {% extends "_shell.html" %}
-{% block page_title %}Charts{% endblock %}
-{% block page_sub %}{{ charts|length }} saved{% endblock %}
+{% block page_title %}{{ _('Charts') }}{% endblock %}
+{% block page_sub %}{{ _('{n} saved', n=charts|length) }}{% endblock %}
 {% block topbar_extra %}
 {% if can_build %}<a class="bi-btn" href="{{ url_for('chart_new') }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
-  New chart
+  {{ _('New chart') }}
 </a>{% endif %}
 {% endblock %}
 
@@ -22,10 +22,10 @@
       <code>{{ c.source_db }}</code>
     </div>
     <div class="bi-card-meta">
-      <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.id) }}">Open</a>
+      <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.id) }}">{{ _('Open') }}</a>
       <form method="post" action="{{ url_for('chart_delete', slug=c.id) }}"
             onsubmit="return confirm('Delete {{ c.title }}?')">
-        <button class="bi-btn sm ghost" type="submit">Delete</button>
+        <button class="bi-btn sm ghost" type="submit">{{ _('Delete') }}</button>
       </form>
     </div>
   </div>
@@ -33,8 +33,7 @@
 </div>
 {% else %}
 <div class="bi-empty-lg">
-  No charts yet. <a href="{{ url_for('chart_new') }}">Create one</a> — write the
-  SQL, pick which column is the x-axis and which are the measures.
+  {{ _('No charts yet.') }} <a href="{{ url_for('chart_new') }}">{{ _('Create one') }}</a>.
 </div>
 {% endif %}
 {% endblock %}

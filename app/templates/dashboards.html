@@ -1,15 +1,15 @@
 {% extends "_shell.html" %}
-{% block page_title %}Dashboards{% endblock %}
-{% block page_sub %}{{ dashboards|length }} saved{% endblock %}
+{% block page_title %}{{ _('Dashboards') }}{% endblock %}
+{% block page_sub %}{{ _('{n} saved', n=dashboards|length) }}{% endblock %}
 
 {% block content %}
 {% if can_build %}<form class="bi-toolbar" method="post" action="{{ url_for('dashboard_create') }}">
   <div class="bi-search bi-search-plain">
-    <input name="title" placeholder="Name a new dashboard…" required>
+    <input name="title" placeholder="{{ _('Name a new dashboard…') }}" required>
   </div>
   <button class="bi-btn" type="submit">
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
-    Create
+    {{ _('Create') }}
   </button>
 </form>{% endif %}
 
@@ -22,14 +22,14 @@
     </div>
     <div class="bi-card-nm">{{ d.title }}</div>
     <div class="bi-card-sub">
-      {{ d.items|length }} chart{{ '' if d.items|length == 1 else 's' }}
+      {{ _('{n} chart', n=d.items|length) if d.items|length == 1 else _('{n} charts', n=d.items|length) }}
     </div>
     <div class="bi-card-meta">
-      <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.id) }}">Open</a>
-      <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.id) }}">Edit</a>
+      <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.id) }}">{{ _('Open') }}</a>
+      <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.id) }}">{{ _('Edit') }}</a>
       <form method="post" action="{{ url_for('dashboard_delete', slug=d.id) }}"
             onsubmit="return confirm('Delete {{ d.title }}? The charts themselves are kept.')">
-        <button class="bi-btn sm ghost" type="submit">Delete</button>
+        <button class="bi-btn sm ghost" type="submit">{{ _('Delete') }}</button>
       </form>
     </div>
   </div>
@@ -37,7 +37,7 @@
 </div>
 {% else %}
 <div class="bi-empty-lg">
-  No dashboards yet. Name one above, then add charts to it.
+  {{ _('No dashboards yet. Name one above, then add charts to it.') }}
   {% if not db_error %}
   You'll need at least one <a href="{{ url_for('charts_index') }}">chart</a> first.
   {% endif %}

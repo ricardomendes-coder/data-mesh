@@ -99,8 +99,8 @@ def test_auth_flow():
 
         # The break-glass form still renders, and offers both paths
         r = client.get("/login/local")
-        assert r.status_code == 200 and "Log in" in r.text
-        assert "Continue with V360 SSO" in r.text, "SSO button missing from login page"
+        assert r.status_code == 200 and "Entrar" in r.text  # pt is the default
+        assert "Continuar com o SSO V360" in r.text, "SSO button missing from login page"
 
         # Wrong password rejected
         r = client.post(
@@ -121,7 +121,7 @@ def test_auth_flow():
         # The console is reachable and is now *only* the query console —
         # reports moved to their own page.
         r = client.get("/")
-        assert r.status_code == 200 and "Signed in as admin" in r.text
+        assert r.status_code == 200 and "Conectado como admin" in r.text
         assert 'id="sql"' in r.text, "query editor missing from the console"
         assert 'data-pane="reports"' not in r.text, (
             "the reports pane is still inside the query console"
@@ -166,7 +166,7 @@ def test_sso_flow():
 
             r = client.get("/")
             assert r.status_code == 200, r.status_code
-            assert "Signed in as marcelo.ferreira" in r.text, "SSO user not on dashboard"
+            assert "Conectado como marcelo.ferreira" in r.text, "SSO user not on dashboard"
 
             # Logout is local-only by default so BI 360 stays signed in
             r = client.post("/logout", follow_redirects=False)
@@ -369,9 +369,24 @@ def test_dataset_preview_is_not_injectable():
 
 
 def test_chart_spec():
-    """Shaping rules, including the ones the palette validation obliges."""
-    from app import charts as ch
+    """Shaping rules, including the ones the palette validation obliges.
 
+    Pinned to English: this is a test about charts, and asserting on translated
+    warning text would make it fail whenever a translation is reworded.
+    """
+    from app import charts as ch
+    from app import i18n
+
+    previous = i18n.get_locale()
+    i18n.set_locale("en")
+    try:
+        _chart_spec_body(ch)
+    finally:
+        i18n.set_locale(previous)
+    print("chart spec: OK")
+
+
+def _chart_spec_body(ch):
     cols = ["dia", "total", "erros"]
     rows = [("2026-01-01", 10, 1), ("2026-01-02", 20, 3)]
 
@@ -417,7 +432,6 @@ def test_chart_spec():
 
     # non-numeric text must not become a silent zero
     assert ch.numeric_columns(["a"], [("hello",)]) == []
-    print("chart spec: OK")
 
 
 def test_dashboard_layout_ordering():
@@ -620,6 +634,70 @@ def test_dashboard_pages_render():
     print("dashboard pages render: OK")
 
 
+def test_interface_language():
+    """Portuguese by default, English by choice, and the choice sticks."""
+    from app import i18n, store
+
+    # ── the translator itself ──
+    previous = i18n.get_locale()
+    try:
+        i18n.set_locale("pt")
+        assert i18n.t("Charts") == "Gráficos"
+        i18n.set_locale("en")
+        assert i18n.t("Charts") == "Charts", "English must return the source string"
+        # A string with no translation falls back rather than blowing up, so a
+        # missed one shows as English instead of an empty label.
+        i18n.set_locale("pt")
+        assert i18n.t("Not translated yet") == "Not translated yet"
+        assert i18n.t("Signed in as {user}", user="ana") == "Conectado como ana"
+        # An unknown code is the default, not a crash.
+        assert i18n.set_locale("klingon") == i18n.DEFAULT == "pt"
+    finally:
+        i18n.set_locale(previous)
+
+    # ── through the app ──
+    saved = (store.available, store.upsert_user, store.set_user_locale, store.get_user_locale)
+    stored = {}
+    store.available = lambda: True
+    store.upsert_user = _no_op_user
+    store.set_user_locale = lambda u, code: stored.__setitem__(u, code) or True
+    store.get_user_locale = lambda u: stored.get(u)
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            # The login page is Portuguese before anyone has chosen anything.
+            body = client.get("/login/local").text
+            assert "Entrar" in body and "Log in" not in body, "login page is not pt by default"
+
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            body = client.get("/").text
+            assert "<span>Consulta</span>" in body, "nav is not translated"
+            assert "Conectado como admin" in body
+
+            # ?lang= wins for one request, so a link can carry a language.
+            body = client.get("/?lang=en").text
+            assert "<span>Query</span>" in body, "?lang=en did not switch"
+
+            # The switcher persists it: session for now, user row for next time.
+            r = client.post("/lang/en", follow_redirects=False)
+            assert r.status_code == 303, r.status_code
+            assert stored.get("admin") == "en", stored
+            body = client.get("/").text
+            assert "<span>Query</span>" in body, "the choice did not stick"
+            assert "Signed in as admin" in body
+
+            # And back again.
+            client.post("/lang/pt", follow_redirects=False)
+            assert client.get("/").text.count("<span>Consulta</span>") == 1
+            assert stored.get("admin") == "pt"
+
+            # A nonsense code falls back rather than 500ing or blanking the UI.
+            client.post("/lang/klingon", follow_redirects=False)
+            assert "<span>Consulta</span>" in client.get("/").text
+    finally:
+        (store.available, store.upsert_user, store.set_user_locale, store.get_user_locale) = saved
+    print("interface language: OK")
+
+
 def test_urls_address_charts_and_dashboards_by_id():
     """URLs use ids; slugs still resolve so old links keep working.
 
@@ -645,9 +723,16 @@ def test_urls_address_charts_and_dashboards_by_id():
     dash.items = [store.DashboardItem(id=11, chart=chart, position=0, width="full")]
 
     saved = (
-        store.available, store.get_dashboard, store.get_chart, store.list_charts,
-        store.list_dashboards, store.list_filters, store.slug_for, store.id_for,
-        store.upsert_user, db_mod.execute,
+        store.available,
+        store.get_dashboard,
+        store.get_chart,
+        store.list_charts,
+        store.list_dashboards,
+        store.list_filters,
+        store.slug_for,
+        store.id_for,
+        store.upsert_user,
+        db_mod.execute,
     )
     store.available = lambda: True
     store.get_dashboard = lambda s, with_items=True: dash if s == "ops" else None
@@ -690,9 +775,16 @@ def test_urls_address_charts_and_dashboards_by_id():
             assert client.get("/charts/9999").status_code == 404
     finally:
         (
-            store.available, store.get_dashboard, store.get_chart, store.list_charts,
-            store.list_dashboards, store.list_filters, store.slug_for, store.id_for,
-            store.upsert_user, db_mod.execute,
+            store.available,
+            store.get_dashboard,
+            store.get_chart,
+            store.list_charts,
+            store.list_dashboards,
+            store.list_filters,
+            store.slug_for,
+            store.id_for,
+            store.upsert_user,
+            db_mod.execute,
         ) = saved
     print("urls address charts and dashboards by id: OK")
 
@@ -1299,33 +1391,35 @@ def test_nav_hides_what_you_cannot_reach():
         for path in PAGES:
             body = _render_nav(narrow, path)
             for hidden in (
-                "<span>Charts</span>",
-                "<span>Dashboards</span>",
-                "<span>Datasets</span>",
-                "<span>Reports</span>",
+                "<span>Gráficos</span>",
+                "<span>Painéis</span>",
+                "<span>Conjuntos de dados</span>",
+                "<span>Relatórios</span>",
             ):
                 assert hidden not in body, f"{hidden} shown without a grant, on {path}"
 
         # The one entry she does have is present.
-        assert "<span>Query</span>" in _render_nav(narrow), "granted feature missing from the nav"
+        assert "<span>Consulta</span>" in _render_nav(narrow), (
+            "granted feature missing from the nav"
+        )
 
         # An admin sees the lot
         body = _render_nav(store.Access(username="boss", everything=True))
         for shown in (
-            "<span>Query</span>",
-            "<span>Charts</span>",
-            "<span>Dashboards</span>",
-            "<span>Datasets</span>",
+            "<span>Consulta</span>",
+            "<span>Gráficos</span>",
+            "<span>Painéis</span>",
+            "<span>Conjuntos de dados</span>",
         ):
             assert shown in body, f"{shown} hidden from an admin"
 
         # No grants at all -> no nav entries
         body = _render_nav(store.Access(username="new"))
         for hidden in (
-            "<span>Query</span>",
-            "<span>Charts</span>",
-            "<span>Dashboards</span>",
-            "<span>Datasets</span>",
+            "<span>Consulta</span>",
+            "<span>Gráficos</span>",
+            "<span>Painéis</span>",
+            "<span>Conjuntos de dados</span>",
         ):
             assert hidden not in body, f"{hidden} shown to a user with no grants"
     finally:
@@ -1826,7 +1920,7 @@ def test_superset_delegated_mode():
             )
             assert r.status_code == 303 and _redirect_path(r) == "/", r.status_code
             r = client.get("/")
-            assert "Signed in as marcelo.ferreira" in r.text, "delegated login failed"
+            assert "Conectado como marcelo.ferreira" in r.text, "delegated login failed"
 
             # Logout goes through Superset — clearing only our cookie would let
             # the next request sign straight back in.
@@ -2002,6 +2096,7 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_interface_language()
     test_urls_address_charts_and_dashboards_by_id()
     test_dashboard_filters_bind_values()
     test_list_pages_render_without_folder_ui()

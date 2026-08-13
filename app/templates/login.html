@@ -8,11 +8,11 @@
       <div class="bi-login-eyebrow">{{ title }}</div>
     </div>
 
-    <div class="bi-login-h">Sign in</div>
+    <div class="bi-login-h">{{ _('Sign in') }}</div>
     <div class="bi-login-p">
       {% if superset_enabled %}Continue with the BI 360 account you already use.
       {% elif sso_enabled %}Use your V360 account to access the hub.
-      {% else %}Enter your credentials to access the hub.{% endif %}
+      {% else %}{{ _('Enter your credentials to access the hub.') }}{% endif %}
     </div>
 
     {% if error %}
@@ -30,7 +30,7 @@
     {% elif sso_enabled %}
     <a class="bi-btn sso" href="{{ url_for('sso_login') }}">
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h2.5A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5H10"/><path d="M7 11l3-3-3-3M10 8H2"/></svg>
-      Continue with V360 SSO
+      {{ _('Continue with V360 SSO') }}
     </a>
     {% endif %}
 
@@ -41,15 +41,15 @@
     {% if password_login_enabled %}
     <form method="post" action="{{ url_for('login_local_submit') }}">
       <div class="bi-fld">
-        <label for="username">Username</label>
+        <label for="username">{{ _('Username') }}</label>
         <input id="username" name="username" autocomplete="username" required
                {% if not (sso_enabled or superset_enabled) %}autofocus{% endif %}>
       </div>
       <div class="bi-fld">
-        <label for="password">Password</label>
+        <label for="password">{{ _('Password') }}</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
       </div>
-      <button class="bi-btn{% if sso_enabled or superset_enabled %} ghost{% endif %}" type="submit">Log in</button>
+      <button class="bi-btn{% if sso_enabled or superset_enabled %} ghost{% endif %}" type="submit">{{ _('Log in') }}</button>
     </form>
     {% if sso_enabled or superset_enabled %}
     <div class="bi-login-note">Local accounts are a fallback for when single sign-on is unavailable.</div>
