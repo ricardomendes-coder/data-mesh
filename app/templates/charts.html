@@ -22,8 +22,8 @@
       <code>{{ c.source_db }}</code>
     </div>
     <div class="bi-card-meta">
-      <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.slug) }}">Open</a>
-      <form method="post" action="{{ url_for('chart_delete', slug=c.slug) }}"
+      <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.id) }}">Open</a>
+      <form method="post" action="{{ url_for('chart_delete', slug=c.id) }}"
             onsubmit="return confirm('Delete {{ c.title }}?')">
         <button class="bi-btn sm ghost" type="submit">Delete</button>
       </form>

@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -280,6 +281,51 @@ def _may_browse_datasets(access: store.Access) -> bool:
     return access.allows(store.FEATURE, "dataset_catalog") and access.allows(
         store.DATABASE, settings.datasets_database
     )
+
+
+def _resolve(table: str, ident: str) -> str:
+    """Path parameter -> slug, for routes addressed by id.
+
+    Declared as a dependency so every route gets it without repeating the
+    lookup: FastAPI binds the path parameter into this, and the route receives
+    the slug that the rest of the code — and every permission grant — speaks in.
+
+    An unknown id 404s here rather than falling through as a slug that happens
+    to be numeric and matches nothing.
+    """
+    if not store.available():
+        return ident  # the route's own db_ok handling reports this properly
+    try:
+        slug = store.slug_for(table, ident)
+    except Exception:
+        logger.exception("Could not resolve %s %r", table, ident)
+        return ident
+    if slug is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return slug
+
+
+def dashboard_ref(slug: str) -> str:
+    return _resolve("dashboards", slug)
+
+
+def chart_ref(slug: str) -> str:
+    return _resolve("charts", slug)
+
+
+def _back_to(request: Request, route: str, table: str, slug: str) -> RedirectResponse:
+    """Redirect to a page's canonical id URL after a POST.
+
+    The handlers work in slugs; the URLs are ids. Without this the address bar
+    would flip back to a slug on every save.
+    """
+    ident = slug
+    if store.available():
+        try:
+            ident = store.id_for(table, slug) or slug
+        except Exception:
+            logger.exception("Could not resolve the id for %s %r", table, slug)
+    return RedirectResponse(request.url_for(route, slug=ident), status_code=303)
 
 
 def _forbidden(
@@ -1087,13 +1133,13 @@ def chart_save(
     )
     saved = store.save_chart(chart)
     logger.info("Chart %r saved by %s", saved.slug, user)
-    return RedirectResponse(request.url_for("chart_detail", slug=saved.slug), status_code=303)
+    return RedirectResponse(request.url_for("chart_detail", slug=saved.id), status_code=303)
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
 def chart_detail(
     request: Request,
-    slug: str,
+    slug: str = Depends(chart_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1137,7 +1183,7 @@ def chart_detail(
 @app.post("/charts/{slug}/delete")
 def chart_delete(
     request: Request,
-    slug: str,
+    slug: str = Depends(chart_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1330,7 +1376,7 @@ def dashboard_create(
     logger.info("Dashboard %r created by %s", dash.slug, user)
     # Straight into the editor: a new dashboard is empty and the next thing you
     # want is to add a chart.
-    return RedirectResponse(request.url_for("dashboard_edit", slug=dash.slug), status_code=303)
+    return RedirectResponse(request.url_for("dashboard_edit", slug=dash.id), status_code=303)
 
 
 def _load_dashboard(request: Request, user: str, slug: str):
@@ -1353,7 +1399,7 @@ def _load_dashboard(request: Request, user: str, slug: str):
 @app.get("/dashboards/{slug}", response_class=HTMLResponse)
 def dashboard_show(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1396,8 +1442,8 @@ def dashboard_show(
 @app.get("/dashboards/{slug}/tiles/{item_id}")
 def dashboard_tile_data(
     request: Request,
-    slug: str,
-    item_id: int,
+    slug: str = Depends(dashboard_ref),
+    item_id: int = PathParam(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1455,7 +1501,7 @@ def dashboard_tile_data(
 @app.get("/dashboards/{slug}/edit", response_class=HTMLResponse)
 def dashboard_edit(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1507,7 +1553,7 @@ def dashboard_edit(
 @app.post("/dashboards/{slug}/layout")
 async def dashboard_save_layout(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1531,8 +1577,8 @@ async def dashboard_save_layout(
 @app.post("/dashboards/{slug}/filters/{filter_id}")
 def dashboard_update_filter(
     request: Request,
-    slug: str,
-    filter_id: int,
+    slug: str = Depends(dashboard_ref),
+    filter_id: int = PathParam(...),
     label: str = Form(...),
     column_expr: str = Form(...),
     filter_type: str = Form("select"),
@@ -1562,13 +1608,13 @@ def dashboard_update_filter(
             source_db=source_db,
             default_value=default_value.strip(),
         )
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/filters")
 def dashboard_add_filter(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     key: str = Form(...),
     label: str = Form(...),
     column_expr: str = Form(...),
@@ -1607,14 +1653,14 @@ def dashboard_add_filter(
                 source_db=source_db,
             ),
         )
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/filters/{filter_id}/delete")
 def dashboard_delete_filter(
     request: Request,
-    slug: str,
-    filter_id: int,
+    slug: str = Depends(dashboard_ref),
+    filter_id: int = PathParam(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1624,13 +1670,13 @@ def dashboard_delete_filter(
         )
     if store.available():
         store.delete_filter(slug, filter_id)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/items")
 def dashboard_add_item(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     chart_slug: str = Form(...),
     width: str = Form(store.DEFAULT_WIDTH),
     user: str = Depends(signed_in_user),
@@ -1644,7 +1690,7 @@ def dashboard_add_item(
         )
     if store.available():
         store.add_item(slug, chart_slug, width)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 def _may_edit_dashboard(access: store.Access, slug: str) -> bool:
@@ -1656,7 +1702,7 @@ def _may_edit_dashboard(access: store.Access, slug: str) -> bool:
 @app.post("/dashboards/{slug}/sections")
 def dashboard_add_section(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     title: str = Form(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
@@ -1668,14 +1714,14 @@ def dashboard_add_section(
         )
     if store.available():
         store.add_section(slug, title)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/sections/{section_id}/delete")
 def dashboard_delete_section(
     request: Request,
-    slug: str,
-    section_id: int,
+    slug: str = Depends(dashboard_ref),
+    section_id: int = PathParam(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1685,14 +1731,14 @@ def dashboard_delete_section(
         )
     if store.available():
         store.delete_section(slug, section_id)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/items/{item_id}/section")
 def dashboard_set_item_section(
     request: Request,
-    slug: str,
-    item_id: int,
+    slug: str = Depends(dashboard_ref),
+    item_id: int = PathParam(...),
     section_id: str = Form(""),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
@@ -1704,13 +1750,13 @@ def dashboard_set_item_section(
     target = int(section_id) if section_id.strip().isdigit() else None
     if store.available():
         store.set_item_section(slug, item_id, target)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/text")
 def dashboard_add_text(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     content: str = Form(...),
     section_id: str = Form(""),
     user: str = Depends(signed_in_user),
@@ -1724,14 +1770,14 @@ def dashboard_add_text(
     target = int(section_id) if section_id.strip().isdigit() else None
     if store.available():
         store.add_text_item(slug, content.strip()[:2000], section_id=target)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/items/{item_id}/remove")
 def dashboard_remove_item(
     request: Request,
-    slug: str,
-    item_id: int,
+    slug: str = Depends(dashboard_ref),
+    item_id: int = PathParam(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1743,14 +1789,14 @@ def dashboard_remove_item(
         )
     if store.available():
         store.remove_item(slug, item_id)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/items/{item_id}/width")
 def dashboard_set_width(
     request: Request,
-    slug: str,
-    item_id: int,
+    slug: str = Depends(dashboard_ref),
+    item_id: int = PathParam(...),
     width: str = Form(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
@@ -1763,14 +1809,14 @@ def dashboard_set_width(
         )
     if store.available():
         store.set_item_width(slug, item_id, width)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/items/{item_id}/move")
 def dashboard_move_item(
     request: Request,
-    slug: str,
-    item_id: int,
+    slug: str = Depends(dashboard_ref),
+    item_id: int = PathParam(...),
     direction: str = Form(...),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
@@ -1783,13 +1829,13 @@ def dashboard_move_item(
         )
     if store.available():
         store.move_item(slug, item_id, -1 if direction == "up" else 1)
-    return RedirectResponse(request.url_for("dashboard_edit", slug=slug), status_code=303)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/delete")
 def dashboard_delete(
     request: Request,
-    slug: str,
+    slug: str = Depends(dashboard_ref),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):

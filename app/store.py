@@ -540,6 +540,44 @@ def save_chart(chart: Chart) -> Chart:
     return _row_to_chart(row)
 
 
+def slug_for(table: str, ident: str) -> str | None:
+    """Resolve an id-or-slug to a slug.
+
+    URLs address charts and dashboards by **id**, because a slug is derived from
+    the title and a rename would break every link and bookmark pointing at it.
+    Everything below this line still works in slugs — permissions in particular,
+    where a grant reading `capturas-por-dia` is far easier to audit than one
+    reading `417`.
+
+    A slug is still accepted so links shared before the switch keep resolving.
+    """
+    ident = str(ident or "")
+    if not ident.isdigit():
+        return ident or None
+    if table not in ("charts", "dashboards", "reports"):
+        raise ValueError(f"not a slugged table: {table!r}")
+    with engine().connect() as conn:
+        return conn.execute(
+            text(f"SELECT slug FROM {table} WHERE id = :i"),  # noqa: S608 — fixed set
+            {"i": int(ident)},
+        ).scalar()
+
+
+def id_for(table: str, slug: str) -> int | None:
+    """The id behind a slug — the inverse of slug_for().
+
+    Used when a POST redirects back to a page: the destination should be the
+    canonical id URL, not the slug the handler happened to be working in.
+    """
+    if table not in ("charts", "dashboards", "reports"):
+        raise ValueError(f"not a slugged table: {table!r}")
+    with engine().connect() as conn:
+        return conn.execute(
+            text(f"SELECT id FROM {table} WHERE slug = :s"),  # noqa: S608 — fixed set
+            {"s": slug},
+        ).scalar()
+
+
 def delete_chart(slug: str) -> bool:
     with engine().begin() as conn:
         result = conn.execute(text("DELETE FROM charts WHERE slug = :s"), {"s": slug})

@@ -33,7 +33,7 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
   {% if editing %}
   <div class="bi-tile-ctl">
     <span class="bi-drag" title="Drag to move">⠿</span>
-    <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=item.id) }}">
+    <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.id, item_id=item.id) }}">
       <button class="bi-icobtn danger" type="submit" title="Remove" aria-label="Remove">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
@@ -51,12 +51,12 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
      data-section="{{ item.section_id or '' }}">
   <div class="bi-tile-hd">
     {% if editing %}<span class="bi-drag" title="Drag to move">⠿</span>{% endif %}
-    <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.slug) }}">{{ t.chart.title }}</a>
+    <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.id) }}">{{ t.chart.title }}</a>
 
     {% if editing %}
     <div class="bi-tile-ctl">
       {% if dashboard.sections %}
-      <form method="post" action="{{ url_for('dashboard_set_item_section', slug=dashboard.slug, item_id=item.id) }}">
+      <form method="post" action="{{ url_for('dashboard_set_item_section', slug=dashboard.id, item_id=item.id) }}">
         <select name="section_id" onchange="this.form.submit()" aria-label="Which tab">
           <option value="" {% if not item.section_id %}selected{% endif %}>— no tab —</option>
           {% for s in dashboard.sections %}
@@ -65,7 +65,7 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
         </select>
       </form>
       {% endif %}
-      <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.slug, item_id=item.id) }}">
+      <form method="post" action="{{ url_for('dashboard_remove_item', slug=dashboard.id, item_id=item.id) }}">
         <button class="bi-icobtn danger" type="submit" title="Remove from dashboard" aria-label="Remove">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
         </button>
@@ -84,7 +84,7 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>
         </summary>
         <div class="bi-tilemenu-pop">
-          <a href="{{ url_for('chart_detail', slug=t.chart.slug) }}">Open chart</a>
+          <a href="{{ url_for('chart_detail', slug=t.chart.id) }}">Open chart</a>
           <a href="{{ url_for('chart_new') }}?from={{ t.chart.slug }}">Edit chart</a>
           <a href="{{ url_for('console') }}?tab=query&amp;database={{ t.chart.source_db|urlencode }}&amp;sql={{ t.chart.sql|urlencode }}">Open SQL in Query</a>
           <button type="button" data-sql-toggle>Show SQL</button>

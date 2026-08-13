@@ -25,9 +25,9 @@
       {{ d.items|length }} chart{{ '' if d.items|length == 1 else 's' }}
     </div>
     <div class="bi-card-meta">
-      <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.slug) }}">Open</a>
-      <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.slug) }}">Edit</a>
-      <form method="post" action="{{ url_for('dashboard_delete', slug=d.slug) }}"
+      <a class="bi-btn sm" href="{{ url_for('dashboard_show', slug=d.id) }}">Open</a>
+      <a class="bi-btn sm ghost" href="{{ url_for('dashboard_edit', slug=d.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('dashboard_delete', slug=d.id) }}"
             onsubmit="return confirm('Delete {{ d.title }}? The charts themselves are kept.')">
         <button class="bi-btn sm ghost" type="submit">Delete</button>
       </form>

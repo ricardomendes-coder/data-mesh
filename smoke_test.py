@@ -620,6 +620,83 @@ def test_dashboard_pages_render():
     print("dashboard pages render: OK")
 
 
+def test_urls_address_charts_and_dashboards_by_id():
+    """URLs use ids; slugs still resolve so old links keep working.
+
+    A slug comes from the title, so renaming a chart used to break every link
+    and bookmark pointing at it. Permissions still speak in slugs — a grant
+    reading `capturas-por-dia` is auditable, `417` is not — so the id only
+    exists at the URL layer.
+    """
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=7,
+        slug="capturas-por-dia",
+        title="Capturas por dia",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="line",
+        x_column="dia",
+        y_columns=["total"],
+    )
+    dash = store.Dashboard(id=3, slug="ops", title="Operação", created_by="admin")
+    dash.items = [store.DashboardItem(id=11, chart=chart, position=0, width="full")]
+
+    saved = (
+        store.available, store.get_dashboard, store.get_chart, store.list_charts,
+        store.list_dashboards, store.list_filters, store.slug_for, store.id_for,
+        store.upsert_user, db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if s == "ops" else None
+    store.get_chart = lambda s: chart if s == "capturas-por-dia" else None
+    store.list_charts = lambda: [chart]
+    store.list_dashboards = lambda: [dash]
+    store.list_filters = lambda s: []
+    store.upsert_user = _no_op_user
+    # The resolver: ids map to slugs, unknown ids do not.
+    ids = {("charts", "7"): "capturas-por-dia", ("dashboards", "3"): "ops"}
+    store.slug_for = lambda table, ident: (
+        ids.get((table, str(ident))) if str(ident).isdigit() else str(ident)
+    )
+    store.id_for = lambda table, slug: {"ops": 3, "capturas-por-dia": 7}.get(slug)
+    db_mod.execute = lambda sql, database=None, max_rows=None, params=None: db_mod.QueryResult(
+        returns_rows=True, columns=["dia", "total"], rows=[("2026-07-01", 10)], rowcount=1
+    )
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            # The id is the address.
+            assert client.get("/dashboards/3").status_code == 200
+            assert client.get("/charts/7").status_code == 200
+            assert client.get("/dashboards/3/tiles/11").status_code == 200
+
+            # Links the pages emit are id-shaped, not slug-shaped.
+            listing = client.get("/dashboards").text
+            assert "/dashboards/3" in listing, "the index still links by slug"
+            assert "/dashboards/ops" not in listing, listing[:200]
+            charts_page = client.get("/charts").text
+            assert "/charts/7" in charts_page and "/charts/capturas-por-dia" not in charts_page
+
+            # A link shared before the switch still resolves.
+            assert client.get("/dashboards/ops").status_code == 200
+            assert client.get("/charts/capturas-por-dia").status_code == 200
+
+            # An id that doesn't exist is a 404, not a slug lookup that misses.
+            assert client.get("/dashboards/9999").status_code == 404
+            assert client.get("/charts/9999").status_code == 404
+    finally:
+        (
+            store.available, store.get_dashboard, store.get_chart, store.list_charts,
+            store.list_dashboards, store.list_filters, store.slug_for, store.id_for,
+            store.upsert_user, db_mod.execute,
+        ) = saved
+    print("urls address charts and dashboards by id: OK")
+
+
 def test_dashboard_filters_bind_values():
     """Filters reach the SQL as bound parameters, never as text.
 
@@ -1925,6 +2002,7 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_urls_address_charts_and_dashboards_by_id()
     test_dashboard_filters_bind_values()
     test_list_pages_render_without_folder_ui()
     test_folders_are_organisation_only()
