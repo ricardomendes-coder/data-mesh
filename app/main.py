@@ -1,7 +1,7 @@
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -996,10 +996,13 @@ def charts_index(
         access,
         charts=[],
         can_build=access.allows(store.FEATURE, "chart_builder"),
+        **_listing_controls(request, store.CHART),
     )
     try:
         # Filtered by slug: a chart you can't open shouldn't be listed either.
-        context["charts"] = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        visible = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        context["charts"] = _apply_tag_filter(visible, store.CHART, context["tag"])
+        context["tags_map"] = _tags_of(store.CHART, [c.slug for c in context["charts"]])
     except Exception:
         logger.exception("Could not list charts")
         context["db_ok"] = False
@@ -1171,8 +1174,93 @@ def chart_save(
         created_by=user,
     )
     saved = store.save_chart(chart)
+    # The query changed, so the cached preview is of the old one.
+    try:
+        if saved.id:
+            store.drop_chart_preview(saved.id)
+    except Exception:
+        logger.exception("Could not drop the cached preview for %r", saved.slug)
     logger.info("Chart %r saved by %s", saved.slug, user)
     return RedirectResponse(request.url_for("chart_detail", slug=saved.id), status_code=303)
+
+
+@app.get("/charts/{slug}/data")
+def chart_data(
+    request: Request,
+    slug: str = Depends(chart_ref),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """One chart's rendered spec, for the listing's preview mode.
+
+    Same shape as the dashboard tile endpoint and drawn by the same JS. It's a
+    separate fetch per card so a listing of forty charts paints immediately and
+    fills in, rather than waiting on forty queries.
+    """
+    if not store.available():
+        return JSONResponse(
+            {"error": i18n.t("The app database is not configured.")}, status_code=503
+        )
+    if not access.allows(store.CHART, slug):
+        return JSONResponse(
+            {"error": i18n.t("You don't have access to that chart.")}, status_code=403
+        )
+    try:
+        chart = store.get_chart(slug)
+    except Exception:
+        logger.exception("Could not load chart %r", slug)
+        return JSONResponse({"error": i18n.t("This chart's query failed.")}, status_code=502)
+    if chart is None:
+        return JSONResponse({"error": i18n.t("Not found")}, status_code=404)
+
+    # Served from cache when it's fresh. A preview exists to tell one chart from
+    # another; re-running 580 queries so each thumbnail is to-the-second is a
+    # cost nobody asked for. `?refresh=1` forces a rebuild.
+    ttl = timedelta(minutes=max(0, settings.preview_cache_minutes))
+    force = request.query_params.get("refresh") == "1"
+    if not force and ttl:
+        try:
+            cached = store.get_chart_preview(chart.id)
+        except Exception:
+            logger.exception("Could not read the cached preview for %r", slug)
+            cached = None
+        if cached:
+            payload, built_at = cached
+            fresh = datetime.now(built_at.tzinfo) - built_at < ttl
+            # A chart edited since the snapshot invalidates it: the query moved.
+            unchanged = not chart.updated_at or chart.updated_at <= built_at
+            if fresh and unchanged:
+                payload["age"] = _age_label(built_at)
+                payload["cached"] = True
+                return JSONResponse(payload)
+
+    try:
+        sql = filters.strip_token(chart.sql)
+        result = db.execute(sql, chart.source_db, max_rows=charts.MAX_POINTS + 1)
+        spec = charts.build_spec(
+            result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns
+        )
+    except Exception:
+        logger.exception("Chart %r failed to render for the listing", slug)
+        return JSONResponse({"error": i18n.t("This chart's query failed.")}, status_code=200)
+
+    payload = {"renders_as": spec.renders_as, "warnings": spec.warnings, "unfiltered": False}
+    if spec.renders_as == "canvas":
+        payload["spec"] = spec.to_dict()
+    elif spec.renders_as == "table":
+        payload["columns"] = spec.columns
+        payload["rows"] = [["" if v is None else str(v) for v in r] for r in spec.rows[:12]]
+    else:
+        payload["value"] = spec.value
+        payload["caption"] = spec.caption
+
+    try:
+        store.put_chart_preview(chart.id, payload)
+    except Exception:
+        logger.exception("Could not cache the preview for %r", slug)
+    payload["age"] = i18n.t("just now")
+    payload["cached"] = False
+    return JSONResponse(payload)
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
@@ -1307,6 +1395,88 @@ def _render_tiles(items: list, active: list | None = None) -> list[dict]:
     return tiles
 
 
+# How a listing can be shown. `box` is the card that already existed; `preview`
+# renders the chart itself; `list` is a dense row per item.
+VIEWS = ("preview", "box", "list")
+DEFAULT_VIEW = "box"
+
+
+def _age_label(built_at) -> str:
+    """How stale a cached preview is, in words.
+
+    Always shown next to the preview: a chart's numbers move when the data
+    moves, so a cached spec is a likeness, not a reading. Saying how old it is
+    costs one line and stops it being mistaken for live.
+    """
+    if built_at is None:
+        return ""
+    now = datetime.now(built_at.tzinfo) if built_at.tzinfo else datetime.now()
+    minutes = max(0, int((now - built_at).total_seconds() // 60))
+    if minutes < 1:
+        return i18n.t("just now")
+    if minutes < 60:
+        return i18n.t("{n} min ago", n=minutes)
+    return i18n.t("{n} h ago", n=minutes // 60)
+
+
+def _listing_controls(request: Request, resource_type: str) -> dict:
+    """View mode, tag filter and the tag bar for a listing page.
+
+    The view is remembered in the session: it's a preference about how you like
+    to browse, and having it reset on every navigation is the kind of small
+    friction that makes a tool feel unfinished.
+    """
+    view = request.query_params.get("view")
+    if view in VIEWS:
+        try:
+            request.session[f"view_{resource_type}"] = view
+        except (AssertionError, KeyError):
+            pass
+    else:
+        try:
+            view = request.session.get(f"view_{resource_type}")
+        except (AssertionError, KeyError):
+            view = None
+    if view not in VIEWS:
+        view = DEFAULT_VIEW
+
+    tags: list = []
+    if store.available():
+        try:
+            tags = store.list_tags(resource_type)
+        except Exception:
+            logger.exception("Could not read tags for %s", resource_type)
+    return {
+        "view": view,
+        "views": VIEWS,
+        "tag": (request.query_params.get("tag") or "").strip(),
+        "all_tags": tags,
+    }
+
+
+def _apply_tag_filter(items: list, resource_type: str, tag_slug: str) -> list:
+    """Narrow a listing to one tag. Runs *after* the permission filter."""
+    if not tag_slug or not store.available():
+        return items
+    try:
+        keys = set(store.keys_with_tag(resource_type, tag_slug))
+    except Exception:
+        logger.exception("Could not filter by tag %r", tag_slug)
+        return items
+    return [i for i in items if i.slug in keys]
+
+
+def _tags_of(resource_type: str, keys: list[str]) -> dict:
+    """slug -> tags, in one query for the whole page."""
+    if not keys or not store.available():
+        return {}
+    try:
+        return store.tags_for(resource_type, keys)
+    except Exception:
+        logger.exception("Could not read tags for the listing")
+        return {}
+
+
 def _dashboard_filters(slug: str) -> list:
     """A dashboard's filter definitions, or none if they can't be read.
 
@@ -1381,11 +1551,12 @@ def dashboards_index(
         access,
         dashboards=[],
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
+        **_listing_controls(request, store.DASHBOARD),
     )
     try:
-        context["dashboards"] = [
-            d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)
-        ]
+        visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
+        context["dashboards"] = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
+        context["tags_map"] = _tags_of(store.DASHBOARD, [d.slug for d in context["dashboards"]])
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False
@@ -2556,6 +2727,47 @@ def set_language(request: Request, code: str, user: str = Depends(signed_in_user
             logger.exception("Could not store the language for %s", user)
     # Back where they were, so switching language doesn't lose the page.
     back = request.headers.get("referer") or str(request.url_for("console"))
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/charts/{slug}/tags")
+def chart_set_tags(
+    request: Request,
+    slug: str = Depends(chart_ref),
+    tags: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Retag a chart. Comma-separated free text — people think in words, and
+    making them create a tag first is friction for something whose only job is
+    to make things findable."""
+    if not (access.allows(store.CHART, slug) and access.allows(store.FEATURE, "chart_builder")):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that chart."), access=access
+        )
+    if store.available():
+        store.set_tags(store.CHART, slug, tags.split(","), created_by=user)
+    # Back to the listing they came from, so the view mode and any tag filter
+    # they had applied survive the round trip.
+    back = request.headers.get("referer") or str(request.url_for("charts_index"))
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/dashboards/{slug}/tags")
+def dashboard_set_tags(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    tags: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
+        )
+    if store.available():
+        store.set_tags(store.DASHBOARD, slug, tags.split(","), created_by=user)
+    back = request.headers.get("referer") or str(request.url_for("dashboards_index"))
     return RedirectResponse(back, status_code=303)
 
 

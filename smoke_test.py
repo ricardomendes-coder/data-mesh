@@ -33,6 +33,7 @@ os.environ["APP_DB_PORT"] = "1"
 # Same for the delegated-auth path: no test should make a real call to Superset.
 os.environ["SUPERSET_INTERNAL_URL"] = "http://127.0.0.1:1"
 
+from datetime import UTC
 from urllib.parse import urlsplit
 
 import pandas as pd
@@ -632,6 +633,233 @@ def test_dashboard_pages_render():
             db_mod.execute,
         ) = saved
     print("dashboard pages render: OK")
+
+
+def test_tags_and_listing_views():
+    """Tags label and filter; they never grant. Plus the three view modes.
+
+    Same rule as folders, and worth pinning for the same reason: the moment a
+    label decides who sees something, "how do I find this" and "may I read it"
+    become one question.
+    """
+    from app import main as main_mod
+    from app import store
+
+    assert "tag" not in store.RESOURCE_TYPES, (
+        "tag became a permission resource type — tagging would start granting"
+    )
+
+    chart_a = store.Chart(
+        id=1,
+        slug="vendas",
+        title="Vendas",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="a",
+        y_columns=["b"],
+    )
+    chart_b = store.Chart(
+        id=2,
+        slug="custos",
+        title="Custos",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="line",
+        x_column="a",
+        y_columns=["b"],
+    )
+    tagged = {"vendas": [store.Tag(id=1, name="Financeiro", slug="financeiro")]}
+
+    saved = (
+        store.available,
+        store.list_charts,
+        store.list_tags,
+        store.tags_for,
+        store.keys_with_tag,
+        store.set_tags,
+        store.upsert_user,
+        store.get_chart,
+        store.slug_for,
+    )
+    calls = {}
+    # URLs carry ids; the handler works in slugs. Without this the resolver
+    # falls back to the raw id and the assertion below reads "1", not "vendas".
+    store.slug_for = lambda table, ident: (
+        {"1": "vendas", "2": "custos"}.get(str(ident)) if str(ident).isdigit() else str(ident)
+    )
+    store.available = lambda: True
+    store.list_charts = lambda: [chart_a, chart_b]
+    store.list_tags = lambda rt=None: [
+        store.Tag(id=1, name="Financeiro", slug="financeiro", count=1)
+    ]
+    store.tags_for = lambda rt, keys: {k: v for k, v in tagged.items() if k in keys}
+    store.keys_with_tag = lambda rt, slug: ["vendas"] if slug == "financeiro" else []
+    store.set_tags = lambda rt, key, names, created_by="": (
+        calls.__setitem__("set", (rt, key, [n.strip() for n in names if n.strip()])) or True
+    )
+    store.get_chart = lambda s: {"vendas": chart_a, "custos": chart_b}.get(s)
+    store.upsert_user = _no_op_user
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            # Default view is the card; the switcher offers all three.
+            body = client.get("/charts").text
+            assert "bi-viewsw" in body, "no view switcher"
+            for name in main_mod.VIEWS:
+                assert f"view={name}" in body, f"{name} view missing from the switcher"
+            assert "Financeiro" in body, "tags not shown on the listing"
+
+            # Markup, not class names: every class also appears in the inlined
+            # stylesheet, so `"bi-listtbl" in body` is true on every page.
+            LIST_MARKUP = '<table class="bi-restbl bi-listtbl">'
+            body = client.get("/charts?view=list").text
+            assert LIST_MARKUP in body, "list view did not render a table"
+            assert 'data-chart="1"' not in body, "list view should not fetch previews"
+
+            body = client.get("/charts?view=preview").text
+            assert 'data-chart="1"' in body, "preview cards don't fetch"
+            assert "chart-preview.js" in body
+            assert LIST_MARKUP not in body
+
+            # The choice is remembered, so browsing doesn't reset it.
+            remembered = client.get("/charts").text
+            assert 'data-chart="1"' in remembered, "the view choice did not stick"
+            assert LIST_MARKUP not in remembered
+
+            # Filtering by tag narrows the list and nothing else.
+            body = client.get("/charts?view=box&tag=financeiro").text
+            assert "Vendas" in body and "Custos" not in body, "tag filter did not narrow"
+
+            # Retagging is free text, and lands as a list of names.
+            r = client.post(
+                "/charts/1/tags", data={"tags": "Financeiro, Mensal , "}, follow_redirects=False
+            )
+            assert r.status_code == 303, r.status_code
+            assert calls["set"] == ("chart", "vendas", ["Financeiro", "Mensal"]), calls["set"]
+
+            # The preview endpoint returns a spec, not a page.
+            from app import db as db_mod
+
+            real = db_mod.execute
+            db_mod.execute = lambda sql, database=None, max_rows=None, params=None: (
+                db_mod.QueryResult(
+                    returns_rows=True, columns=["a", "b"], rows=[("x", 1)], rowcount=1
+                )
+            )
+            try:
+                payload = client.get("/charts/1/data").json()
+                assert payload["renders_as"] == "canvas", payload
+                assert payload["spec"]["labels"] == ["x"], payload
+            finally:
+                db_mod.execute = real
+    finally:
+        (
+            store.available,
+            store.list_charts,
+            store.list_tags,
+            store.tags_for,
+            store.keys_with_tag,
+            store.set_tags,
+            store.upsert_user,
+            store.get_chart,
+            store.slug_for,
+        ) = saved
+    print("tags and listing views: OK")
+
+
+def test_preview_cache():
+    """Previews come from a cache, carry their age, and never outlive an edit.
+
+    A chart's numbers move when the *data* moves, not when someone edits the
+    chart — so a cached spec is a likeness, not a reading, and every response
+    says how old it is.
+    """
+    from datetime import datetime, timedelta
+
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=7,
+        slug="vendas",
+        title="Vendas",
+        source_db="analytics",
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="a",
+        y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    cache: dict = {}
+    ran = []
+
+    saved = (
+        store.available,
+        store.get_chart,
+        store.slug_for,
+        store.upsert_user,
+        store.get_chart_preview,
+        store.put_chart_preview,
+        db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_chart = lambda s: chart if s == "vendas" else None
+    store.slug_for = lambda table, ident: "vendas" if str(ident) == "7" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_chart_preview = lambda cid: cache.get(cid)
+    store.put_chart_preview = lambda cid, spec: cache.__setitem__(cid, (spec, datetime.now(UTC)))
+
+    def _execute(sql, database=None, max_rows=None, params=None):
+        ran.append(sql)
+        return db_mod.QueryResult(
+            returns_rows=True, columns=["a", "b"], rows=[("x", 1)], rowcount=1
+        )
+
+    db_mod.execute = _execute
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            # Cold: runs the query, caches it, and reports itself as fresh.
+            first = client.get("/charts/7/data").json()
+            assert first["cached"] is False and first["age"], first
+            assert len(ran) == 1, ran
+
+            # Warm: no query at all.
+            second = client.get("/charts/7/data").json()
+            assert second["cached"] is True, second
+            assert len(ran) == 1, "the cached preview still hit the warehouse"
+            assert second["spec"] == first["spec"]
+
+            # ?refresh=1 forces it.
+            client.get("/charts/7/data?refresh=1")
+            assert len(ran) == 2, "refresh did not re-run the query"
+
+            # Older than the TTL: rebuilt.
+            spec, _ = cache[7]
+            cache[7] = (spec, datetime.now(UTC) - timedelta(hours=48))
+            client.get("/charts/7/data")
+            assert len(ran) == 3, "a stale preview was served"
+
+            # Edited since the snapshot: rebuilt, because the query moved.
+            spec, _ = cache[7]
+            cache[7] = (spec, datetime.now(UTC))
+            chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
+            client.get("/charts/7/data")
+            assert len(ran) == 4, "a preview of the pre-edit query was served"
+    finally:
+        (
+            store.available,
+            store.get_chart,
+            store.slug_for,
+            store.upsert_user,
+            store.get_chart_preview,
+            store.put_chart_preview,
+            db_mod.execute,
+        ) = saved
+    print("preview cache: OK")
 
 
 def test_interface_language():
@@ -2096,6 +2324,8 @@ if __name__ == "__main__":
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()
+    test_tags_and_listing_views()
+    test_preview_cache()
     test_interface_language()
     test_urls_address_charts_and_dashboards_by_id()
     test_dashboard_filters_bind_values()

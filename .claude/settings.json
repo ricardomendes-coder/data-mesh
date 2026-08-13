@@ -35,7 +35,12 @@
       "Bash(node --check *)",
       "Bash(google-chrome --headless *)",
       "Bash(node --check app/static/dashboard-render.js)",
-      "Bash(xargs -I{} echo \"leftover references: {}\")"
+      "Bash(xargs -I{} echo \"leftover references: {}\")",
+      "Bash(echo \"=== task output ===\")",
+      "Bash(cat /tmp/claude-1000/-home-marcelo-trabalho-data-mesh/ae6b2dea-f69d-454c-802e-685526b77394/tasks/bcvzfrd5k.output)",
+      "Bash(awk '{print \"  \", $NF, $5, \"bytes\"}')",
+      "Read(//usr/bin/**)",
+      "Bash(python3 -V)"
     ]
   }
 }

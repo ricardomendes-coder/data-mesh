@@ -1,7 +1,9 @@
 {% extends "_shell.html" %}
+{% from "_listing.html" import view_switcher, tag_bar, tags_of with context %}
 {% block page_title %}{{ _('Charts') }}{% endblock %}
 {% block page_sub %}{{ _('{n} saved', n=charts|length) }}{% endblock %}
 {% block topbar_extra %}
+{{ view_switcher('charts_index', view, views, tag) }}
 {% if can_build %}<a class="bi-btn" href="{{ url_for('chart_new') }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
   {{ _('New chart') }}
@@ -9,8 +11,40 @@
 {% endblock %}
 
 {% block content %}
+{{ tag_bar('charts_index', all_tags, tag, view) }}
+
 {% if charts %}
-<div class="bi-cards">
+
+{# ── list: one dense row each, for scanning a long catalogue ── #}
+{% if view == 'list' %}
+<div class="bi-restbl-wrap">
+  <table class="bi-restbl bi-listtbl">
+    <thead>
+      <tr>
+        <th>{{ _('Title') }}</th><th>{{ _('Chart type') }}</th>
+        <th>{{ _('Database') }}</th><th>{{ _('Tags') }}</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in charts %}
+      <tr>
+        <td><a href="{{ url_for('chart_detail', slug=c.id) }}">{{ c.title }}</a></td>
+        <td><span class="bi-kind bi-kind-view">{{ _(c.chart_type) }}</span></td>
+        <td><code>{{ c.source_db }}</code></td>
+        <td>{{ tags_of(tags_map.get(c.slug, []), url_for('chart_set_tags', slug=c.id), can_build) }}</td>
+        <td class="bi-listact">
+          <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.id) }}">{{ _('Open') }}</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+{# ── preview and box share the card grid; preview adds the rendered chart ── #}
+<div class="bi-cards {{ 'bi-cards-preview' if view == 'preview' else '' }}"
+     data-preview="{{ url_for('charts_index') }}">
   {% for c in charts %}
   <div class="bi-card">
     <div class="bi-card-ic bi-card-ic-chart">
@@ -18,22 +52,48 @@
     </div>
     <div class="bi-card-nm">{{ c.title }}</div>
     <div class="bi-card-sub">
-      <span class="bi-kind bi-kind-view">{{ c.chart_type }}</span>
+      <span class="bi-kind bi-kind-view">{{ _(c.chart_type) }}</span>
       <code>{{ c.source_db }}</code>
+      {% if c.description %}<div class="bi-sub">{{ c.description|inline_code }}</div>{% endif %}
     </div>
+
+    {% if view == 'preview' %}
+    {# Fetched per card after the page paints, the same way dashboard tiles are,
+       so forty charts don't mean waiting on forty queries. #}
+    <div class="bi-card-prev" data-chart="{{ c.id }}" data-canvas="chart-{{ c.id }}"
+         data-refresh-label="{{ _('Refresh') }}">
+      <div class="bi-tile-skel"><span></span><span></span><span></span></div>
+    </div>
+    {% endif %}
+
+    {{ tags_of(tags_map.get(c.slug, []), url_for('chart_set_tags', slug=c.id), can_build) }}
+
     <div class="bi-card-meta">
       <a class="bi-btn sm" href="{{ url_for('chart_detail', slug=c.id) }}">{{ _('Open') }}</a>
       <form method="post" action="{{ url_for('chart_delete', slug=c.id) }}"
-            onsubmit="return confirm('Delete {{ c.title }}?')">
+            onsubmit="return confirm('{{ _('Delete') }}: {{ c.title }}?')">
         <button class="bi-btn sm ghost" type="submit">{{ _('Delete') }}</button>
       </form>
     </div>
   </div>
   {% endfor %}
 </div>
+{% endif %}
+
+{% if view == 'preview' %}
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='chart-preview.js') }}"></script>
+{% endif %}
+
 {% else %}
 <div class="bi-empty-lg">
+  {% if tag %}
+  {{ _('Nothing tagged {tag}.', tag=tag) }}
+  <a href="{{ url_for('charts_index') }}?view={{ view }}">{{ _('All') }}</a>
+  {% else %}
   {{ _('No charts yet.') }} <a href="{{ url_for('chart_new') }}">{{ _('Create one') }}</a>.
+  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

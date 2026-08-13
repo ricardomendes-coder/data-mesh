@@ -1,0 +1,57 @@
+{# Listing chrome shared by the charts and dashboards pages: the view switcher
+   and the tag bar. Imported `with context` — the macros use url_for and _(). #}
+
+{# preview | box | list. The choice is remembered per listing in the session,
+   so it survives navigating away and back. #}
+{% macro view_switcher(route, view, views, tag) -%}
+<div class="bi-viewsw" role="group" aria-label="{{ _('View') }}">
+  {% for name in views %}
+  <a class="bi-viewbtn {{ 'active' if name == view else '' }}"
+     href="{{ url_for(route) }}?view={{ name }}{% if tag %}&amp;tag={{ tag }}{% endif %}"
+     title="{{ _(name) }}" {% if name == view %}aria-current="true"{% endif %}>
+    {% if name == 'preview' %}
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M4.5 10.5l2.5-3 2 2.2 2.5-3.2"/></svg>
+    {% elif name == 'box' %}
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="5" height="5" rx="1"/><rect x="9" y="2.5" width="5" height="5" rx="1"/><rect x="2" y="8.5" width="5" height="5" rx="1"/><rect x="9" y="8.5" width="5" height="5" rx="1"/></svg>
+    {% else %}
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+    {% endif %}
+    <span>{{ _(name) }}</span>
+  </a>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{# Only rendered when something is actually tagged: an empty bar is furniture. #}
+{% macro tag_bar(route, all_tags, tag, view) -%}
+{% if all_tags %}
+<div class="bi-tagbar">
+  <a class="bi-tagchip {{ 'active' if not tag else '' }}"
+     href="{{ url_for(route) }}?view={{ view }}">{{ _('All') }}</a>
+  {% for g in all_tags %}
+  <a class="bi-tagchip {{ 'active' if g.slug == tag else '' }}"
+     href="{{ url_for(route) }}?view={{ view }}&amp;tag={{ g.slug }}">
+    {{ g.name }}<span class="bi-tagn">{{ g.count }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{# The tags on one item, plus an inline editor behind a details toggle so the
+   listing stays calm until you want to change something. #}
+{% macro tags_of(item_tags, action, can_edit) -%}
+<div class="bi-tags">
+  {% for g in item_tags %}<span class="bi-tag">{{ g.name }}</span>{% endfor %}
+  {% if can_edit %}
+  <details class="bi-tagedit">
+    <summary title="{{ _('Edit tags') }}">+</summary>
+    <form class="bi-tagform" method="post" action="{{ action }}">
+      <input name="tags" value="{{ item_tags|map(attribute='name')|join(', ') }}"
+             placeholder="{{ _('comma, separated, tags') }}" aria-label="{{ _('Tags') }}">
+      <button class="bi-btn sm" type="submit">{{ _('Save') }}</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{%- endmacro %}

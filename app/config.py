@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Interface language. Portuguese by default because that's what the people
     # using this speak; English stays available per user. See app/i18n.py.
     default_locale: str = "pt"
+    # How long a cached chart preview stays usable. Previews are for
+    # recognising a chart, not for reading its numbers; the card shows the age.
+    preview_cache_minutes: int = 60
 
     # Session cookie name. MUST NOT be "session": this app is served from the
     # same origin as Superset (bi.v360.io/report vs bi.v360.io/), and Flask's

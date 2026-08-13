@@ -365,6 +365,60 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE users ADD COLUMN IF NOT EXISTS locale text;
         """,
     ),
+    (
+        "0012_tags",
+        """
+        -- Tags label a chart or a dashboard so it can be found. Like folders,
+        -- they are presentation only: no row in role_permissions, never read by
+        -- access_for(). Tagging something can neither reveal nor hide it.
+        --
+        -- Unlike a folder, a tag is many-to-many — that is the whole point of a
+        -- tag. A chart is "financeiro" *and* "mensal", where it lives in exactly
+        -- one folder.
+        CREATE TABLE IF NOT EXISTS tags (
+            id         bigserial   PRIMARY KEY,
+            name       text        NOT NULL,
+            slug       text        NOT NULL UNIQUE,
+            created_by text        NOT NULL DEFAULT '',
+            created_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        -- (type, key) rather than a foreign key per table: the same shape the
+        -- permission and folder vocabularies use, so adding a taggable kind is
+        -- a constant rather than a migration.
+        CREATE TABLE IF NOT EXISTS resource_tags (
+            tag_id        bigint NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            resource_type text   NOT NULL,
+            resource_key  text   NOT NULL,
+            PRIMARY KEY (tag_id, resource_type, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS resource_tags_resource_idx
+            ON resource_tags (resource_type, resource_key);
+        """,
+    ),
+    (
+        "0013_chart_previews",
+        """
+        -- A rendered chart spec, kept so the previews on the Charts listing
+        -- don't re-run every query on every visit.
+        --
+        -- The spec, not an image: Chart.js draws in the browser, so a picture
+        -- would mean running a headless browser server-side — and would lose
+        -- the tooltips and the legend. This is a few KB of labels and series
+        -- that the same JS renders exactly as it renders a live one.
+        --
+        -- Cached with an age, never presented as current. A chart's numbers
+        -- move when the *data* moves, not when someone edits the chart, so a
+        -- snapshot taken at save time would quietly show last month's figures.
+        -- The card says how old it is; app/main.py refreshes past the TTL.
+        CREATE TABLE IF NOT EXISTS chart_previews (
+            chart_id bigint      PRIMARY KEY REFERENCES charts(id) ON DELETE CASCADE,
+            spec     jsonb       NOT NULL,
+            built_at timestamptz NOT NULL DEFAULT now()
+        );
+        """,
+    ),
 ]
 
 
@@ -452,6 +506,8 @@ def slugify(title: str) -> str:
 
 def _row_to_chart(row: Any) -> Chart:
     m = row._mapping
+    # The listing select omits `sql` — see list_charts().
+    has_sql = "sql" in m
     y = m["y_columns"]
     # psycopg2 hands jsonb back already decoded; be tolerant of a text column.
     if isinstance(y, str):
@@ -462,7 +518,7 @@ def _row_to_chart(row: Any) -> Chart:
         title=m["title"],
         description=m["description"],
         source_db=m["source_db"],
-        sql=m["sql"],
+        sql=m["sql"] if has_sql else "",
         chart_type=m["chart_type"],
         x_column=m["x_column"],
         y_columns=list(y or []),
@@ -479,9 +535,29 @@ _SELECT = (
 )
 
 
-def list_charts() -> list[Chart]:
+# The listing select, deliberately without `sql`.
+#
+# Measured on the real 580-chart catalogue: the same query costs 41.9s with the
+# SQL text and 2.3s without. The payload is a similar size either way — the cost
+# is in reading 580 large out-of-line values, not the bytes — and nothing that
+# lists charts reads .sql: the listing shows title, type, database and tags, the
+# dashboard editor shows names, the permissions screen shows slugs.
+_LIST_SELECT = (
+    "SELECT id, slug, title, description, source_db, chart_type, "
+    "x_column, y_columns, created_by, folder_id, created_at, updated_at FROM charts"
+)
+
+
+def list_charts(with_sql: bool = False) -> list[Chart]:
+    """Every chart. `sql` comes back empty unless you ask for it.
+
+    Pulling 580 query bodies to render 580 titles is the difference between a
+    page that opens and one that doesn't. Anything needing the query text wants
+    a single chart — use get_chart().
+    """
+    select = _SELECT if with_sql else _LIST_SELECT
     with engine().connect() as conn:
-        rows = conn.execute(text(f"{_SELECT} ORDER BY updated_at DESC"))
+        rows = conn.execute(text(f"{select} ORDER BY updated_at DESC"))  # noqa: S608 — fixed
         return [_row_to_chart(r) for r in rows]
 
 
@@ -1561,6 +1637,181 @@ def access_for(username: str) -> Access:
             return Access(username=username, everything=True)
 
     return Access(username=username, granted=granted)
+
+
+# ── tags ───────────────────────────────────────────────────────────────────
+#
+# Labels for finding things. Deliberately outside the permission model — see
+# migration 0012 — so tagging a chart never changes who can see it.
+
+TAGGABLE = (CHART, DASHBOARD)
+
+
+@dataclass
+class Tag:
+    name: str
+    slug: str
+    id: int | None = None
+    count: int = 0  # how many things carry it, for the filter bar
+
+
+def list_tags(resource_type: str | None = None) -> list[Tag]:
+    """Every tag, with a usage count. Ordered by use, then name."""
+    where = "WHERE rt.resource_type = :t" if resource_type else ""
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT g.id, g.name, g.slug, count(rt.tag_id) AS n
+                FROM tags g
+                LEFT JOIN resource_tags rt ON rt.tag_id = g.id {where}
+                GROUP BY g.id, g.name, g.slug
+                ORDER BY n DESC, lower(g.name)
+                """  # noqa: S608 — `where` is a fixed literal, not input
+            ),
+            {"t": resource_type} if resource_type else {},
+        ).fetchall()
+    return [Tag(id=r[0], name=r[1], slug=r[2], count=r[3]) for r in rows]
+
+
+def tags_for(resource_type: str, keys: list[str]) -> dict[str, list[Tag]]:
+    """key -> its tags, for a whole listing in one query."""
+    if not keys:
+        return {}
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT rt.resource_key, g.id, g.name, g.slug FROM resource_tags rt "
+                "JOIN tags g ON g.id = rt.tag_id "
+                "WHERE rt.resource_type = :t AND rt.resource_key = ANY(:keys) "
+                "ORDER BY lower(g.name)"
+            ),
+            {"t": resource_type, "keys": list(keys)},
+        ).fetchall()
+    out: dict[str, list[Tag]] = {}
+    for key, tag_id, name, slug in rows:
+        out.setdefault(key, []).append(Tag(id=tag_id, name=name, slug=slug))
+    return out
+
+
+def keys_with_tag(resource_type: str, tag_slug: str) -> list[str]:
+    """Which resources carry a tag — the filter on a listing page."""
+    with engine().connect() as conn:
+        return [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT rt.resource_key FROM resource_tags rt "
+                    "JOIN tags g ON g.id = rt.tag_id "
+                    "WHERE rt.resource_type = :t AND g.slug = :s"
+                ),
+                {"t": resource_type, "s": tag_slug},
+            )
+        ]
+
+
+def set_tags(resource_type: str, key: str, names: list[str], created_by: str = "") -> bool:
+    """Replace a resource's tags, creating any that are new.
+
+    Takes names rather than ids so the UI can be a free-text field: people think
+    in words, and making them create a tag before using it is friction for
+    something whose only job is to make things findable.
+    """
+    if resource_type not in TAGGABLE:
+        return False
+    cleaned: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw in names:
+        name = " ".join(str(raw or "").split())[:60]
+        if not name:
+            continue
+        slug = slugify(name)
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        cleaned.append((name, slug))
+
+    with engine().begin() as conn:
+        tag_ids = []
+        for name, slug in cleaned:
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE slug = :s"), {"s": slug}).scalar()
+            if tag_id is None:
+                tag_id = conn.execute(
+                    text(
+                        "INSERT INTO tags (name, slug, created_by) VALUES (:n, :s, :c) RETURNING id"
+                    ),
+                    {"n": name, "s": slug, "c": created_by},
+                ).scalar()
+            tag_ids.append(tag_id)
+
+        conn.execute(
+            text("DELETE FROM resource_tags WHERE resource_type = :t AND resource_key = :k"),
+            {"t": resource_type, "k": key},
+        )
+        for tag_id in tag_ids:
+            conn.execute(
+                text(
+                    "INSERT INTO resource_tags (tag_id, resource_type, resource_key) "
+                    "VALUES (:g, :t, :k) ON CONFLICT DO NOTHING"
+                ),
+                {"g": tag_id, "t": resource_type, "k": key},
+            )
+        # A tag nobody uses is noise in the filter bar.
+        conn.execute(
+            text(
+                "DELETE FROM tags WHERE NOT EXISTS "
+                "(SELECT 1 FROM resource_tags rt WHERE rt.tag_id = tags.id)"
+            )
+        )
+    return True
+
+
+# ── cached chart previews ──────────────────────────────────────────────────
+#
+# The rendered spec of a chart, kept so the Charts listing doesn't re-run every
+# query on every visit.
+#
+# The spec, not an image: Chart.js draws in the browser, so a picture would mean
+# running a headless browser server-side and would lose the tooltips and the
+# legend. This is a few KB of labels and series that the same JS draws exactly
+# as it draws a live one.
+#
+# Always served with its age. A chart's numbers move when the *data* moves, not
+# when someone edits the chart, so a snapshot taken at save time would quietly
+# show last month's figures as if they were today's.
+
+
+def get_chart_preview(chart_id: int) -> tuple[dict, datetime] | None:
+    """A cached spec and when it was built, or None."""
+    with engine().connect() as conn:
+        row = conn.execute(
+            text("SELECT spec, built_at FROM chart_previews WHERE chart_id = :i"),
+            {"i": chart_id},
+        ).first()
+    if row is None:
+        return None
+    spec = row[0]
+    if isinstance(spec, str):
+        spec = json.loads(spec)
+    return spec, row[1]
+
+
+def put_chart_preview(chart_id: int, spec: dict) -> None:
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO chart_previews (chart_id, spec, built_at) "
+                "VALUES (:i, CAST(:s AS jsonb), now()) "
+                "ON CONFLICT (chart_id) DO UPDATE SET spec = EXCLUDED.spec, built_at = now()"
+            ),
+            {"i": chart_id, "s": json.dumps(spec, default=str)},
+        )
+
+
+def drop_chart_preview(chart_id: int) -> None:
+    """Editing a chart invalidates its preview — the query changed."""
+    with engine().begin() as conn:
+        conn.execute(text("DELETE FROM chart_previews WHERE chart_id = :i"), {"i": chart_id})
 
 
 # ── dashboard filters ──────────────────────────────────────────────────────
