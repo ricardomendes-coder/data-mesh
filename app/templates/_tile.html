@@ -79,7 +79,7 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
         <div class="bi-tilemenu-pop">
           <a href="{{ url_for('chart_detail', slug=t.chart.id) }}">{{ _('Open chart') }}</a>
           <a href="{{ url_for('chart_new') }}?from={{ t.chart.slug }}">{{ _('Edit chart') }}</a>
-          <a href="{{ url_for('console') }}?tab=query&amp;database={{ t.chart.source_db|urlencode }}&amp;sql={{ t.chart.sql|urlencode }}">{{ _('Open SQL in Query') }}</a>
+          <a href="{{ url_for('console') }}?tab=query&amp;database={{ t.chart.source_db|urlencode }}&amp;sql={{ t.chart.sql|strip_filters|urlencode }}">{{ _('Open SQL in Query') }}</a>
           <button type="button" data-sql-toggle>{{ _('Show SQL') }}</button>
           <div class="bi-tile-meta">
             <code>{{ t.chart.source_db }}</code>
@@ -92,7 +92,7 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
   </div>
 
   {% if not editing %}
-  <pre class="bi-tile-sql" hidden>{{ t.chart.sql }}</pre>
+  <pre class="bi-tile-sql" hidden>{{ t.chart.sql|strip_filters }}</pre>
   {% endif %}
 
   {# Filled in by the browser. `data-tile` is what the loader looks for. #}

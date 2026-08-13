@@ -96,6 +96,10 @@ templates.env.globals["_"] = i18n.t
 templates.env.globals["locales"] = i18n.LOCALE_NAMES
 templates.env.globals["current_locale"] = i18n.get_locale
 
+# Charts store their SQL with the {{ filters }} token in it. Anywhere the SQL
+# is *shown* — the SQL panel, the "open in Query" link — it should be the SQL
+# that actually runs, so the token comes out.
+templates.env.filters["strip_filters"] = filters.strip_token
 templates.env.filters["inline_code"] = _inline_code
 templates.env.filters["markdown_lite"] = _markdown_lite
 
@@ -1254,10 +1258,23 @@ def chart_data(
         payload["value"] = spec.value
         payload["caption"] = spec.caption
 
-    try:
-        store.put_chart_preview(chart.id, payload)
-    except Exception:
-        logger.exception("Could not cache the preview for %r", slug)
+    # An empty result is far more often a moment than a fact — an ETL that
+    # truncates and reloads leaves its tables briefly empty, and caching that
+    # snapshot pins "no data" on the card for the whole TTL. Serve it, don't
+    # keep it; the next look asks the warehouse again.
+    empty = (spec.renders_as == "table" and not payload["rows"]) or (
+        spec.renders_as == "canvas" and not (payload["spec"].get("labels") or [])
+    )
+    if empty:
+        try:
+            store.drop_chart_preview(chart.id)
+        except Exception:
+            logger.exception("Could not drop the stale preview for %r", slug)
+    else:
+        try:
+            store.put_chart_preview(chart.id, payload)
+        except Exception:
+            logger.exception("Could not cache the preview for %r", slug)
     payload["age"] = i18n.t("just now")
     payload["cached"] = False
     return JSONResponse(payload)
@@ -1293,7 +1310,10 @@ def chart_detail(
         user, "charts", access, chart=chart, spec=None, columns=[], rows=[], chart_error=None
     )
     try:
-        result = db.execute(chart.sql, chart.source_db)
+        # The stored SQL carries the {{ filters }} token, which is Report Hub's
+        # and not SQL. The dashboard path substitutes it with the active
+        # filters; here there are none, so it comes out.
+        result = db.execute(filters.strip_token(chart.sql), chart.source_db)
     except Exception:
         logger.exception("Chart %r failed to refresh", slug)
         context["chart_error"] = "This chart's query failed. Edit it, or check the server logs."
@@ -1551,12 +1571,19 @@ def dashboards_index(
         access,
         dashboards=[],
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
+        first_chart={},
         **_listing_controls(request, store.DASHBOARD),
     )
     try:
         visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
         context["dashboards"] = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
         context["tags_map"] = _tags_of(store.DASHBOARD, [d.slug for d in context["dashboards"]])
+        # Preview shows a dashboard's first chart — one real chart rather than a
+        # sketch, and one query per card instead of one per tile.
+        if context["view"] == "preview":
+            context["first_chart"] = store.first_chart_of(
+                [d.slug for d in context["dashboards"]]
+            )
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False

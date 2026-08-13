@@ -61,7 +61,8 @@
     {# Fetched per card after the page paints, the same way dashboard tiles are,
        so forty charts don't mean waiting on forty queries. #}
     <div class="bi-card-prev" data-chart="{{ c.id }}" data-canvas="chart-{{ c.id }}"
-         data-refresh-label="{{ _('Refresh') }}">
+         data-refresh-label="{{ _('Refresh') }}"
+         data-empty-label="{{ _('No data.') }}">
       <div class="bi-tile-skel"><span></span><span></span><span></span></div>
     </div>
     {% endif %}

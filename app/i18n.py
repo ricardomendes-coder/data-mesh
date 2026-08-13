@@ -163,6 +163,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "Drag to resize": "Arraste para redimensionar",
         "Nothing on this tab yet.": "Nada nesta aba ainda.",
         "This dashboard is empty.": "Este painel está vazio.",
+        "No data.": "Sem dados.",
         "Nothing on this dashboard yet. Add a chart above.": "Nada neste painel ainda. Adicione um gráfico acima.",
         "No dashboards yet. Name one above, then add charts to it.": "Nenhum painel ainda. Dê um nome acima e depois adicione gráficos.",
         "Name a new dashboard…": "Nomeie um novo painel…",

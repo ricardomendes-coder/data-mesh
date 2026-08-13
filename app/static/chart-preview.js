@@ -30,6 +30,11 @@
       return;
     }
     if (payload.renders_as === "table") {
+      // A bare header row over nothing reads as a broken preview. Say it.
+      if (!(payload.rows || []).length) {
+        box.appendChild(el("div", "bi-prev-nodata", box.getAttribute("data-empty-label") || ""));
+        return;
+      }
       var holder = el("div", "bi-tile-table");
       var table = el("table", "bi-restbl");
       var head = table.createTHead().insertRow();

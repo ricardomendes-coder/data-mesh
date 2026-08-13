@@ -53,8 +53,8 @@
 </section>
 
 <section class="pane" data-pane="sql">
-  <pre class="bi-snippet">{{ chart.sql }}</pre>
-  <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|urlencode }}">Open in Query</a>
+  <pre class="bi-snippet">{{ chart.sql|strip_filters }}</pre>
+  <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|strip_filters|urlencode }}">Open in Query</a>
 </section>
 
 <script id="chart-data" type="application/json">{{ spec.to_dict()|tojson if (spec and how == 'canvas') else 'null' }}</script>

@@ -1781,6 +1781,33 @@ def set_tags(resource_type: str, key: str, names: list[str], created_by: str = "
 # show last month's figures as if they were today's.
 
 
+def first_chart_of(dashboard_slugs: list[str]) -> dict[str, int]:
+    """dashboard slug -> the id of its first chart, for the listing preview.
+
+    One query for the whole page. "First" is the tile that renders first: grid
+    order when the dashboard has been laid out, insertion order otherwise —
+    which is the chart somebody recognises the dashboard by.
+    """
+    if not dashboard_slugs:
+        return {}
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT DISTINCT ON (d.slug) d.slug, i.chart_id
+                FROM dashboards d
+                JOIN dashboard_items i ON i.dashboard_id = d.id
+                WHERE d.slug = ANY(:slugs) AND i.chart_id IS NOT NULL
+                ORDER BY d.slug,
+                         coalesce(i.grid_y, 9999), coalesce(i.grid_x, 9999),
+                         i.position, i.id
+                """
+            ),
+            {"slugs": list(dashboard_slugs)},
+        ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def get_chart_preview(chart_id: int) -> tuple[dict, datetime] | None:
     """A cached spec and when it was built, or None."""
     with engine().connect() as conn:

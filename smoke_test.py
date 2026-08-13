@@ -802,6 +802,7 @@ def test_preview_cache():
         store.upsert_user,
         store.get_chart_preview,
         store.put_chart_preview,
+        store.drop_chart_preview,
         db_mod.execute,
     )
     store.available = lambda: True
@@ -810,6 +811,7 @@ def test_preview_cache():
     store.upsert_user = _no_op_user
     store.get_chart_preview = lambda cid: cache.get(cid)
     store.put_chart_preview = lambda cid, spec: cache.__setitem__(cid, (spec, datetime.now(UTC)))
+    store.drop_chart_preview = lambda cid: cache.pop(cid, None)
 
     def _execute(sql, database=None, max_rows=None, params=None):
         ran.append(sql)
@@ -849,6 +851,23 @@ def test_preview_cache():
             chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
             client.get("/charts/7/data")
             assert len(ran) == 4, "a preview of the pre-edit query was served"
+
+            # An empty result is served but never kept. An ETL that truncates
+            # and reloads leaves its tables empty for a minute; caching that
+            # pins "no data" on the card long after the data is back.
+            chart.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
+            cache.clear()
+            empty = db_mod.QueryResult(
+                returns_rows=True, columns=["a", "b"], rows=[], rowcount=0
+            )
+            db_mod.execute = lambda sql, database=None, max_rows=None, params=None: (
+                ran.append(sql) or empty
+            )
+            body = client.get("/charts/7/data").json()
+            assert not body.get("spec", {}).get("labels"), body
+            assert 7 not in cache, "an empty preview was cached"
+            client.get("/charts/7/data")
+            assert len(ran) == 6, "the empty preview was served from a cache"
     finally:
         (
             store.available,
@@ -857,6 +876,7 @@ def test_preview_cache():
             store.upsert_user,
             store.get_chart_preview,
             store.put_chart_preview,
+            store.drop_chart_preview,
             db_mod.execute,
         ) = saved
     print("preview cache: OK")
