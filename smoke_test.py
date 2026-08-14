@@ -690,9 +690,17 @@ def test_tags_and_listing_views():
     )
     store.available = lambda: True
     store.list_charts = lambda: [chart_a, chart_b]
-    store.list_tags = lambda rt=None: [
-        store.Tag(id=1, name="Financeiro", slug="financeiro", count=1)
-    ]
+    # Called two ways: with a type for the filter bar, without for the picker's
+    # whole vocabulary. "Reservado" is defined but carried by nothing, so it
+    # must reach the picker and stay out of the bar.
+    store.list_tags = lambda rt=None: (
+        [store.Tag(id=1, name="Financeiro", slug="financeiro", count=1)]
+        if rt
+        else [
+            store.Tag(id=1, name="Financeiro", slug="financeiro", count=1, chart_count=1),
+            store.Tag(id=2, name="Reservado", slug="reservado"),
+        ]
+    )
     store.tags_for = lambda rt, keys: {k: v for k, v in tagged.items() if k in keys}
     store.keys_with_tag = lambda rt, slug: ["vendas"] if slug == "financeiro" else []
     store.set_tags = lambda rt, key, names, created_by="": (
@@ -732,12 +740,34 @@ def test_tags_and_listing_views():
             body = client.get("/charts?view=box&tag=financeiro").text
             assert "Vendas" in body and "Custos" not in body, "tag filter did not narrow"
 
-            # Retagging is free text, and lands as a list of names.
+            # Retagging is free text, and lands as a list of names. More than
+            # one tag per item is the whole point of tags being many-to-many —
+            # a chart is "financeiro" *and* "mensal".
             r = client.post(
                 "/charts/1/tags", data={"tags": "Financeiro, Mensal , "}, follow_redirects=False
             )
             assert r.status_code == 303, r.status_code
             assert calls["set"] == ("chart", "vendas", ["Financeiro", "Mensal"]), calls["set"]
+
+            # …and the editor has to *say* so. It was a single pre-filled text
+            # box: once an item had one tag the placeholder was hidden and
+            # nothing hinted a second was allowed, so in practice nothing ever
+            # carried two. The chip editor and its picker are what fix that.
+            body = client.get("/charts?view=box").text
+            assert "tag-editor.js" in body, "the chip editor is not loaded"
+            assert 'id="bi-tagvocab"' in body, "no vocabulary for the picker"
+            assert 'value="Reservado"' in body, (
+                "a tag defined on /admin/tags but unused is missing from the picker — "
+                "it could then only be applied by typing it from memory"
+            )
+            assert body.count('id="bi-tagvocab"') == 1, (
+                "one datalist per card: on a 580-chart listing that is a megabyte "
+                "of markup repeating the same few words"
+            )
+            # The bar is still per-type, so an unused tag isn't offered as a
+            # filter that would return nothing.
+            bar = body.split('id="bi-tagvocab"')[0]
+            assert "Reservado" not in bar.split('class="bi-tagbar"')[-1].split("</div>")[0]
 
             # The preview endpoint returns a spec, not a page.
             from app import db as db_mod

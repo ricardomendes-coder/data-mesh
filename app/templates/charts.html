@@ -1,5 +1,5 @@
 {% extends "_shell.html" %}
-{% from "_listing.html" import view_switcher, tag_bar, tags_of with context %}
+{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab with context %}
 {% block page_title %}{{ _('Charts') }}{% endblock %}
 {% block page_sub %}{{ _('{n} saved', n=charts|length) }}{% endblock %}
 {% block topbar_extra %}
@@ -97,4 +97,6 @@
   {% endif %}
 </div>
 {% endif %}
+
+{% if can_build %}{{ tag_vocab(vocab) }}{% endif %}
 {% endblock %}

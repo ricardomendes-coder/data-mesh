@@ -1461,9 +1461,16 @@ def _listing_controls(request: Request, resource_type: str) -> dict:
         view = DEFAULT_VIEW
 
     tags: list = []
+    vocab: list = []
     if store.available():
         try:
+            # Two lists, two jobs. The filter bar shows what this kind of thing
+            # is actually tagged with; the editor's picker offers the whole
+            # vocabulary, including tags defined on /admin/tags that nothing
+            # carries yet — otherwise a tag created there could never be
+            # applied except by typing it from memory.
             tags = store.list_tags(resource_type)
+            vocab = store.list_tags()
         except Exception:
             logger.exception("Could not read tags for %s", resource_type)
     return {
@@ -1471,6 +1478,7 @@ def _listing_controls(request: Request, resource_type: str) -> dict:
         "views": VIEWS,
         "tag": (request.query_params.get("tag") or "").strip(),
         "all_tags": tags,
+        "vocab": vocab,
     }
 
 

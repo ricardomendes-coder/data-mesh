@@ -46,7 +46,11 @@
   {% if can_edit %}
   <details class="bi-tagedit">
     <summary title="{{ _('Edit tags') }}">+</summary>
-    <form class="bi-tagform" method="post" action="{{ action }}">
+    {# The field that posts is this one input, comma-separated, whether or not
+       tag-editor.js gets to it. The script turns it into chips and takes it
+       hidden; with the script gone you still get the plain text box. #}
+    <form class="bi-tagform" method="post" action="{{ action }}"
+          data-add-label="{{ _('add tag…') }}" data-remove-label="{{ _('Remove') }}">
       <input name="tags" value="{{ item_tags|map(attribute='name')|join(', ') }}"
              placeholder="{{ _('comma, separated, tags') }}" aria-label="{{ _('Tags') }}">
       <button class="bi-btn sm" type="submit">{{ _('Save') }}</button>
@@ -54,4 +58,14 @@
   </details>
   {% endif %}
 </div>
+{%- endmacro %}
+
+{# Called once per page, at the end. One datalist for every editor on it: a
+   listing can hold 580 cards, and a copy of the vocabulary in each is a
+   megabyte of markup to say the same four words. #}
+{% macro tag_vocab(vocab) -%}
+<datalist id="bi-tagvocab">
+  {% for g in vocab %}<option value="{{ g.name }}"></option>{% endfor %}
+</datalist>
+<script src="{{ url_for('static', path='tag-editor.js') }}"></script>
 {%- endmacro %}
