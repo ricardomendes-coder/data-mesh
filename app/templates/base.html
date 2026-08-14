@@ -338,13 +338,10 @@
        tag-editor.js runs this goes type=hidden and .bi-tagbox takes over. */
     .bi-tagform>input[name="tags"]{width:210px;height:28px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .4rem;font-size:.76rem;outline:none;}
     .bi-tagform>input[name="tags"]:focus{border-color:var(--orange);box-shadow:var(--ring);}
-    .bi-tagbox{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;width:210px;min-height:28px;padding:.2rem .25rem;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);cursor:text;}
-    .bi-tagbox:focus-within{border-color:var(--orange);box-shadow:var(--ring);}
-    .bi-tagchips{display:contents;}
-    .bi-tag-on{display:inline-flex;align-items:center;gap:.1rem;}
-    .bi-tagx{border:0;background:none;padding:0 0 0 .1rem;color:inherit;font-size:.82rem;line-height:1;opacity:.55;cursor:pointer;}
-    .bi-tagx:hover{opacity:1;}
-    .bi-taginput{flex:1 1 60px;min-width:60px;height:20px;border:0;background:none;padding:0 .15rem;font-size:.76rem;color:var(--text);outline:none;}
+    /* The picker: every tag an admin has defined, checked or not. */
+    .bi-tagmenu{display:flex;flex-direction:column;gap:.12rem;width:210px;max-height:220px;overflow-y:auto;}
+    .bi-tagpick{justify-content:flex-start;gap:.35rem;font-size:.76rem;}
+    .bi-tagmenu-empty{margin:0;padding:.3rem .1rem;color:var(--muted);font-size:.72rem;line-height:1.35;}
 
     /* preview cards are taller: they hold a real chart */
     .bi-cards-preview .bi-card{min-height:290px;}

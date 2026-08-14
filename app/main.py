@@ -2814,7 +2814,7 @@ def chart_set_tags(
             request, user, i18n.t("You don't have access to that chart."), access=access
         )
     if store.available():
-        store.set_tags(store.CHART, slug, tags.split(","), created_by=user)
+        store.set_tags(store.CHART, slug, tags.split(","))
     # Back to the listing they came from, so the view mode and any tag filter
     # they had applied survive the round trip.
     back = request.headers.get("referer") or str(request.url_for("charts_index"))
@@ -2834,7 +2834,7 @@ def dashboard_set_tags(
             request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
     if store.available():
-        store.set_tags(store.DASHBOARD, slug, tags.split(","), created_by=user)
+        store.set_tags(store.DASHBOARD, slug, tags.split(","))
     back = request.headers.get("referer") or str(request.url_for("dashboards_index"))
     return RedirectResponse(back, status_code=303)
 

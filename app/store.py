@@ -1762,39 +1762,47 @@ def keys_with_tag(resource_type: str, tag_slug: str) -> list[str]:
         ]
 
 
-def set_tags(resource_type: str, key: str, names: list[str], created_by: str = "") -> bool:
+def set_tags(resource_type: str, key: str, names: list[str]) -> bool:
     """Replace a resource's tags, creating any that are new.
 
-    Takes names rather than ids so the UI can be a free-text field: people think
-    in words, and making them create a tag before using it is friction for
-    something whose only job is to make things findable.
+    Attaches tags that already exist and ignores the rest. Creating one is a
+    separate, admin-only act (create_tag, /admin/tags): the vocabulary is
+    supposed to be a short list everyone shares, and a field that invents a tag
+    on submit is how you end up with "financeiro", "Financeiro " and
+    "finaceiro" meaning the same thing and finding different sets.
+
+    Still takes names rather than ids because that is what the form posts, and
+    matching is by slug — so case and spacing don't have to be exact.
     """
     if resource_type not in TAGGABLE:
         return False
-    cleaned: list[tuple[str, str]] = []
+    wanted: list[str] = []
     seen: set[str] = set()
     for raw in names:
-        name = " ".join(str(raw or "").split())[:60]
-        if not name:
-            continue
-        slug = slugify(name)
-        if not slug or slug in seen:
-            continue
-        seen.add(slug)
-        cleaned.append((name, slug))
+        slug = slugify(" ".join(str(raw or "").split())[:60])
+        if slug and slug not in seen:
+            seen.add(slug)
+            wanted.append(slug)
 
     with engine().begin() as conn:
         tag_ids = []
-        for name, slug in cleaned:
-            tag_id = conn.execute(text("SELECT id FROM tags WHERE slug = :s"), {"s": slug}).scalar()
-            if tag_id is None:
-                tag_id = conn.execute(
-                    text(
-                        "INSERT INTO tags (name, slug, created_by) VALUES (:n, :s, :c) RETURNING id"
-                    ),
-                    {"n": name, "s": slug, "c": created_by},
-                ).scalar()
-            tag_ids.append(tag_id)
+        if wanted:
+            found = {
+                r[0]: r[1]
+                for r in conn.execute(
+                    text("SELECT slug, id FROM tags WHERE slug = ANY(:s)"), {"s": wanted}
+                )
+            }
+            # Order follows what was submitted, not what the database returns.
+            tag_ids = [found[s] for s in wanted if s in found]
+            unknown = [s for s in wanted if s not in found]
+            if unknown:
+                logger.info(
+                    "Ignored unknown tag(s) %r on %s %r — tags are created in admin",
+                    unknown,
+                    resource_type,
+                    key,
+                )
 
         conn.execute(
             text("DELETE FROM resource_tags WHERE resource_type = :t AND resource_key = :k"),

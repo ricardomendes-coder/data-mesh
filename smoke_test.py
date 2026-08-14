@@ -703,7 +703,7 @@ def test_tags_and_listing_views():
     )
     store.tags_for = lambda rt, keys: {k: v for k, v in tagged.items() if k in keys}
     store.keys_with_tag = lambda rt, slug: ["vendas"] if slug == "financeiro" else []
-    store.set_tags = lambda rt, key, names, created_by="": (
+    store.set_tags = lambda rt, key, names: (
         calls.__setitem__("set", (rt, key, [n.strip() for n in names if n.strip()])) or True
     )
     store.get_chart = lambda s: {"vendas": chart_a, "custos": chart_b}.get(s)
@@ -752,17 +752,17 @@ def test_tags_and_listing_views():
             # …and the editor has to *say* so. It was a single pre-filled text
             # box: once an item had one tag the placeholder was hidden and
             # nothing hinted a second was allowed, so in practice nothing ever
-            # carried two. The chip editor and its picker are what fix that.
+            # carried two. Picking from a list is what fixes that.
             body = client.get("/charts?view=box").text
-            assert "tag-editor.js" in body, "the chip editor is not loaded"
+            assert "tag-editor.js" in body, "the tag picker is not loaded"
             assert 'id="bi-tagvocab"' in body, "no vocabulary for the picker"
-            assert 'value="Reservado"' in body, (
-                "a tag defined on /admin/tags but unused is missing from the picker — "
-                "it could then only be applied by typing it from memory"
+            assert '"Reservado"' in body, (
+                "a tag defined on /admin/tags but carried by nothing is missing from "
+                "the picker — there would then be no way to apply it at all"
             )
             assert body.count('id="bi-tagvocab"') == 1, (
-                "one datalist per card: on a 580-chart listing that is a megabyte "
-                "of markup repeating the same few words"
+                "one copy of the vocabulary per card: on a 580-chart listing that is "
+                "a megabyte of markup repeating the same few words"
             )
             # The bar is still per-type, so an unused tag isn't offered as a
             # filter that would return nothing.
@@ -1582,6 +1582,14 @@ def test_tag_management():
         "set_tags sweeps unused tags again — that deletes tags created on "
         "/admin/tags before anyone gets to use them. Deletion is explicit now, "
         "via delete_tag()."
+    )
+    # And it must not create, either. Tagging is open to anyone who can build;
+    # defining the vocabulary is not. If applying a tag can invent one, the
+    # admin screen is decoration and the list drifts into near-duplicates that
+    # each find a different subset.
+    assert "INSERT INTO tags" not in inspect.getsource(store.set_tags), (
+        "set_tags creates tags again — tagging something would then be a way "
+        "around /admin/tags for anyone with the builder feature."
     )
     print("tag management: OK")
 

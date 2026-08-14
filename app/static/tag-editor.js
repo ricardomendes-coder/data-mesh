@@ -1,118 +1,88 @@
-/* Turns the tag field into chips you can add to and take from.
+/* Tagging is picking from a list, not typing.
  *
- * The thing that posts is still the server-rendered <input name="tags">, comma
- * separated, exactly as before — this script hides it and keeps it in sync.
- * So the editor degrades to the plain text box rather than to nothing, and the
- * route on the other side never learns that any of this happened.
+ * Tags are created in Administration → Tags and nowhere else, so this editor
+ * only ever offers words that already exist. A field that invents a tag on
+ * submit is how a vocabulary turns into "financeiro", "Financeiro " and
+ * "finaceiro" meaning the same thing and finding three different sets.
  *
- * Multiple tags always worked; the single pre-filled text box just never said
- * so. Once an item had one tag the placeholder was gone, and nothing suggested
- * a second was allowed.
+ * The form still posts the server-rendered <input name="tags">, comma
+ * separated — the route and the store never learn this happened. The list is
+ * built here, from one copy of the vocabulary shared by the whole page,
+ * because a listing can hold 580 cards and each carrying its own copy of the
+ * options is a megabyte of markup saying the same few words.
  */
 (function () {
   "use strict";
 
-  function clean(raw) {
-    return String(raw || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  var node = document.getElementById("bi-tagvocab");
+  if (!node) return;
+  var vocab;
+  try {
+    vocab = JSON.parse(node.textContent) || [];
+  } catch (e) {
+    return;
   }
 
-  function parse(value) {
-    var out = [];
-    var seen = {};
-    String(value || "").split(",").forEach(function (raw) {
-      var name = clean(raw);
-      var key = name.toLowerCase();
-      if (name && !seen[key]) {
-        seen[key] = 1;
-        out.push(name);
-      }
-    });
-    return out;
+  function key(name) {
+    return String(name || "").trim().toLowerCase();
   }
 
   function enhance(form) {
     var field = form.querySelector('input[name="tags"]');
-    if (!field || field.getAttribute("data-chips")) return;
-    field.setAttribute("data-chips", "1");
+    if (!field || field.getAttribute("data-picker")) return;
+    field.setAttribute("data-picker", "1");
 
-    var names = parse(field.value);
-    var removeLabel = form.getAttribute("data-remove-label") || "";
+    // What the item carries now, kept as the vocabulary's own spelling so a
+    // save can't quietly rename anything.
+    var chosen = {};
+    String(field.value || "")
+      .split(",")
+      .forEach(function (raw) {
+        if (key(raw)) chosen[key(raw)] = true;
+      });
 
-    var box = document.createElement("div");
-    box.className = "bi-tagbox";
-    var chips = document.createElement("span");
-    chips.className = "bi-tagchips";
-    var entry = document.createElement("input");
-    entry.type = "text";
-    entry.className = "bi-taginput";
-    entry.setAttribute("list", "bi-tagvocab");
-    entry.setAttribute("autocomplete", "off");
-    entry.placeholder = form.getAttribute("data-add-label") || "";
-    entry.setAttribute("aria-label", entry.placeholder);
-
-    box.appendChild(chips);
-    box.appendChild(entry);
     field.type = "hidden";
-    field.parentNode.insertBefore(box, field);
+    var menu = document.createElement("div");
+    menu.className = "bi-tagmenu";
 
-    function draw() {
+    if (!vocab.length) {
+      var empty = document.createElement("p");
+      empty.className = "bi-tagmenu-empty";
+      empty.textContent = form.getAttribute("data-empty-label") || "";
+      menu.appendChild(empty);
+    }
+
+    function sync() {
+      var names = vocab.filter(function (name) {
+        return chosen[key(name)];
+      });
       field.value = names.join(", ");
-      chips.innerHTML = "";
-      names.forEach(function (name, i) {
-        var chip = document.createElement("span");
-        chip.className = "bi-tag bi-tag-on";
-        chip.appendChild(document.createTextNode(name));
-        var x = document.createElement("button");
-        x.type = "button";
-        x.className = "bi-tagx";
-        x.title = removeLabel;
-        x.textContent = "×";
-        x.addEventListener("click", function () {
-          names.splice(i, 1);
-          draw();
-          entry.focus();
-        });
-        chip.appendChild(x);
-        chips.appendChild(chip);
-      });
     }
 
-    function add(raw) {
-      var name = clean(raw);
-      entry.value = "";
-      if (!name) return;
-      var key = name.toLowerCase();
-      var already = names.some(function (n) {
-        return n.toLowerCase() === key;
+    vocab.forEach(function (name) {
+      var label = document.createElement("label");
+      label.className = "bi-chip-check bi-tagpick";
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!chosen[key(name)];
+      var text = document.createElement("span");
+      text.textContent = name;
+      box.addEventListener("change", function () {
+        if (box.checked) chosen[key(name)] = true;
+        else delete chosen[key(name)];
+        sync();
       });
-      // Same word twice is one tag — slugify would merge them anyway, so
-      // showing two identical chips would just be a lie about what got saved.
-      if (!already) names.push(name);
-      draw();
-    }
-
-    entry.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === ",") {
-        // Enter in a form means submit. Here it means "that's one tag" — the
-        // Save button is how you finish.
-        e.preventDefault();
-        add(entry.value);
-      } else if (e.key === "Backspace" && !entry.value && names.length) {
-        names.pop();
-        draw();
-      }
-    });
-    // Picking from the datalist doesn't go through keydown.
-    entry.addEventListener("change", function () {
-      add(entry.value);
-    });
-    // A half-typed word when Save is pressed is a tag the person meant to add.
-    // Dropping it silently is how an editor loses someone's trust.
-    form.addEventListener("submit", function () {
-      add(entry.value);
+      label.appendChild(box);
+      label.appendChild(text);
+      menu.appendChild(label);
     });
 
-    draw();
+    field.parentNode.insertBefore(menu, field);
+    // A tag the item carries that is no longer in the vocabulary would have no
+    // checkbox, and since this posts the full set, saving would silently drop
+    // it. Rebuilding from the boxes on load makes that visible instead: what
+    // you see is exactly what a save will keep.
+    sync();
   }
 
   Array.prototype.forEach.call(document.querySelectorAll("form.bi-tagform"), enhance);

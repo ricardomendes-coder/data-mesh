@@ -104,7 +104,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "Tags": "Tags",
         "Edit tags": "Editar tags",
         "comma, separated, tags": "tags, separadas, por vírgula",
-        "add tag…": "adicionar tag…",
+        "No tags defined yet.": (
+            "Nenhuma tag definida ainda. Um administrador cria em Administração → Tags."
+        ),
         "Nothing tagged {tag}.": "Nada com a tag {tag}.",
         # ── managing the tag vocabulary ──
         "Tag": "Tag",

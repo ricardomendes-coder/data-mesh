@@ -47,10 +47,11 @@
   <details class="bi-tagedit">
     <summary title="{{ _('Edit tags') }}">+</summary>
     {# The field that posts is this one input, comma-separated, whether or not
-       tag-editor.js gets to it. The script turns it into chips and takes it
-       hidden; with the script gone you still get the plain text box. #}
+       tag-editor.js gets to it — it replaces the box with the picker and takes
+       this hidden. Typing a tag that doesn't exist creates nothing either way:
+       the store only attaches tags an admin already defined. #}
     <form class="bi-tagform" method="post" action="{{ action }}"
-          data-add-label="{{ _('add tag…') }}" data-remove-label="{{ _('Remove') }}">
+          data-empty-label="{{ _('No tags defined yet.') }}">
       <input name="tags" value="{{ item_tags|map(attribute='name')|join(', ') }}"
              placeholder="{{ _('comma, separated, tags') }}" aria-label="{{ _('Tags') }}">
       <button class="bi-btn sm" type="submit">{{ _('Save') }}</button>
@@ -64,8 +65,6 @@
    listing can hold 580 cards, and a copy of the vocabulary in each is a
    megabyte of markup to say the same four words. #}
 {% macro tag_vocab(vocab) -%}
-<datalist id="bi-tagvocab">
-  {% for g in vocab %}<option value="{{ g.name }}"></option>{% endfor %}
-</datalist>
+<script type="application/json" id="bi-tagvocab">{{ vocab|map(attribute='name')|list|tojson }}</script>
 <script src="{{ url_for('static', path='tag-editor.js') }}"></script>
 {%- endmacro %}
