@@ -419,6 +419,19 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "0014_tile_title_override",
+        """
+        -- A dashboard can rename a chart for its own purposes. Superset calls
+        -- it sliceNameOverride, and 214 of the 1112 imported tiles carry one —
+        -- so without this the tile shows a name nobody put there.
+        --
+        -- On the tile, not the chart: the same chart can appear on two
+        -- dashboards under two names, which is exactly why the override exists.
+        ALTER TABLE dashboard_items
+            ADD COLUMN IF NOT EXISTS title_override text NOT NULL DEFAULT '';
+        """,
+    ),
 ]
 
 
@@ -699,8 +712,13 @@ DEFAULT_WIDTH = "half"
 # cleanly into halves, thirds and quarters — and because Superset uses twelve,
 # so an imported layout maps across without rescaling.
 GRID_COLUMNS = 12
-ROW_HEIGHT_PX = 56  # one grid_h unit
-DEFAULT_TILE = (6, 5)  # w, h — half width, a readable chart height
+# Superset's own unit, so an imported height needs no conversion: meta.height
+# lands in grid_h as it stands. It used to be 56px with the Superset value
+# divided by seven, which distorted 75 of the 88 distinct heights in the V360
+# instance — a dashboard that merely resembled the original.
+ROW_HEIGHT_PX = 8  # one grid_h unit
+GRID_GUTTER_PX = 16  # between columns, and the gap stacked tiles leave
+DEFAULT_TILE = (6, 50)  # w, h — half width, a readable chart height
 
 
 @dataclass
@@ -719,17 +737,30 @@ class DashboardItem:
     position: int
     chart: Chart | None = None
     width: str = DEFAULT_WIDTH
-    kind: str = "chart"  # chart | text
+    kind: str = "chart"  # chart | text | divider
     content: str = ""
     section_id: int | None = None
     grid_x: int | None = None
     grid_y: int | None = None
     grid_w: int | None = None
     grid_h: int | None = None
+    # A dashboard may rename a chart for its own purposes — Superset calls it
+    # sliceNameOverride and 214 tiles in the V360 instance use one. Empty means
+    # "show the chart's own name".
+    title_override: str = ""
 
     @property
     def is_text(self) -> bool:
         return self.kind == "text"
+
+    @property
+    def is_divider(self) -> bool:
+        return self.kind == "divider"
+
+    @property
+    def display_title(self) -> str:
+        """What this tile is called *here*."""
+        return self.title_override or (self.chart.title if self.chart else "")
 
     @property
     def placed(self) -> bool:
@@ -744,7 +775,9 @@ class DashboardItem:
 
     @property
     def height_px(self) -> int:
-        units = self.grid_h or (2 if self.is_text else DEFAULT_TILE[1])
+        if self.is_divider:
+            return 2 * ROW_HEIGHT_PX
+        units = self.grid_h or (14 if self.is_text else DEFAULT_TILE[1])
         return max(1, units) * ROW_HEIGHT_PX
 
 
@@ -834,7 +867,7 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
             text(
                 """
                 SELECT i.id, i.position, i.width, i.kind, i.content, i.section_id,
-                       i.grid_x, i.grid_y, i.grid_w, i.grid_h,
+                       i.grid_x, i.grid_y, i.grid_w, i.grid_h, i.title_override,
                        c.id AS c_id, c.slug, c.title, c.description, c.source_db,
                        c.sql, c.chart_type, c.x_column, c.y_columns, c.created_by,
                        c.created_at, c.updated_at
@@ -890,6 +923,7 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
                 grid_y=m["grid_y"],
                 grid_w=m["grid_w"],
                 grid_h=m["grid_h"],
+                title_override=m["title_override"] or "",
                 chart=chart,
             )
         )
@@ -998,14 +1032,20 @@ def delete_section(dashboard_slug: str, section_id: int) -> bool:
 
 
 def add_text_item(
-    dashboard_slug: str, content: str, section_id: int | None = None, width: str = "full"
+    dashboard_slug: str,
+    content: str,
+    section_id: int | None = None,
+    width: str = "full",
+    kind: str = "text",
 ) -> int | None:
-    """Append a block of text — a heading or a note between charts.
+    """Append a chartless tile — a heading, a note, or a rule between charts.
 
     Returns the new tile's id, so an importer can place it on the grid.
     """
     if width not in WIDTHS:
         width = "full"
+    if kind not in ("text", "divider"):
+        kind = "text"
     with engine().begin() as conn:
         dash_id = conn.execute(
             text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
@@ -1023,9 +1063,9 @@ def add_text_item(
             text(
                 "INSERT INTO dashboard_items "
                 "(dashboard_id, chart_id, position, width, kind, content, section_id) "
-                "VALUES (:d, NULL, :p, :w, 'text', :c, :s) RETURNING id"
+                "VALUES (:d, NULL, :p, :w, :k, :c, :s) RETURNING id"
             ),
-            {"d": dash_id, "p": position, "w": width, "c": content, "s": section_id},
+            {"d": dash_id, "p": position, "w": width, "c": content, "s": section_id, "k": kind},
         ).scalar()
         _touch(conn, dash_id)
         return new_id
@@ -1115,7 +1155,11 @@ def set_item_section(dashboard_slug: str, item_id: int, section_id: int | None) 
 
 
 def add_item(
-    dashboard_slug: str, chart_slug: str, width: str = DEFAULT_WIDTH, section_id: int | None = None
+    dashboard_slug: str,
+    chart_slug: str,
+    width: str = DEFAULT_WIDTH,
+    section_id: int | None = None,
+    title_override: str = "",
 ) -> int | None:
     """Append a chart to a dashboard. None if either no longer exists.
 
@@ -1149,10 +1193,17 @@ def add_item(
         new_id = conn.execute(
             text(
                 "INSERT INTO dashboard_items "
-                "(dashboard_id, chart_id, position, width, kind, section_id) "
-                "VALUES (:d, :c, :p, :w, 'chart', :s) RETURNING id"
+                "(dashboard_id, chart_id, position, width, kind, section_id, title_override) "
+                "VALUES (:d, :c, :p, :w, 'chart', :s, :t) RETURNING id"
             ),
-            {"d": dash_id, "c": chart_id, "p": next_pos, "w": width, "s": section_id},
+            {
+                "d": dash_id,
+                "c": chart_id,
+                "p": next_pos,
+                "w": width,
+                "s": section_id,
+                "t": title_override,
+            },
         ).scalar()
         _touch(conn, dash_id)
     return new_id

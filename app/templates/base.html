@@ -373,7 +373,12 @@
     /* ── dashboard grid ── */
     /* 12 columns, explicit rows. auto-rows rather than a fixed template so a
        tile dropped at row 40 doesn't force 39 empty rows to be painted. */
-    .bi-tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:56px;gap:14px;align-items:stretch;}
+    /* Superset's grid, unit for unit: 8px rows, 16px between columns, and the
+       gap between stacked tiles carried in the coordinates themselves (a tile
+       ends two rows short of the next). A row-gap here would multiply — a tile
+       50 rows tall would gain 49 gaps — so vertical spacing lives in the y. */
+    .bi-tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:8px;column-gap:16px;row-gap:0;align-items:stretch;}
+    .bi-tile-divider{grid-column:1/-1;align-self:center;height:1px;background:var(--border);border:0;box-shadow:none;}
     @media(max-width:900px){
       /* One column on a phone: a 12-col drag layout is meaningless there, and
          honouring grid-row would leave holes. */
@@ -418,6 +423,20 @@
 
     /* ── dashboard filter bar ── */
     .bi-filterbar{display:flex;align-items:flex-end;gap:.7rem;flex-wrap:wrap;padding:.7rem .85rem;margin-bottom:.9rem;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--sh-1);}
+    /* Filters as a drawer over the right edge. It overlays rather than pushes:
+       tiles sit at Superset's own column widths, and narrowing the canvas to
+       make room would distort every imported dashboard. */
+    .bi-filterdrawer{display:flex;justify-content:flex-end;margin-bottom:.6rem;}
+    .bi-filterdrawer>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .6rem;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--surface);color:var(--body);font-size:.76rem;font-weight:600;}
+    .bi-filterdrawer>summary::-webkit-details-marker{display:none;}
+    .bi-filterdrawer>summary:hover{border-color:var(--orange);color:var(--orange);}
+    .bi-filterdrawer[open]>summary{border-color:var(--orange);color:var(--orange);}
+    .bi-filterpanel{position:fixed;top:0;right:0;z-index:60;display:flex;flex-direction:column;align-items:stretch;gap:.85rem;width:296px;max-width:88vw;height:100vh;overflow-y:auto;padding:1.1rem 1rem;border-left:1px solid var(--border-strong);background:var(--surface);box-shadow:var(--sh-3);}
+    .bi-filterpanel .bi-filter{display:flex;flex-direction:column;gap:.25rem;}
+    .bi-filterpanel .bi-filter select,.bi-filterpanel .bi-filter input{width:100%;}
+    .bi-filterpanel .bi-daterange{display:flex;gap:.3rem;}
+    .bi-filterpanel .bi-filter-actions{position:sticky;bottom:0;display:flex;gap:.4rem;padding-top:.6rem;background:var(--surface);}
+    @media (max-width:720px){.bi-filterpanel{width:100%;max-width:100%;}}
     .bi-filter{display:flex;flex-direction:column;gap:.22rem;}
     .bi-filter label{font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.01em;}
     .bi-filter select,.bi-filter input{height:30px;min-width:150px;max-width:230px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .4rem;font-size:.78rem;color:var(--title);background:var(--surface);outline:none;}

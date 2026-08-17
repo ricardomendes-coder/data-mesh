@@ -7,16 +7,25 @@
 
 {% macro geometry(item) -%}
 {%- if item.placed -%}
-grid-column: {{ item.grid_x + 1 }} / span {{ item.span }}; grid-row: {{ item.grid_y + 1 }} / span {{ item.grid_h or 5 }};
+grid-column: {{ item.grid_x + 1 }} / span {{ item.span }}; grid-row: {{ item.grid_y + 1 }} / span {{ item.grid_h or 50 }};
 {%- else -%}
-grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.kind == 'text' else 5) }};
+grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (14 if item.kind == 'text' else 50) }};
 {%- endif -%}
 {%- endmacro %}
 
 {% macro tile(t, canvas_id, editing=false, widths=(), dashboard=None) -%}
 {% set item = t.item %}
 
-{% if item.kind == 'text' %}
+{% if item.kind == 'divider' %}
+{# A rule Superset drew between blocks. It carries no content, so it is a line
+   and nothing else — but it is still a tile, so it can be moved like one. #}
+<hr class="bi-tile bi-tile-divider{{ ' bi-draggable' if editing else '' }}"
+    style="{{ geometry(item) }}" data-item="{{ item.id }}"
+    data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
+    data-w="{{ item.span }}" data-h="{{ item.grid_h or 2 }}"
+    data-section="{{ item.section_id or '' }}">
+
+{% elif item.kind == 'text' %}
 <div class="bi-tile bi-tile-text{{ ' bi-draggable' if editing else '' }}"
      style="{{ geometry(item) }}" data-item="{{ item.id }}"
      data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
@@ -44,7 +53,9 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (2 if item.k
      data-section="{{ item.section_id or '' }}">
   <div class="bi-tile-hd">
     {% if editing %}<span class="bi-drag" title="{{ _('Drag to move') }}">⠿</span>{% endif %}
-    <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.id) }}">{{ t.chart.title }}</a>
+    {# The name this dashboard gives the chart, which is not always the chart's
+       own — Superset's sliceNameOverride, on 214 of the imported tiles. #}
+    <a class="bi-tile-tt" href="{{ url_for('chart_detail', slug=t.chart.id) }}">{{ item.display_title or t.chart.title }}</a>
 
     {% if editing %}
     <div class="bi-tile-ctl">

@@ -1594,6 +1594,100 @@ def test_tag_management():
     print("tag management: OK")
 
 
+def test_imported_layout_mirrors_superset():
+    """An imported dashboard must be the original, not a tidied-up version.
+
+    The translator used to round every height into a coarser row, squeeze out
+    blank bands and flatten text blocks to two rows — each defensible on its
+    own, and together they moved everything. It also never stacked a COLUMN,
+    dropped dividers, and read a chart's own name where the dashboard had
+    renamed it.
+    """
+    import json
+
+    from tools.superset_migrate import translate as T
+
+    def node(kind, children=(), **meta):
+        return {"type": kind, "children": list(children), "meta": meta}
+
+    pos = {
+        "ROOT_ID": node("ROOT", ["GRID_ID"]),
+        "GRID_ID": node("GRID", ["HEAD", "ROW1", "DIV", "TABS1"]),
+        "HEAD": node("HEADER", text="Operação", headerSize="MEDIUM_HEADER"),
+        "ROW1": node("ROW", ["C1", "COL1"]),
+        "C1": node("CHART", chartId=11, sliceName="Vendas", width=4, height=30),
+        "COL1": node("COLUMN", ["C2", "MD1"], width=8),
+        "C2": node(
+            "CHART", chartId=12, sliceName="Custos", sliceNameOverride="Custos 2026",
+            width=8, height=20,
+        ),
+        "MD1": node("MARKDOWN", code="**nota**", width=8, height=10),
+        "DIV": node("DIVIDER"),
+        "TABS1": node("TABS", ["TAB_A", "TAB_B"]),
+        "TAB_A": node("TAB", ["ROW_A"], text="Resumo"),
+        "ROW_A": node("ROW", ["C3"]),
+        "C3": node("CHART", chartId=13, sliceName="SLA", width=12, height=40),
+        "TAB_B": node("TAB", ["ROW_B"], text="Detalhe"),
+        "ROW_B": node("ROW", ["C4"]),
+        "C4": node("CHART", chartId=14, sliceName="Chamados", width=6, height=40),
+    }
+    tiles, tabs = T.layout_of(json.dumps(pos))
+    by_id = {t.node_id: t for t in tiles}
+
+    assert tabs == ["Resumo", "Detalhe"], tabs
+    assert len(tiles) == 7, [t.node_id for t in tiles]
+
+    # Heights arrive as Superset stores them. 30 is not 30/7 rounded to 4.
+    assert by_id["C1"].h == 30, by_id["C1"]
+    assert by_id["MD1"].h == 10, "a text block was flattened again"
+
+    # A header spans its parent; it carries no width of its own.
+    assert (by_id["HEAD"].x, by_id["HEAD"].w) == (0, 12), by_id["HEAD"]
+    assert by_id["HEAD"].content.startswith("## "), by_id["HEAD"].content
+
+    # Side by side in the row: the column starts where the chart ends.
+    assert by_id["C1"].x == 0 and by_id["COL1" if "COL1" in by_id else "C2"].x == 4
+    # …and the column stacks its own children instead of laying them across.
+    assert by_id["C2"].x == by_id["MD1"].x == 4, "COLUMN laid out sideways"
+    assert by_id["MD1"].y > by_id["C2"].y, "COLUMN did not stack"
+
+    # The rule Superset drew is a tile, not a dropped node.
+    assert by_id["DIV"].kind == "divider", by_id["DIV"]
+
+    # The name the dashboard gives a chart wins over the chart's own.
+    assert by_id["C2"].title == "Custos 2026", by_id["C2"].title
+    assert by_id["C1"].title == "Vendas"
+
+    # Each tab is its own pane, so both start at the top rather than the
+    # second one being pushed below the first.
+    assert by_id["C3"].tab == "Resumo" and by_id["C4"].tab == "Detalhe"
+    assert by_id["C3"].y == by_id["C4"].y == 0, "tabs share one vertical cursor"
+
+    # Nothing may sit on top of anything else in the same pane.
+    for i, a in enumerate(tiles):
+        for b in tiles[i + 1:]:
+            if a.tab != b.tab:
+                continue
+            assert not (
+                a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+            ), f"{a.node_id} overlaps {b.node_id}"
+
+    # Nested tabs keep their path, so two tabs named the same stay apart.
+    nested = {
+        "ROOT_ID": node("ROOT", ["GRID_ID"]),
+        "GRID_ID": node("GRID", ["T1"]),
+        "T1": node("TABS", ["TA"]),
+        "TA": node("TAB", ["T2"], text="Norte"),
+        "T2": node("TABS", ["TB"]),
+        "TB": node("TAB", ["R"], text="Resumo"),
+        "R": node("ROW", ["C"]),
+        "C": node("CHART", chartId=21, sliceName="x", width=6, height=20),
+    }
+    _tiles, nested_tabs = T.layout_of(json.dumps(nested))
+    assert "Norte / Resumo" in nested_tabs, nested_tabs
+    print("imported layout mirrors superset: OK")
+
+
 def test_every_resource_type_is_grantable():
     """Each permission type must offer checkboxes on the roles screen.
 
@@ -2497,6 +2591,7 @@ if __name__ == "__main__":
     test_folders_are_organisation_only()
     test_admin_panel_and_gate()
     test_tag_management()
+    test_imported_layout_mirrors_superset()
     test_every_resource_type_is_grantable()
     test_user_detail_page()
     test_nav_hides_what_you_cannot_reach()

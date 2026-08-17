@@ -19,10 +19,25 @@
 <div class="bi-ds-desc">{{ dashboard.description|inline_code }}</div>
 {% endif %}
 
-{# The bar is a GET form: submitting puts the choices in the URL, so a filtered
-   dashboard is a link somebody can send. #}
+{# Filters live in a drawer on the right rather than a bar across the top.
+   The tiles are placed at Superset's own column widths, so anything that
+   permanently narrows the canvas would distort every dashboard on the way in;
+   a drawer overlays instead of pushing, and the grid keeps its full width.
+
+   A <details>, so it opens and closes with no JavaScript at all. Still a GET
+   form: the choices end up in the URL, so a filtered dashboard is a link
+   somebody can send. #}
 {% if filters %}
-<form class="bi-filterbar" method="get" action="{{ url_for('dashboard_show', slug=dashboard.id) }}">
+{# Closed until asked for. It overlays the tiles, so opening it by default
+   would hide the right-hand third of every dashboard on arrival — which is
+   what it did. The count on the button is how you know filters are on. #}
+{% set active = filters|selectattr('values')|list|length %}
+<details class="bi-filterdrawer">
+  <summary title="{{ _('Filters') }}">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M4.5 8h7M6.5 12h3"/></svg>
+    {{ _('Filters') }}{% if active %} <span class="bi-tagn">{{ active }}</span>{% endif %}
+  </summary>
+<form class="bi-filterpanel" method="get" action="{{ url_for('dashboard_show', slug=dashboard.id) }}">
   {% for f in filters %}
   <div class="bi-filter">
     <label for="flt-{{ f.key }}">{{ f.label }}</label>
@@ -50,6 +65,7 @@
     <a class="bi-btn sm ghost" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">{{ _('Clear') }}</a>
   </div>
 </form>
+</details>
 {% endif %}
 
 {% if tiles %}

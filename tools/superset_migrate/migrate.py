@@ -331,10 +331,20 @@ def main():
     if not store.available():
         sys.exit("report_hub is not reachable — check APP_DB_* and the tunnel")
 
+    # This tool writes columns the app's migrations create, and it can run
+    # against a database the app has never booted against — or one a release
+    # behind. Applying them here means the import can't half-succeed on a
+    # schema that predates it, which is exactly how a run once left 579 charts
+    # in place and no dashboards.
+    store.init_schema()
+
     columns_of = dataset_columns()
 
     # ── charts ──
     slug_of: dict[int, str] = {}
+    # The chart's own name, so a dashboard's sliceNameOverride is only stored
+    # when it actually says something different.
+    charts_by_id: dict[int, str] = {}
     for n, c in enumerate(charts, 1):
         slug = store.unique_slug(c["name"] or f"chart-{c['id']}", exists=store.get_chart)
         saved = store.save_chart(
@@ -351,6 +361,7 @@ def main():
             )
         )
         slug_of[c["id"]] = saved.slug
+        charts_by_id[c["id"]] = saved.title
         if n % 50 == 0:
             print(f"  ...{n}/{len(charts)} charts", flush=True)
     print(f"created {len(slug_of)} charts")
@@ -374,10 +385,17 @@ def main():
         )
         made += 1
 
-        tab_of_chart, tab_order = T.tabs_of(position_json)
-        # Where Superset drew each thing, on the same 12-column grid.
-        boxes = T.geometry(position_json)
+        # The layout tree *is* the dashboard: every tile, its tab and its box
+        # come from one read of it. Driving this from the dashboard_slices list
+        # instead meant a chart's position and its tab were looked up in two
+        # separate walks that had to agree, and blocks Superset drew but that
+        # list didn't mention — headings, rules — were invisible here.
+        layout, tab_order = T.layout_of(position_json)
         placements: list[dict] = []
+        # The slices actually drawn here, in reading order. This used to come
+        # from dashboard_slices, which can list a chart the layout doesn't
+        # draw — a filter would then claim a scope wider than the dashboard.
+        mine = [t.chart_id for t in layout if t.kind == "chart" and t.chart_id in slug_of]
 
         section_id: dict[str, int] = {}
         for tab_title in tab_order:
@@ -386,47 +404,45 @@ def main():
                 section_id[tab_title] = new_id
                 tabs += 1
 
-        # Headings and notes, so an imported dashboard keeps its structure.
-        for tab_title, body, node_id in T.markdown_blocks(position_json):
-            item_id = store.add_text_item(slug, body[:2000], section_id=section_id.get(tab_title))
+        for tile in layout:
+            sid = section_id.get(tile.tab) if tile.tab else None
+            if tile.kind == "chart":
+                chart_slug = slug_of.get(tile.chart_id)
+                if not chart_slug:
+                    continue  # the chart itself didn't migrate; skip its tile
+                item_id = store.add_item(
+                    slug,
+                    chart_slug,
+                    width="half",
+                    section_id=sid,
+                    # Only when it differs, so an unchanged name keeps tracking
+                    # the chart if someone renames it later.
+                    title_override=(
+                        tile.title
+                        if tile.title and tile.title != charts_by_id.get(tile.chart_id, "")
+                        else ""
+                    ),
+                )
+                if item_id:
+                    tiles += 1
+            else:
+                item_id = store.add_text_item(
+                    slug, tile.content[:2000], section_id=sid, kind=tile.kind
+                )
+                if item_id:
+                    texts += 1
             if not item_id:
                 continue
-            texts += 1
-            box = boxes.get(f"node:{node_id}")
-            if box:
-                placements.append(
-                    {
-                        "id": item_id,
-                        "x": box[0],
-                        "y": box[1],
-                        "w": box[2],
-                        "h": box[3],
-                        "section_id": section_id.get(tab_title),
-                    }
-                )
-
-        mine = [s for s in links.get(dash_id, []) if s in slug_of]
-        width = "half" if len(mine) > 1 else "full"
-        for slice_id in mine:
-            tab_title = tab_of_chart.get(slice_id)
-            item_id = store.add_item(
-                slug, slug_of[slice_id], width=width, section_id=section_id.get(tab_title)
+            placements.append(
+                {
+                    "id": item_id,
+                    "x": tile.x,
+                    "y": tile.y,
+                    "w": tile.w,
+                    "h": tile.h,
+                    "section_id": sid,
+                }
             )
-            if not item_id:
-                continue
-            tiles += 1
-            box = boxes.get(f"chart:{slice_id}")
-            if box:
-                placements.append(
-                    {
-                        "id": item_id,
-                        "x": box[0],
-                        "y": box[1],
-                        "w": box[2],
-                        "h": box[3],
-                        "section_id": section_id.get(tab_title),
-                    }
-                )
 
         # One write for the whole layout, so the dashboard opens looking like
         # the Superset one rather than as a generic two-column flow.

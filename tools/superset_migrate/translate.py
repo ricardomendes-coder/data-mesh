@@ -13,6 +13,7 @@ filter has to go *inside* the aggregation, and only the generator knows where.
 
 import json
 import re
+from dataclasses import dataclass
 
 FILTER_TOKEN = "{{ filters }}"
 
@@ -537,6 +538,229 @@ def _compact(boxes: dict) -> dict:
             if blank_run == 1:  # keep one row of breathing space, drop the rest
                 cursor += 1
     return {key: (x, mapping.get(y, y), w, h) for key, (x, y, w, h) in boxes.items()}
+
+
+# ── the layout, read once ──────────────────────────────────────────────────
+#
+# Superset's own grid constants. Mirroring the numbers is the entire point:
+# meta.width is in columns of twelve, meta.height in units of GRID_BASE_UNIT,
+# and stacked blocks are separated by one gutter. Keeping those units instead
+# of rounding them into a coarser row is what makes an imported dashboard the
+# same dashboard rather than one that merely resembles it.
+
+GRID_COLUMNS = 12
+GRID_BASE_UNIT = 8  # px per height unit — the renderer uses the same number
+GRID_GUTTER_UNITS = 2  # the 16px between stacked blocks, in height units
+
+DEFAULT_CHART_HEIGHT = 50
+DEFAULT_WIDTH = 4
+# Headers and dividers carry no height of their own; Superset gives them a
+# fixed band that depends only on the heading size.
+HEADER_UNITS = {"SMALL_HEADER": 4, "MEDIUM_HEADER": 5, "LARGE_HEADER": 6}
+HEADER_LEVEL = {"SMALL_HEADER": 3, "MEDIUM_HEADER": 2, "LARGE_HEADER": 1}
+DEFAULT_HEADER_UNITS = 5
+DIVIDER_UNITS = 2
+
+CONTAINERS = ("ROOT", "GRID", "TABS", "TAB", "ROW", "COLUMN")
+
+
+@dataclass
+class Tile:
+    """One block of a dashboard, where Superset draws it."""
+
+    kind: str  # chart | text | divider
+    node_id: str
+    tab: str | None
+    x: int
+    y: int
+    w: int
+    h: int
+    chart_id: int | None = None
+    title: str = ""
+    content: str = ""
+
+
+def layout_of(position_json: str) -> tuple[list[Tile], list[str]]:
+    """Every block Superset draws, at Superset's coordinates. One traversal.
+
+    geometry(), tabs_of() and markdown_blocks() each walked this same tree and
+    had to agree with one another about what counted as a node and which tab it
+    sat under. They didn't: a node reachable by two paths was emitted twice, and
+    110 duplicate text blocks had to be deleted by hand afterwards. The tree is
+    the dashboard, so it gets read once and answers every question.
+
+    Returns the tiles in reading order and the tab names in the order Superset
+    shows them. Nested tabs come back as "Outer / Inner" — Report Hub's sections
+    are flat, and a path keeps two tabs that share a name apart.
+    """
+    try:
+        nodes = json.loads(position_json or "{}")
+    except Exception:
+        return [], []
+    if not isinstance(nodes, dict):
+        return [], []
+
+    tiles: list[Tile] = []
+    tab_order: list[str] = []
+    seen: set[str] = set()
+
+    def width_of(node: dict, available: int) -> int:
+        """How many columns this child takes of the space it was handed."""
+        # A header or a divider has no width of its own: it spans its parent.
+        if node.get("type") in ("HEADER", "DIVIDER"):
+            return available
+        try:
+            want = int((node.get("meta") or {}).get("width") or DEFAULT_WIDTH)
+        except (TypeError, ValueError):
+            want = DEFAULT_WIDTH
+        return max(1, min(available, want))
+
+    def height_of(kind: str, meta: dict) -> int:
+        if kind == "DIVIDER":
+            return DIVIDER_UNITS
+        if kind == "HEADER":
+            return HEADER_UNITS.get(meta.get("headerSize"), DEFAULT_HEADER_UNITS)
+        try:
+            return max(1, int(meta.get("height") or DEFAULT_CHART_HEIGHT))
+        except (TypeError, ValueError):
+            return DEFAULT_CHART_HEIGHT
+
+    def stack(children: list, tab: str | None, x: int, y: int, width: int) -> int:
+        """Children one under another, gutter between. Returns height used."""
+        cursor = y
+        for child in children:
+            used = place(child, tab, x, cursor, width)
+            if used:
+                cursor += used + GRID_GUTTER_UNITS
+        return max(0, cursor - y - GRID_GUTTER_UNITS)
+
+    def place(node_id: str, tab: str | None, x: int, y: int, width: int) -> int:
+        node = nodes.get(node_id)
+        if not isinstance(node, dict):
+            return 0
+        kind = node.get("type")
+        meta = node.get("meta") or {}
+        children = node.get("children") or []
+
+        if kind in ("ROOT", "GRID"):
+            return stack(children, tab, x, y, width)
+
+        if kind == "TABS":
+            # Every pane starts at the top of its own tab, so a TABS block
+            # takes no room in the flow its parent is laying out.
+            for child in children:
+                place(child, tab, x, y, width)
+            return 0
+
+        if kind == "TAB":
+            name = str(meta.get("text") or meta.get("defaultText") or "Tab").strip() or "Tab"
+            path = f"{tab} / {name}" if tab else name
+            if path not in tab_order:
+                tab_order.append(path)
+            stack(children, path, 0, 0, GRID_COLUMNS)
+            return 0
+
+        if kind == "ROW":
+            cursor_x, row_y, tallest = x, y, 0
+            for child in children:
+                child_node = nodes.get(child)
+                if not isinstance(child_node, dict):
+                    continue
+                cw = width_of(child_node, width)
+                # A row wider than the grid wraps instead of overflowing.
+                if cursor_x > x and cursor_x + cw > x + width:
+                    cursor_x = x
+                    row_y += tallest + GRID_GUTTER_UNITS
+                    tallest = 0
+                tallest = max(tallest, place(child, tab, cursor_x, row_y, cw))
+                cursor_x += cw
+            return (row_y - y) + tallest
+
+        if kind == "COLUMN":
+            try:
+                own = int(meta.get("width") or width)
+            except (TypeError, ValueError):
+                own = width
+            return stack(children, tab, x, y, max(1, min(width, own)))
+
+        # ── leaves ──
+        if node_id in seen:
+            # The same node reached twice is a bug in the walk, not content.
+            return 0
+        height = height_of(kind, meta)
+
+        if kind == "CHART":
+            chart_id = meta.get("chartId")
+            if not isinstance(chart_id, int):
+                return height
+            seen.add(node_id)
+            tiles.append(
+                Tile(
+                    kind="chart",
+                    node_id=node_id,
+                    tab=tab,
+                    x=x,
+                    y=y,
+                    w=width,
+                    h=height,
+                    chart_id=chart_id,
+                    # The dashboard may rename a chart for its own purposes;
+                    # 214 of them do. That name is the one people read here.
+                    title=str(meta.get("sliceNameOverride") or meta.get("sliceName") or "").strip(),
+                )
+            )
+            return height
+
+        if kind == "MARKDOWN":
+            seen.add(node_id)
+            tiles.append(
+                Tile(
+                    kind="text",
+                    node_id=node_id,
+                    tab=tab,
+                    x=x,
+                    y=y,
+                    w=width,
+                    h=height,
+                    content=str(meta.get("code") or ""),
+                )
+            )
+            return height
+
+        if kind == "HEADER":
+            text_ = str(meta.get("text") or "").strip()
+            if not text_:
+                return height
+            seen.add(node_id)
+            level = HEADER_LEVEL.get(meta.get("headerSize"), 2)
+            tiles.append(
+                Tile(
+                    kind="text",
+                    node_id=node_id,
+                    tab=tab,
+                    x=x,
+                    y=y,
+                    w=width,
+                    h=height,
+                    content=f"{'#' * level} {text_}",
+                )
+            )
+            return height
+
+        if kind == "DIVIDER":
+            seen.add(node_id)
+            tiles.append(
+                Tile(kind="divider", node_id=node_id, tab=tab, x=x, y=y, w=width, h=height)
+            )
+            return height
+
+        return 0
+
+    # ROOT_ID contains GRID_ID, so walking both visits every node twice.
+    root = "ROOT_ID" if "ROOT_ID" in nodes else "GRID_ID"
+    if root in nodes:
+        place(root, None, 0, 0, GRID_COLUMNS)
+    return tiles, tab_order
 
 
 def markdown_blocks(position_json: str) -> list[tuple[str | None, str, str]]:

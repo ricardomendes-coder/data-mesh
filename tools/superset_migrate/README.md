@@ -38,7 +38,32 @@ would have generated:
 | `big_number_total`, `big_number` | a **big number** tile |
 | dashboard tabs | dashboard sections |
 | markdown & header blocks | text tiles |
+| divider blocks | divider tiles |
 | `filter_select`, `filter_time` native filters | dashboard filters |
+
+## The layout is copied, not approximated
+
+`layout_of()` reads `position_json` **once** and returns every block with the
+box Superset gives it. One traversal rather than three: `geometry()`,
+`tabs_of()` and `markdown_blocks()` each used to walk the same tree and had to
+agree with one another about what counted as a node and which tab it sat under.
+They didn't — a node reachable by two paths was emitted twice, and 110
+duplicate text blocks had to be deleted by hand after a run.
+
+Coordinates stay in Superset's own units: `meta.width` in columns of twelve,
+`meta.height` in units of 8px, one gutter between stacked blocks. Nothing is
+rounded into a coarser row (of the 88 distinct heights in the V360 instance, 75
+don't divide evenly by seven) and no blank space is squeezed out. `ROW` lays
+its children across, `COLUMN` stacks them, and nesting — which reaches nine
+levels deep here — keeps its offsets relative to the parent.
+
+Two details that are easy to miss:
+
+- **`sliceNameOverride`** — a dashboard can rename a chart for its own purposes,
+  and 214 of the 1112 tiles do. That name is stored on the tile, not the chart,
+  because the same chart can appear on two dashboards under two names.
+- **Nested tabs** become `"Outer / Inner"`, so two tabs sharing a name in
+  different parents stay apart in Report Hub's flat sections.
 
 **Time series split by a category** are pivoted with conditional aggregation
 (`SUM(x) FILTER (WHERE c_id = 'acme')`), because one flat result can't feed a

@@ -15,8 +15,12 @@
   if (!grid) return;
 
   var COLUMNS = parseInt(grid.getAttribute("data-columns"), 10) || 12;
-  var ROW_PX = parseInt(grid.getAttribute("data-row-px"), 10) || 56;
-  var GAP_PX = 14;
+  // One row is 8px, Superset's unit, and rows do not gap — vertical spacing is
+  // carried in the coordinates. Columns still gap, so cellSize() below only
+  // subtracts the horizontal gutters.
+  var ROW_PX = parseInt(grid.getAttribute("data-row-px"), 10) || 8;
+  var GAP_PX = 16;
+  var ROW_GAP_PX = 0;
   var saveUrl = grid.getAttribute("data-save");
   var status = document.getElementById("layout-status");
 
@@ -136,7 +140,7 @@
   document.addEventListener("pointermove", function (event) {
     if (!dragging) return;
     var dx = Math.round((event.clientX - dragging.startX) / (dragging.cell + GAP_PX));
-    var dy = Math.round((event.clientY - dragging.startY) / (ROW_PX + GAP_PX));
+    var dy = Math.round((event.clientY - dragging.startY) / (ROW_PX + ROW_GAP_PX));
     var box = {
       x: dragging.box.x, y: dragging.box.y,
       w: dragging.box.w, h: dragging.box.h,
