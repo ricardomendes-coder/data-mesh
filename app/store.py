@@ -18,6 +18,7 @@ recorded; never edit a step that has shipped, add another.
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -809,6 +810,12 @@ class DashboardSection:
     title: str
     position: int = 0
     items: list[DashboardItem] = field(default_factory=list)
+    # The URL fragment that opens this tab. Derived from the title rather than
+    # from `id`, which is a bigserial: re-importing a dashboard renumbers every
+    # tab, so a link somebody saved would quietly open a different one. Filled
+    # in by get_dashboard(), which is the only place that can see the siblings
+    # a name has to stay unique against.
+    anchor: str = ""
 
 
 @dataclass
@@ -963,7 +970,36 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
         )
         for s in sections
     ]
+
+    name_tab_anchors(dash.sections)
     return dash
+
+
+def name_tab_anchors(sections: list[DashboardSection]) -> None:
+    """Give each tab the URL fragment that opens it, in place.
+
+    From the title, and unique within the dashboard. Two tabs really can share
+    a name — Superset allows it — so the second gets a suffix, the way
+    unique_slug() handles charts.
+    """
+    used: dict[str, int] = {}
+    for index, section in enumerate(sections, 1):
+        # Accents are folded rather than stripped: these titles are Portuguese,
+        # and slugify()'s rule turns "Recém-Tombados" into "rec-m-tombados" and
+        # "Operação" into "opera-o". An anchor is read by people.
+        #
+        # slugify() itself keeps the old rule on purpose — its output is a
+        # stored key that permission and tag rows point at, so changing it
+        # would rename every chart and orphan those rows. An anchor is computed
+        # at render time and belongs to nobody, so it can just be better.
+        folded = unicodedata.normalize("NFKD", section.title.strip().lower())
+        folded = "".join(c for c in folded if not unicodedata.combining(c))
+        # Not slugify() either: its empty-title fallback is the literal "chart",
+        # which would be a lie on a tab. A title with nothing sluggable in it —
+        # an emoji, say — falls back to its position instead.
+        base = _SLUG_STRIP.sub("-", folded).strip("-") or f"tab-{index}"
+        used[base] = used.get(base, 0) + 1
+        section.anchor = base if used[base] == 1 else f"{base}-{used[base]}"
 
 
 def save_dashboard(dash: Dashboard) -> Dashboard:

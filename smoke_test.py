@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 
 # Env MUST be set before importing the app (settings + user store read it at import).
@@ -1680,6 +1681,57 @@ def test_dashboard_page_runs_no_warehouse_queries():
     print("dashboard page runs no warehouse queries: OK")
 
 
+def test_tab_anchors_survive_a_reimport():
+    """A link to one tab must still open that tab after the dashboard is redone.
+
+    The anchor used to be `sec-<dashboard_sections.id>`, a bigserial. Every
+    --wipe/--apply of the Superset import renumbers every tab, so a saved link
+    either matched nothing or — worse — matched a different tab and opened it
+    without a word. The title survives an import; the row id does not.
+    """
+    from app import store
+
+    def sections(*titles, first_id=10):
+        return [
+            store.DashboardSection(id=first_id + n, title=t, position=n)
+            for n, t in enumerate(titles)
+        ]
+
+    def anchors(rows):
+        # The real thing get_dashboard() calls, not a copy of it here.
+        store.name_tab_anchors(rows)
+        return [s.anchor for s in rows]
+
+    # Same titles, different row ids: the same anchors.
+    before = anchors(sections("Resumo", "Detalhe", first_id=10))
+    after = anchors(sections("Resumo", "Detalhe", first_id=9000))
+    assert before == after == ["resumo", "detalhe"], (before, after)
+
+    # Two tabs may share a name; the second must not steal the first's link.
+    dupes = anchors(sections("Resumo", "Resumo"))
+    assert dupes == ["resumo", "resumo-2"], dupes
+    assert len(set(dupes)) == 2, "two tabs answer to the same anchor"
+
+    # A title with nothing sluggable in it falls back to its position, not to
+    # slugify()'s "chart" default, which would be a lie on a tab.
+    assert anchors(sections("📊", "Vendas")) == ["tab-1", "vendas"]
+
+    # Accents fold instead of being stripped. These titles are Portuguese, and
+    # the old rule gave "rec-m-tombados" and "opera-o" — an anchor is read by
+    # people, and that one is unreadable.
+    assert anchors(sections("Clientes Recém-Tombados", "Operação", "Diário")) == [
+        "clientes-recem-tombados",
+        "operacao",
+        "diario",
+    ]
+
+    # Only characters that are safe unescaped in a URL fragment and in the
+    # attribute lookup the page does.
+    for anchor in anchors(sections("Acompanhamento Diário", "SLA / Metas")):
+        assert re.fullmatch(r"[a-z0-9-]+", anchor), anchor
+    print("tab anchors survive a reimport: OK")
+
+
 def test_imported_layout_mirrors_superset():
     """An imported dashboard must be the original, not a tidied-up version.
 
@@ -2678,6 +2730,7 @@ if __name__ == "__main__":
     test_admin_panel_and_gate()
     test_tag_management()
     test_dashboard_page_runs_no_warehouse_queries()
+    test_tab_anchors_survive_a_reimport()
     test_imported_layout_mirrors_superset()
     test_every_resource_type_is_grantable()
     test_user_detail_page()

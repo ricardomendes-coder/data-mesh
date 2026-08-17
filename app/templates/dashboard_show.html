@@ -89,11 +89,11 @@
 {% if dashboard.has_tabs %}
 <div class="bi-panel-tabs bi-dash-tabs">
   {% for s in dashboard.sections %}
-  <button class="bi-ptab {{ 'active' if loop.first else '' }}" data-tab="sec-{{ s.id }}" type="button">{{ s.title }}</button>
+  <button class="bi-ptab {{ 'active' if loop.first else '' }}" data-tab="{{ s.anchor }}" type="button">{{ s.title }}</button>
   {% endfor %}
 </div>
 {% for s in dashboard.sections %}
-<section class="pane {{ 'active' if loop.first else '' }}" data-pane="sec-{{ s.id }}">
+<section class="pane {{ 'active' if loop.first else '' }}" data-pane="{{ s.anchor }}">
   {% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
   {% if in_tab %}
   <div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
@@ -129,10 +129,19 @@
   tabs.forEach(function (t) {
     t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
   });
-  /* Deep links: /dashboards/x#sec-12 opens on that tab, so a link to one tab
-     of a dashboard is shareable. */
-  var wanted = (location.hash || '').replace('#', '');
-  if (wanted && document.querySelector('.pane[data-pane="' + wanted + '"]')) show(wanted);
+  /* Deep links: /dashboards/277#resumo opens on that tab, so a link to one tab
+     of a dashboard is shareable — and keeps working after a re-import, which
+     the old #sec-<row id> form did not.
+
+     Matched by walking the panes rather than building a selector from the
+     hash: the hash is whatever is in the address bar, and splicing that into
+     querySelector lets a stray quote throw a SyntaxError and take tab
+     switching down with it. */
+  var wanted = decodeURIComponent((location.hash || '').replace('#', ''));
+  var panes = document.querySelectorAll('.pane[data-pane]');
+  for (var i = 0; i < panes.length; i++) {
+    if (panes[i].getAttribute('data-pane') === wanted) { show(wanted); break; }
+  }
 })();
 </script>
 {% endif %}
