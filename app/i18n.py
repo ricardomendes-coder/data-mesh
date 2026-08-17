@@ -96,6 +96,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "rows": "linhas",
         "row(s) fetched": "linha(s) obtida(s)",
         "no options": "sem opções",
+        "loading options…": "carregando opções…",
         # ── listing views + tags ──
         "View": "Visualização",
         "preview": "prévia",

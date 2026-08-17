@@ -1,7 +1,8 @@
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -1526,22 +1527,38 @@ def _filter_options(definitions: list, access: store.Access) -> dict[str, list[s
     Each is a query the dashboard's editor wrote, so it runs under the same
     database grant as anything else: no grant for that database, no options.
     A failing options query costs one dropdown, never the page.
+
+    **Not called while rendering a dashboard.** These are `SELECT DISTINCT`
+    over the warehouse and they are slow — on Automatismo, eleven of them
+    totalling 292 seconds, run in series before the page sent a byte, for a
+    drawer most visits never open. They are served from
+    dashboard_filter_options instead, on demand, and refreshed here.
     """
-    options: dict[str, list[str]] = {}
-    for d in definitions:
-        if d.filter_type != filters.SELECT or not d.values_sql.strip():
-            continue
-        if d.source_db and not access.allows(store.DATABASE, d.source_db):
-            continue
+    wanted = [
+        d
+        for d in definitions
+        if d.filter_type == filters.SELECT
+        and d.values_sql.strip()
+        and (not d.source_db or access.allows(store.DATABASE, d.source_db))
+    ]
+    if not wanted:
+        return {}
+
+    def one(d) -> tuple[str, list[str]]:
         try:
             result = db.execute(d.values_sql, d.source_db or None, max_rows=1000)
-            options[d.key] = [
+            return d.key, [
                 "" if r[0] is None else str(r[0]) for r in result.rows if r and r[0] is not None
             ]
         except Exception:
             logger.exception("Filter %r options query failed", d.key)
-            options[d.key] = []
-    return options
+            return d.key, []
+
+    # In parallel: they are independent, and in series the slowest dashboard
+    # waited on the sum rather than the maximum.
+    workers = min(len(wanted), 6)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return dict(pool.map(one, wanted))
 
 
 def _tile_shells(items: list) -> list[dict]:
@@ -1682,12 +1699,68 @@ def dashboard_show(
         dashboard=dash,
         tiles=tiles,
         filters=active,
-        filter_options=_filter_options(definitions, access),
+        # Deliberately empty: the drawer fetches its own options when opened.
+        # Building them here is what made this page take minutes.
+        filter_options={},
         can_build=access.allows(store.FEATURE, "dashboard_builder"),
         grid_columns=store.GRID_COLUMNS,
         row_height=store.ROW_HEIGHT_PX,
     )
     return templates.TemplateResponse(request, "dashboard_show.html", context)
+
+
+@app.get("/dashboards/{slug}/filter-options")
+def dashboard_filter_options(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """The values every select filter offers, fetched when the drawer opens.
+
+    Cached, because these are `SELECT DISTINCT` over the warehouse and a
+    column's distinct values move on the data's schedule rather than the
+    viewer's. `?refresh=1` forces a rebuild.
+    """
+    if not store.available():
+        return JSONResponse({"error": i18n.t("The app database is not configured.")}, 503)
+    if not access.allows(store.DASHBOARD, slug):
+        return JSONResponse(
+            {"error": i18n.t("You don't have access to that dashboard.")}, status_code=403
+        )
+
+    definitions = _dashboard_filters(slug)
+    ttl = timedelta(minutes=max(0, settings.filter_options_cache_minutes))
+    force = request.query_params.get("refresh") == "1"
+    cached: dict = {}
+    if not force and ttl:
+        try:
+            cached = store.get_filter_options(slug)
+        except Exception:
+            logger.exception("Could not read cached filter options for %r", slug)
+
+    now = datetime.now(UTC)
+    fresh: dict[str, list] = {}
+    stale = []
+    for d in definitions:
+        if d.filter_type != filters.SELECT or not d.values_sql.strip():
+            continue
+        hit = cached.get(d.key)
+        if hit and now - hit[1] < ttl:
+            fresh[d.key] = hit[0]
+        else:
+            stale.append(d)
+
+    if stale:
+        built = _filter_options(stale, access)
+        for key, values in built.items():
+            fresh[key] = values
+            try:
+                store.put_filter_options(slug, key, values)
+            except Exception:
+                logger.exception("Could not cache filter options for %r/%r", slug, key)
+
+    return JSONResponse({"options": fresh})
 
 
 @app.get("/dashboards/{slug}/tiles/{item_id}")

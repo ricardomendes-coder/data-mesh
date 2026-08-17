@@ -432,6 +432,26 @@ MIGRATIONS: list[tuple[str, str]] = [
             ADD COLUMN IF NOT EXISTS title_override text NOT NULL DEFAULT '';
         """,
     ),
+    (
+        "0015_filter_option_cache",
+        """
+        -- The values a select filter offers. Each is a
+        -- `SELECT DISTINCT col FROM table` over the warehouse, and the
+        -- dashboard page used to run all of them, in series, before sending a
+        -- byte: on Automatismo that was eleven queries and 292 seconds for a
+        -- drawer most visits never open.
+        --
+        -- Cached because a column's distinct values move on the data's
+        -- schedule, not the viewer's — an hour-old list is the same list.
+        CREATE TABLE IF NOT EXISTS dashboard_filter_options (
+            dashboard_slug text        NOT NULL,
+            filter_key     text        NOT NULL,
+            options        jsonb       NOT NULL,
+            built_at       timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (dashboard_slug, filter_key)
+        );
+        """,
+    ),
 ]
 
 
@@ -1917,6 +1937,38 @@ def first_chart_of(dashboard_slugs: list[str]) -> dict[str, int]:
             {"slugs": list(dashboard_slugs)},
         ).fetchall()
     return {r[0]: r[1] for r in rows}
+
+
+def get_filter_options(dashboard_slug: str) -> dict[str, tuple[list, datetime]]:
+    """Cached option lists for a dashboard's filters, keyed by filter key."""
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT filter_key, options, built_at FROM dashboard_filter_options "
+                "WHERE dashboard_slug = :s"
+            ),
+            {"s": dashboard_slug},
+        ).fetchall()
+    out: dict[str, tuple[list, datetime]] = {}
+    for key, options, built_at in rows:
+        if isinstance(options, str):
+            options = json.loads(options)
+        out[key] = (list(options or []), built_at)
+    return out
+
+
+def put_filter_options(dashboard_slug: str, filter_key: str, options: list) -> None:
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_filter_options "
+                "(dashboard_slug, filter_key, options, built_at) "
+                "VALUES (:s, :k, cast(:o AS jsonb), now()) "
+                "ON CONFLICT (dashboard_slug, filter_key) DO UPDATE "
+                "SET options = excluded.options, built_at = excluded.built_at"
+            ),
+            {"s": dashboard_slug, "k": filter_key, "o": json.dumps(list(options))},
+        )
 
 
 def get_chart_preview(chart_id: int) -> tuple[dict, datetime] | None:

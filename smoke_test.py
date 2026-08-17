@@ -1594,6 +1594,92 @@ def test_tag_management():
     print("tag management: OK")
 
 
+def test_dashboard_page_runs_no_warehouse_queries():
+    """Opening a dashboard must not wait on the warehouse. At all.
+
+    The tiles have fetched themselves since the async rewrite, but the filter
+    drawer's option lists — one `SELECT DISTINCT` per select filter — were
+    still built while rendering. On the Automatismo dashboard that was eleven
+    queries totalling 292 seconds before a byte was sent, for a drawer most
+    visits never open. They belong behind /filter-options, which is cached and
+    only asked for when somebody opens the thing.
+    """
+    from datetime import datetime
+
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=1, slug="vendas", title="Vendas", source_db="analytics",
+        sql="SELECT a, b FROM t WHERE 1=1 {{ filters }}",
+        chart_type="bar", x_column="a", y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    dash = store.Dashboard(
+        slug="automatismo", title="Automatismo", id=9,
+        items=[store.DashboardItem(id=5, position=0, chart=chart, grid_x=0, grid_y=0,
+                                   grid_w=6, grid_h=50)],
+    )
+
+    class F:
+        key = "cliente"
+        label = "Cliente"
+        filter_type = "select"
+        column_expr = "c_id"
+        values_sql = "SELECT DISTINCT c_id FROM huge_table"
+        source_db = "analytics"
+        default_value = ""
+        applies_to = ["vendas"]
+
+    ran: list[str] = []
+    saved = (
+        store.available, store.get_dashboard, store.list_filters, store.slug_for,
+        store.upsert_user, store.get_filter_options, store.put_filter_options,
+        db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if s == "automatismo" else None
+    store.list_filters = lambda s: [F()]
+    store.slug_for = lambda table, ident: "automatismo" if str(ident) == "9" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_filter_options = lambda s: {}
+    store.put_filter_options = lambda s, k, v: None
+
+    def _execute(sql, database=None, max_rows=None, params=None):
+        ran.append(sql)
+        return db_mod.QueryResult(
+            returns_rows=True, columns=["c_id"], rows=[("acme",)], rowcount=1
+        )
+
+    db_mod.execute = _execute
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            body = client.get("/dashboards/9").text
+            assert ran == [], f"the dashboard page hit the warehouse: {ran}"
+            assert "filter-options" in body, "the drawer has nowhere to fetch its options"
+            assert "huge_table" not in body, "an options query leaked into the page"
+
+            # Asked for explicitly, they run — and are cached on the way out.
+            payload = client.get("/dashboards/9/filter-options").json()
+            assert payload["options"] == {"cliente": ["acme"]}, payload
+            assert ran == ["SELECT DISTINCT c_id FROM huge_table"], ran
+
+            # A filtered link still carries its selection with no JS involved.
+            body = client.get("/dashboards/9?cliente=acme").text
+            assert 'value="acme"' in body and "selected" in body, (
+                "a filtered link lost its selection without the options fetch"
+            )
+    finally:
+        (
+            store.available, store.get_dashboard, store.list_filters, store.slug_for,
+            store.upsert_user, store.get_filter_options, store.put_filter_options,
+            db_mod.execute,
+        ) = saved
+    print("dashboard page runs no warehouse queries: OK")
+
+
 def test_imported_layout_mirrors_superset():
     """An imported dashboard must be the original, not a tidied-up version.
 
@@ -2591,6 +2677,7 @@ if __name__ == "__main__":
     test_folders_are_organisation_only()
     test_admin_panel_and_gate()
     test_tag_management()
+    test_dashboard_page_runs_no_warehouse_queries()
     test_imported_layout_mirrors_superset()
     test_every_resource_type_is_grantable()
     test_user_detail_page()

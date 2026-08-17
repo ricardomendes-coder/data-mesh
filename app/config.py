@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # How long a cached chart preview stays usable. Previews are for
     # recognising a chart, not for reading its numbers; the card shows the age.
     preview_cache_minutes: int = 60
+    # How long a filter's option list stays usable. Longer than a preview: the
+    # distinct values of a column change on the data's schedule, and rebuilding
+    # them cost this app 292 seconds on one dashboard.
+    filter_options_cache_minutes: int = 360
 
     # Session cookie name. MUST NOT be "session": this app is served from the
     # same origin as Superset (bi.v360.io/report vs bi.v360.io/), and Flask's
