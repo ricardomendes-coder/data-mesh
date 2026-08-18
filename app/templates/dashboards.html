@@ -45,7 +45,8 @@
 
 {% else %}
 <div class="bi-cards {{ 'bi-cards-preview' if view == 'preview' else '' }}"
-     data-preview="{{ url_for('charts_index') }}">
+     data-preview="{{ url_for('charts_index') }}"
+     data-err-timeout="{{ _('This chart took too long to answer.') }}">
   {% for d in dashboards %}
   <div class="bi-card">
     <div class="bi-card-ic bi-card-ic-dash">

@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -1221,11 +1222,16 @@ def chart_data(
     # Served from cache when it's fresh. A preview exists to tell one chart from
     # another; re-running 580 queries so each thumbnail is to-the-second is a
     # cost nobody asked for. `?refresh=1` forces a rebuild.
+    # Two shapes of the same query: the listing wants a likeness and caps the
+    # table at a dozen rows; the chart's own page wants the whole result. They
+    # cache separately because they are different answers.
+    full = request.query_params.get("full") == "1"
+    variant = "full" if full else "preview"
     ttl = timedelta(minutes=max(0, settings.preview_cache_minutes))
     force = request.query_params.get("refresh") == "1"
     if not force and ttl:
         try:
-            cached = store.get_chart_preview(chart.id)
+            cached = store.get_chart_preview(chart.id, variant)
         except Exception:
             logger.exception("Could not read the cached preview for %r", slug)
             cached = None
@@ -1241,7 +1247,9 @@ def chart_data(
 
     try:
         sql = filters.strip_token(chart.sql)
-        result = db.execute(sql, chart.source_db, max_rows=charts.MAX_POINTS + 1)
+        result = db.execute(
+            sql, chart.source_db, max_rows=None if full else charts.MAX_POINTS + 1
+        )
         spec = charts.build_spec(
             result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns
         )
@@ -1254,7 +1262,8 @@ def chart_data(
         payload["spec"] = spec.to_dict()
     elif spec.renders_as == "table":
         payload["columns"] = spec.columns
-        payload["rows"] = [["" if v is None else str(v) for v in r] for r in spec.rows[:12]]
+        rows = spec.rows if full else spec.rows[:12]
+        payload["rows"] = [["" if v is None else str(v) for v in r] for r in rows]
     else:
         payload["value"] = spec.value
         payload["caption"] = spec.caption
@@ -1268,12 +1277,12 @@ def chart_data(
     )
     if empty:
         try:
-            store.drop_chart_preview(chart.id)
+            store.drop_chart_preview(chart.id, variant)
         except Exception:
             logger.exception("Could not drop the stale preview for %r", slug)
     else:
         try:
-            store.put_chart_preview(chart.id, payload)
+            store.put_chart_preview(chart.id, payload, variant)
         except Exception:
             logger.exception("Could not cache the preview for %r", slug)
     payload["age"] = i18n.t("just now")
@@ -1307,25 +1316,13 @@ def chart_detail(
         )
         return templates.TemplateResponse(request, "charts.html", context, status_code=404)
 
+    # No query here. This page used to run the chart's SQL while rendering, so
+    # opening a chart that takes eighty seconds meant eighty seconds of blank
+    # browser — the same thing the dashboards were fixed for a while ago, which
+    # never reached this page. The SQL panel needs nothing from the warehouse
+    # and paints at once; the chart and its rows arrive from chart_data.
     context = _shell_context(
         user, "charts", access, chart=chart, spec=None, columns=[], rows=[], chart_error=None
-    )
-    try:
-        # The stored SQL carries the {{ filters }} token, which is Report Hub's
-        # and not SQL. The dashboard path substitutes it with the active
-        # filters; here there are none, so it comes out.
-        result = db.execute(filters.strip_token(chart.sql), chart.source_db)
-    except Exception:
-        logger.exception("Chart %r failed to refresh", slug)
-        context["chart_error"] = "This chart's query failed. Edit it, or check the server logs."
-        return templates.TemplateResponse(request, "chart_detail.html", context)
-
-    context["columns"] = result.columns
-    context["rows"] = [
-        [None if v is None else str(v) for v in row] for row in result.rows[: charts.MAX_POINTS]
-    ]
-    context["spec"] = charts.build_spec(
-        result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns
     )
     return templates.TemplateResponse(request, "chart_detail.html", context)
 
@@ -1362,6 +1359,36 @@ def _dashboards_unavailable(request: Request, user: str, status: int = 503):
         ),
     )
     return templates.TemplateResponse(request, "dashboards.html", context, status_code=status)
+
+
+def _tile_signature(item, active: list) -> str:
+    """A digest of the query this tile is about to run.
+
+    Keyed on the SQL and its bound parameters rather than on the filter
+    selection: the query is what decides the answer, so two selections that
+    produce the same query correctly share one cached result, and an edit to
+    the chart's SQL can never collide with what was cached before it.
+    """
+    if item.chart is None:
+        return ""
+    try:
+        sql, params = filters.apply(item.chart.sql, active, item.chart.slug)
+    except Exception:
+        logger.exception("Could not build the cache key for tile %s", item.id)
+        return ""
+    material = "\n".join(
+        [sql, repr(sorted(params.items())), item.chart.source_db, item.chart.chart_type]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _looks_empty(spec) -> bool:
+    """True when the tile rendered nothing — see the caller for why it matters."""
+    if spec.renders_as == "table":
+        return not spec.rows
+    if spec.renders_as == "canvas":
+        return not (spec.to_dict().get("labels") or [])
+    return spec.value in (None, "")
 
 
 def _render_tiles(items: list, active: list | None = None) -> list[dict]:
@@ -1800,7 +1827,31 @@ def dashboard_tile_data(
 
     definitions = _dashboard_filters(slug)
     chosen = {key: request.query_params.getlist(key) for key in request.query_params}
+    # `refresh` is ours, not a filter: it must not become part of the key, or a
+    # forced rebuild would be cached under a signature nothing else looks up.
+    chosen.pop("refresh", None)
     active = filters.resolve(definitions, chosen)
+
+    # The cache key is the query about to run — SQL plus its bound parameters —
+    # because that is exactly what decides the answer. Two viewers with the
+    # same filters share an entry, a different filter is a different key, and
+    # an edited chart writes different SQL and so cannot hit a stale one.
+    sig = _tile_signature(item, active)
+    ttl = timedelta(minutes=max(0, settings.tile_cache_minutes))
+    force = request.query_params.get("refresh") == "1"
+    if sig and not force and ttl:
+        try:
+            hit = store.get_tile_cache(item.id, sig)
+        except Exception:
+            logger.exception("Could not read the cached tile %s", item_id)
+            hit = None
+        if hit:
+            payload, built_at = hit
+            chart_moved = item.chart.updated_at and item.chart.updated_at > built_at
+            if datetime.now(built_at.tzinfo) - built_at < ttl and not chart_moved:
+                payload["age"] = _age_label(built_at)
+                payload["cached"] = True
+                return JSONResponse(payload)
 
     tile = _render_tiles([item], active)[0]
     if tile["error"]:
@@ -1819,6 +1870,18 @@ def dashboard_tile_data(
     else:
         payload["value"] = spec.value
         payload["caption"] = spec.caption
+
+    # An empty result is far more often a moment than a fact — an ETL that
+    # truncates and reloads leaves its tables briefly empty, and pinning that
+    # on a tile for an hour is worse than re-running the query. Same rule the
+    # chart previews follow.
+    if sig and not _looks_empty(spec):
+        try:
+            store.put_tile_cache(item.id, sig, payload)
+        except Exception:
+            logger.exception("Could not cache tile %s", item_id)
+    payload["age"] = i18n.t("just now")
+    payload["cached"] = False
     return JSONResponse(payload)
 
 

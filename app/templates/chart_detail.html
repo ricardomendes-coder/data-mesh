@@ -1,82 +1,61 @@
 {% extends "_shell.html" %}
 {% block page_title %}{{ chart.title }}{% endblock %}
 {% block page_sub %}
-  <a href="{{ url_for('charts_index') }}">Charts</a> /
+  <a href="{{ url_for('charts_index') }}">{{ _('Charts') }}</a> /
   <span class="bi-kind bi-kind-view">{{ chart.chart_type }}</span>
   <code>{{ chart.source_db }}</code>
 {% endblock %}
 
 {% block content %}
-{% if chart_error %}
-<div class="bi-err">
-  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.8v3.6M8 11h.01"/></svg>
-  <span>{{ chart_error }}</span>
-</div>
-{% else %}
+{# Nothing on this page waits on the warehouse. The SQL is already here, so it
+   paints immediately; the chart and its rows are fetched by chart-detail.js
+   from the same endpoint the listing uses, in its full-result mode. #}
+<div id="chart-detail"
+     data-url="{{ url_for('chart_data', slug=chart.id) }}"
+     data-kind="{{ chart.chart_type }}"
+     data-refresh-label="{{ _('Refresh') }}"
+     data-err-timeout="{{ _('This chart took too long to answer.') }}"
+     data-err-failed="{{ _('This chart\'s query failed.') }}"
+     data-rows-label="{{ _('row(s) fetched') }}">
 
-{% if spec and spec.warnings %}
-{% for w in spec.warnings %}<div class="bi-err">{{ w }}</div>{% endfor %}
-{% endif %}
-
-{% set how = spec.renders_as if spec else 'canvas' %}
-{% if how == 'number' %}
-<div class="bi-chartbox bi-chartbox-lg bi-kpi-box">
-  <div class="bi-kpi bi-kpi-lg">{{ spec.value }}</div>
-  {% if spec.caption %}<div class="bi-kpi-cap">{{ spec.caption }}</div>{% endif %}
-</div>
-{% elif how == 'canvas' %}
-<div class="bi-chartbox bi-chartbox-lg">
-  <canvas id="chart" height="360"></canvas>
-</div>
-{% endif %}
-{# A table chart needs no box of its own — the Data pane below *is* the chart. #}
-
-<div class="bi-panel-tabs">
-  <button class="bi-ptab active" data-tab="data" type="button">Data</button>
-  <button class="bi-ptab" data-tab="sql" type="button">SQL</button>
-</div>
-
-{# The validator flags three palette slots as sub-3:1 on white, which obliges
-   "relief" — a readable alternative to colour. This table is it. #}
-<section class="pane active" data-pane="data">
-  <div class="bi-result-meta">{{ rows|length }} row(s)</div>
-  <div class="bi-restbl-wrap">
-    <table class="bi-restbl">
-      <thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
-      <tbody>
-        {% for row in rows %}
-        <tr>{% for cell in row %}<td>{% if cell is none %}<span class="bi-null">null</span>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="bi-chartbox bi-chartbox-lg" id="chart-shell">
+    <div class="bi-tile-skel"><span></span><span></span><span></span></div>
   </div>
-</section>
 
-<section class="pane" data-pane="sql">
-  <pre class="bi-snippet">{{ chart.sql|strip_filters }}</pre>
-  <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|strip_filters|urlencode }}">Open in Query</a>
-</section>
+  <div class="bi-panel-tabs">
+    <button class="bi-ptab active" data-tab="data" type="button">{{ _('Data') }}</button>
+    <button class="bi-ptab" data-tab="sql" type="button">{{ _('SQL') }}</button>
+  </div>
 
-<script id="chart-data" type="application/json">{{ spec.to_dict()|tojson if (spec and how == 'canvas') else 'null' }}</script>
+  {# The validator flags three palette slots as sub-3:1 on white, which obliges
+     "relief" — a readable alternative to colour. This table is it. #}
+  <section class="pane active" data-pane="data">
+    <div class="bi-result-meta" id="chart-rowcount"></div>
+    <div class="bi-restbl-wrap"><table class="bi-restbl" id="chart-table"></table></div>
+  </section>
+
+  <section class="pane" data-pane="sql">
+    <pre class="bi-snippet">{{ chart.sql|strip_filters }}</pre>
+    <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|strip_filters|urlencode }}">{{ _('Open SQL in Query') }}</a>
+  </section>
+</div>
+
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='chart-detail.js') }}"></script>
 <script>
-(function(){
-  var node = document.getElementById('chart-data');
-  var spec = node ? JSON.parse(node.textContent) : null;
-  if (spec) window.renderChart('chart', spec);
-  document.querySelectorAll('button[data-tab]').forEach(function(el){
-    el.addEventListener('click', function(){
+(function () {
+  document.querySelectorAll('button[data-tab]').forEach(function (el) {
+    el.addEventListener('click', function () {
       var tab = el.getAttribute('data-tab');
-      document.querySelectorAll('button[data-tab]').forEach(function(b){
+      document.querySelectorAll('button[data-tab]').forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-tab') === tab);
       });
-      document.querySelectorAll('.pane').forEach(function(p){
+      document.querySelectorAll('.pane').forEach(function (p) {
         p.classList.toggle('active', p.getAttribute('data-pane') === tab);
       });
     });
   });
 })();
 </script>
-{% endif %}
 {% endblock %}

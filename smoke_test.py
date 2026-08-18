@@ -840,9 +840,13 @@ def test_preview_cache():
     store.get_chart = lambda s: chart if s == "vendas" else None
     store.slug_for = lambda table, ident: "vendas" if str(ident) == "7" else str(ident)
     store.upsert_user = _no_op_user
-    store.get_chart_preview = lambda cid: cache.get(cid)
-    store.put_chart_preview = lambda cid, spec: cache.__setitem__(cid, (spec, datetime.now(UTC)))
-    store.drop_chart_preview = lambda cid: cache.pop(cid, None)
+    # Keyed by (chart, variant): the listing thumbnail and the chart page's
+    # full result are different answers to the same query.
+    store.get_chart_preview = lambda cid, variant="preview": cache.get((cid, variant))
+    store.put_chart_preview = lambda cid, spec, variant="preview": cache.__setitem__(
+        (cid, variant), (spec, datetime.now(UTC))
+    )
+    store.drop_chart_preview = lambda cid, variant=None: cache.pop((cid, variant), None)
 
     def _execute(sql, database=None, max_rows=None, params=None):
         ran.append(sql)
@@ -871,14 +875,15 @@ def test_preview_cache():
             assert len(ran) == 2, "refresh did not re-run the query"
 
             # Older than the TTL: rebuilt.
-            spec, _ = cache[7]
-            cache[7] = (spec, datetime.now(UTC) - timedelta(hours=48))
+            key = (7, "preview")
+            spec, _ = cache[key]
+            cache[key] = (spec, datetime.now(UTC) - timedelta(hours=48))
             client.get("/charts/7/data")
             assert len(ran) == 3, "a stale preview was served"
 
             # Edited since the snapshot: rebuilt, because the query moved.
-            spec, _ = cache[7]
-            cache[7] = (spec, datetime.now(UTC))
+            spec, _ = cache[key]
+            cache[key] = (spec, datetime.now(UTC))
             chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
             client.get("/charts/7/data")
             assert len(ran) == 4, "a preview of the pre-edit query was served"
@@ -896,7 +901,7 @@ def test_preview_cache():
             )
             body = client.get("/charts/7/data").json()
             assert not body.get("spec", {}).get("labels"), body
-            assert 7 not in cache, "an empty preview was cached"
+            assert (7, "preview") not in cache, "an empty preview was cached"
             client.get("/charts/7/data")
             assert len(ran) == 6, "the empty preview was served from a cache"
     finally:
@@ -1730,6 +1735,238 @@ def test_tab_anchors_survive_a_reimport():
     for anchor in anchors(sections("Acompanhamento Diário", "SLA / Metas")):
         assert re.fullmatch(r"[a-z0-9-]+", anchor), anchor
     print("tab anchors survive a reimport: OK")
+
+
+def test_filter_defaults_are_never_the_word_none():
+    """A JSON null default must not become the string "None".
+
+    Superset stores a native filter's default under defaultDataMask, and a
+    null in that list arrived here as Python None. str(None) is "None", which
+    was written to the filter as its default value — and because defaults
+    apply the moment a dashboard opens, every tile the filter scoped ran
+
+        WHERE flag_event IN ('None')
+
+    against a boolean column and failed on arrival. The whole Automatismo
+    dashboard read as "this chart's query failed" for that reason alone.
+    """
+    import json
+
+    from tools.superset_migrate import translate as T
+
+    def meta(value):
+        return json.dumps(
+            {
+                "native_filter_configuration": [
+                    {
+                        "filterType": "filter_select",
+                        "name": "Evento de API",
+                        "targets": [{"column": {"name": "flag_event"}}],
+                        "defaultDataMask": {"filterState": {"value": value}},
+                    }
+                ]
+            }
+        )
+
+    def default_for(value):
+        got = T.filters_of(meta(value))
+        return got[0]["default_value"] if got else None
+
+    assert default_for([None]) == "", "a null default came back as a value"
+    assert default_for(None) == ""
+    assert default_for([]) == ""
+    # A real default still survives, including one that follows a null.
+    assert default_for(["acme"]) == "acme"
+    assert default_for([None, "acme"]) == "acme"
+    # Booleans are values, not absences: Postgres reads 'False' on a boolean
+    # column happily, and dropping it would silently widen the dashboard.
+    assert default_for([False]) == "False"
+    assert default_for([0]) == "0"
+
+    # Nothing may reach a filter default that Postgres cannot read as a value.
+    for value in ([None], None, []):
+        assert default_for(value) not in ("None", "nan", "NaT"), value
+    print("filter defaults are never the word None: OK")
+
+
+def test_chart_page_does_not_wait_on_the_query():
+    """A chart's own page must paint before its query finishes.
+
+    It used to run the SQL while rendering, so opening one of the heavier
+    charts — 84 seconds against a 5.7 GB view — was that long of blank browser
+    with no title and no SQL. The dashboards were fixed for exactly this and
+    the fix never reached this page. The SQL panel needs nothing from the
+    warehouse, so it must be there on arrival.
+    """
+    from datetime import datetime
+
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=4, slug="pesado", title="Pesado", source_db="analytics",
+        sql="SELECT a, b FROM mview WHERE 1=1 {{ filters }}",
+        chart_type="table", x_column="a", y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    ran: list = []
+    cache: dict = {}
+    saved = (
+        store.available, store.get_chart, store.slug_for, store.upsert_user,
+        store.get_chart_preview, store.put_chart_preview, db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_chart = lambda s: chart if s == "pesado" else None
+    store.slug_for = lambda table, ident: "pesado" if str(ident) == "4" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_chart_preview = lambda cid, variant="preview": cache.get((cid, variant))
+    store.put_chart_preview = lambda cid, spec, variant="preview": cache.__setitem__(
+        (cid, variant), (spec, datetime.now(UTC))
+    )
+
+    def _execute(sql, database=None, max_rows=None, params=None):
+        ran.append((sql, max_rows))
+        return db_mod.QueryResult(
+            returns_rows=True, columns=["a", "b"],
+            rows=[(f"r{n}", n) for n in range(40)], rowcount=40,
+        )
+
+    db_mod.execute = _execute
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            body = client.get("/charts/4").text
+            assert ran == [], f"the chart page ran its query while rendering: {ran}"
+            assert "chart-detail.js" in body, "nothing will fill the page in"
+            # The SQL costs nothing to show, so waiting for it is inexcusable.
+            assert "FROM mview" in body, "the SQL panel is not on the first paint"
+            assert "{{ filters }}" not in body, "the filter token leaked into the SQL panel"
+
+            # The rows arrive from the shared endpoint, in full-result mode:
+            # every row, not the dozen a listing thumbnail keeps.
+            payload = client.get("/charts/4/data?full=1").json()
+            assert len(payload["rows"]) == 40, len(payload["rows"])
+            assert ran and ran[-1][1] is None, "the full result was capped like a thumbnail"
+
+            # ...and the thumbnail stays a thumbnail, cached apart from it.
+            small = client.get("/charts/4/data").json()
+            assert len(small["rows"]) == 12, len(small["rows"])
+            assert (4, "full") in cache and (4, "preview") in cache, sorted(cache)
+            assert client.get("/charts/4/data?full=1").json()["cached"] is True
+    finally:
+        (
+            store.available, store.get_chart, store.slug_for, store.upsert_user,
+            store.get_chart_preview, store.put_chart_preview, db_mod.execute,
+        ) = saved
+    print("chart page does not wait on the query: OK")
+
+
+def test_tile_cache():
+    """A dashboard tile is answered from cache, and says how old the answer is.
+
+    The Automatismo dashboard's fourteen tiles take 9s to 220s each against a
+    5.7 GB materialized view; one drops its connection partway. Superset
+    survives the same dashboard by caching results in Redis for 24 hours and
+    never mentioning it. Caching is right; hiding the age is not.
+    """
+    from datetime import datetime, timedelta
+
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(
+        id=3, slug="pesado", title="Pesado", source_db="analytics",
+        sql="SELECT a, b FROM mview WHERE 1=1 {{ filters }}",
+        chart_type="bar", x_column="a", y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    item = store.DashboardItem(id=7, position=0, chart=chart, grid_x=0, grid_y=0,
+                               grid_w=6, grid_h=50)
+    dash = store.Dashboard(slug="automatismo", title="Automatismo", id=9, items=[item])
+
+    class F:
+        key = "cliente"
+        label = "Cliente"
+        filter_type = "text"
+        column_expr = "c_id"
+        values_sql = ""
+        source_db = "analytics"
+        default_value = ""
+        applies_to = ["pesado"]
+
+    cache: dict = {}
+    ran: list = []
+    saved = (
+        store.available, store.get_dashboard, store.list_filters, store.slug_for,
+        store.upsert_user, store.get_tile_cache, store.put_tile_cache, db_mod.execute,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if s == "automatismo" else None
+    store.list_filters = lambda s: [F()]
+    store.slug_for = lambda table, ident: "automatismo" if str(ident) == "9" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_tile_cache = lambda i, sig: cache.get((i, sig))
+    store.put_tile_cache = lambda i, sig, payload: cache.__setitem__(
+        (i, sig), (payload, datetime.now(UTC))
+    )
+
+    def _execute(sql, database=None, max_rows=None, params=None):
+        ran.append((sql, dict(params or {})))
+        return db_mod.QueryResult(
+            returns_rows=True, columns=["a", "b"], rows=[("x", 1)], rowcount=1
+        )
+
+    db_mod.execute = _execute
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            first = client.get("/dashboards/9/tiles/7").json()
+            assert first["cached"] is False and first["age"], first
+            assert len(ran) == 1, ran
+
+            # Warm: no query at all, and it admits to being a recording.
+            second = client.get("/dashboards/9/tiles/7").json()
+            assert second["cached"] is True, second
+            assert len(ran) == 1, "a cached tile still hit the warehouse"
+            assert second["spec"] == first["spec"]
+
+            # A different filter is a different question, not a cache hit.
+            client.get("/dashboards/9/tiles/7?cliente=acme")
+            assert len(ran) == 2, "a filtered tile was served the unfiltered answer"
+            assert "acme" in str(ran[-1][1].values()), ran[-1]
+
+            # ...and that one caches on its own key.
+            client.get("/dashboards/9/tiles/7?cliente=acme")
+            assert len(ran) == 2, ran
+
+            # The refresh button forces a rebuild, and `refresh` must not leak
+            # into the key — otherwise the fresh answer is filed where nothing
+            # will ever look for it.
+            forced = client.get("/dashboards/9/tiles/7?refresh=1").json()
+            assert len(ran) == 3, "refresh did not re-run the query"
+            assert forced["cached"] is False
+            again = client.get("/dashboards/9/tiles/7").json()
+            assert again["cached"] is True and len(ran) == 3, (
+                "the forced rebuild was filed under a key nothing reads"
+            )
+
+            # Past the TTL, and after an edit, it runs again.
+            key = next(iter(cache))
+            cache[key] = (cache[key][0], datetime.now(UTC) - timedelta(hours=48))
+            client.get("/dashboards/9/tiles/7")
+            assert len(ran) == 4, "a stale tile was served"
+
+            chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
+            client.get("/dashboards/9/tiles/7")
+            assert len(ran) == 5, "a tile from before the chart was edited was served"
+    finally:
+        (
+            store.available, store.get_dashboard, store.list_filters, store.slug_for,
+            store.upsert_user, store.get_tile_cache, store.put_tile_cache, db_mod.execute,
+        ) = saved
+    print("tile cache: OK")
 
 
 def test_imported_layout_mirrors_superset():
@@ -2731,6 +2968,9 @@ if __name__ == "__main__":
     test_tag_management()
     test_dashboard_page_runs_no_warehouse_queries()
     test_tab_anchors_survive_a_reimport()
+    test_filter_defaults_are_never_the_word_none()
+    test_chart_page_does_not_wait_on_the_query()
+    test_tile_cache()
     test_imported_layout_mirrors_superset()
     test_every_resource_type_is_grantable()
     test_user_detail_page()

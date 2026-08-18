@@ -199,6 +199,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "Name a new dashboard…": "Nomeie um novo painel…",
         "This chart's query failed.": "A consulta deste gráfico falhou.",
         "Could not load this chart.": "Não foi possível carregar este gráfico.",
+        "This chart took too long to answer.": "Este gráfico demorou demais para responder.",
         "editing": "editando",
         "Unsaved changes": "Alterações não salvas",
         "Layout saved": "Layout salvo",

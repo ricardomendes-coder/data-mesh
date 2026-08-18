@@ -63,9 +63,18 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
       .then(function (res) {
         var payload = res.body || {};
-        if (!res.ok || payload.error) {
+        // Same distinction the dashboard tiles make: a chart that is merely
+        // slow must not read as a broken one.
+        if (!res.ok) {
           box.innerHTML = "";
-          box.appendChild(el("div", "bi-tile-err", payload.error || ""));
+          box.appendChild(
+            el("div", "bi-tile-err", payload.error || grid.getAttribute("data-err-timeout") || "")
+          );
+          return;
+        }
+        if (payload.error) {
+          box.innerHTML = "";
+          box.appendChild(el("div", "bi-tile-err", payload.error));
           return;
         }
         draw(box, payload);

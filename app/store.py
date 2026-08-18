@@ -453,6 +453,47 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "0017_chart_result_variants",
+        """
+        -- A chart's own result, cached — now in two shapes rather than one.
+        -- The listing thumbnail keeps at most a dozen table rows because it is
+        -- a likeness; the chart's own page shows the whole result. Same chart,
+        -- same query, different answers, so they cannot share one row.
+        --
+        -- Existing rows are thumbnails, which is what the default says.
+        ALTER TABLE chart_previews
+            ADD COLUMN IF NOT EXISTS variant text NOT NULL DEFAULT 'preview';
+        ALTER TABLE chart_previews DROP CONSTRAINT IF EXISTS chart_previews_pkey;
+        ALTER TABLE chart_previews ADD PRIMARY KEY (chart_id, variant);
+        """,
+    ),
+    (
+        "0016_tile_cache",
+        """
+        -- A rendered dashboard tile, kept so opening a dashboard doesn't
+        -- re-run every query on it. On the Automatismo dashboard the fourteen
+        -- tiles read one 5.7 GB materialized view and take 9s to 220s each;
+        -- one of them dropped its connection at 162s. Superset survives the
+        -- same dashboard by caching results in Redis for 24 hours — it isn't
+        -- faster, it just isn't asking.
+        --
+        -- Keyed by the query, not by the tile: `sig` is a digest of the SQL
+        -- and its bound parameters, which is exactly what decides the answer.
+        -- Two viewers with the same filters share an entry; a different filter
+        -- is a different key rather than a wrong hit.
+        CREATE TABLE IF NOT EXISTS dashboard_tile_cache (
+            item_id  bigint      NOT NULL REFERENCES dashboard_items(id) ON DELETE CASCADE,
+            sig      text        NOT NULL,
+            payload  jsonb       NOT NULL,
+            built_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (item_id, sig)
+        );
+
+        CREATE INDEX IF NOT EXISTS dashboard_tile_cache_built_idx
+            ON dashboard_tile_cache (built_at);
+        """,
+    ),
 ]
 
 
@@ -2007,12 +2048,57 @@ def put_filter_options(dashboard_slug: str, filter_key: str, options: list) -> N
         )
 
 
-def get_chart_preview(chart_id: int) -> tuple[dict, datetime] | None:
-    """A cached spec and when it was built, or None."""
+def get_tile_cache(item_id: int, sig: str) -> tuple[dict, datetime] | None:
+    """A tile's last rendered payload for this exact query, if we kept one."""
     with engine().connect() as conn:
         row = conn.execute(
-            text("SELECT spec, built_at FROM chart_previews WHERE chart_id = :i"),
-            {"i": chart_id},
+            text(
+                "SELECT payload, built_at FROM dashboard_tile_cache "
+                "WHERE item_id = :i AND sig = :s"
+            ),
+            {"i": item_id, "s": sig},
+        ).first()
+    if row is None:
+        return None
+    payload = row[0]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return payload, row[1]
+
+
+def put_tile_cache(item_id: int, sig: str, payload: dict) -> None:
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_tile_cache (item_id, sig, payload, built_at) "
+                "VALUES (:i, :s, cast(:p AS jsonb), now()) "
+                "ON CONFLICT (item_id, sig) DO UPDATE "
+                "SET payload = excluded.payload, built_at = excluded.built_at"
+            ),
+            {"i": item_id, "s": sig, "p": json.dumps(payload)},
+        )
+
+
+def drop_tile_cache(item_id: int, sig: str | None = None) -> None:
+    """Forget a tile's cached answer — one query's, or all of them."""
+    sql = "DELETE FROM dashboard_tile_cache WHERE item_id = :i"
+    params: dict = {"i": item_id}
+    if sig is not None:
+        sql += " AND sig = :s"
+        params["s"] = sig
+    with engine().begin() as conn:
+        conn.execute(text(sql), params)
+
+
+def get_chart_preview(chart_id: int, variant: str = "preview") -> tuple[dict, datetime] | None:
+    """A chart's cached result. `variant` picks the thumbnail or the full one."""
+    with engine().connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT spec, built_at FROM chart_previews "
+                "WHERE chart_id = :c AND variant = :v"
+            ),
+            {"c": chart_id, "v": variant},
         ).first()
     if row is None:
         return None
@@ -2022,22 +2108,28 @@ def get_chart_preview(chart_id: int) -> tuple[dict, datetime] | None:
     return spec, row[1]
 
 
-def put_chart_preview(chart_id: int, spec: dict) -> None:
+def put_chart_preview(chart_id: int, spec: dict, variant: str = "preview") -> None:
     with engine().begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO chart_previews (chart_id, spec, built_at) "
-                "VALUES (:i, CAST(:s AS jsonb), now()) "
-                "ON CONFLICT (chart_id) DO UPDATE SET spec = EXCLUDED.spec, built_at = now()"
+                "INSERT INTO chart_previews (chart_id, variant, spec, built_at) "
+                "VALUES (:c, :v, cast(:s AS jsonb), now()) "
+                "ON CONFLICT (chart_id, variant) DO UPDATE "
+                "SET spec = excluded.spec, built_at = excluded.built_at"
             ),
-            {"i": chart_id, "s": json.dumps(spec, default=str)},
+            {"c": chart_id, "v": variant, "s": json.dumps(spec)},
         )
 
 
-def drop_chart_preview(chart_id: int) -> None:
-    """Editing a chart invalidates its preview — the query changed."""
+def drop_chart_preview(chart_id: int, variant: str | None = None) -> None:
+    """Forget a chart's cached result — one shape of it, or every shape."""
+    sql = "DELETE FROM chart_previews WHERE chart_id = :c"
+    params: dict = {"c": chart_id}
+    if variant is not None:
+        sql += " AND variant = :v"
+        params["v"] = variant
     with engine().begin() as conn:
-        conn.execute(text("DELETE FROM chart_previews WHERE chart_id = :i"), {"i": chart_id})
+        conn.execute(text(sql), params)
 
 
 # ── dashboard filters ──────────────────────────────────────────────────────

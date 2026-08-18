@@ -81,7 +81,10 @@
    same, and a dashboard that opens on a header plus its KPIs reads better than
    one that opens on a bare row of tab names. #}
 {% if loose %}
-<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
+<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}"
+     data-refresh-label="{{ _('Refresh') }}"
+     data-err-timeout="{{ _('This chart took too long to answer.') }}"
+     data-err-unreachable="{{ _('Could not load this chart.') }}">
   {% for t in loose %}{{ tile(t, t.canvas_id) }}{% endfor %}
 </div>
 {% endif %}
@@ -96,7 +99,10 @@
 <section class="pane {{ 'active' if loop.first else '' }}" data-pane="{{ s.anchor }}">
   {% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
   {% if in_tab %}
-  <div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
+  <div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}"
+     data-refresh-label="{{ _('Refresh') }}"
+     data-err-timeout="{{ _('This chart took too long to answer.') }}"
+     data-err-unreachable="{{ _('Could not load this chart.') }}">
     {% for t in in_tab %}{{ tile(t, t.canvas_id) }}{% endfor %}
   </div>
   {% else %}
@@ -105,7 +111,10 @@
 </section>
 {% endfor %}
 {% elif not loose %}
-<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
+<div class="bi-tiles" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}"
+     data-refresh-label="{{ _('Refresh') }}"
+     data-err-timeout="{{ _('This chart took too long to answer.') }}"
+     data-err-unreachable="{{ _('Could not load this chart.') }}">
   {% for t in tiles %}{{ tile(t, t.canvas_id) }}{% endfor %}
 </div>
 {% endif %}

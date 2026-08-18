@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # distinct values of a column change on the data's schedule, and rebuilding
     # them cost this app 292 seconds on one dashboard.
     filter_options_cache_minutes: int = 360
+    # How long a rendered dashboard tile stays usable. The tile shows its age
+    # and offers a refresh, which is the difference between this and Superset:
+    # it caches the same results for 24 hours and never says so.
+    tile_cache_minutes: int = 60
 
     # Session cookie name. MUST NOT be "session": this app is served from the
     # same origin as Superset (bi.v360.io/report vs bi.v360.io/), and Flask's

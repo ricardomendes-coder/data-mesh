@@ -64,7 +64,7 @@
     box.appendChild(err);
   }
 
-  function load(box) {
+  function load(box, force) {
     var tile = box.closest(".bi-tile");
     var grid = box.closest(".bi-tiles");
     var itemId = box.getAttribute("data-tile");
@@ -76,18 +76,33 @@
     // same numbers as the rest of the page.
     var base = (grid && grid.getAttribute("data-tiles")) || window.location.pathname + "/tiles";
     var url = base + "/" + itemId + window.location.search;
+    // A forced refresh has to say so *and* survive an existing query
+    // string, which is why this is appended rather than assigned.
+    if (force) url += (url.indexOf("?") === -1 ? "?" : "&") + "refresh=1";
 
     return fetch(url, { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
       .then(function (res) {
         var payload = res.body || {};
-        if (!res.ok || payload.error) {
-          fail(box, payload.error || "This chart's query failed.");
+        // A server-reported SQL error and "the request never came back" are
+        // very different things, and printing one sentence for both is how a
+        // tile that is merely slow reads as a broken chart.
+        if (!res.ok) {
+          fail(box, payload.error || label("timeout"));
+          return;
+        }
+        if (payload.error) {
+          fail(box, payload.error);
           return;
         }
         if (payload.renders_as === "table") renderTable(box, payload);
         else if (payload.renders_as === "number") renderNumber(box, payload);
         else renderCanvas(box, payload, canvasId);
+        // Cached results carry their age and a way to force a fresh one.
+        // Superset caches the same queries for 24 hours and never says so; a
+        // number that looks current and is a day old is the failure mode this
+        // whole tool exists to avoid.
+        stamp(box, payload);
 
         if (tile) {
           var warn = tile.querySelector(".bi-tile-warn");
@@ -100,8 +115,32 @@
         }
       })
       .catch(function () {
-        fail(box, "Could not load this chart.");
+        fail(box, label("unreachable"));
       });
+  }
+
+
+  function label(name) {
+    var host = document.querySelector("[data-tiles]");
+    return (host && host.getAttribute("data-err-" + name)) || "";
+  }
+
+  function stamp(box, payload) {
+    if (!payload.age) return;
+    var host = document.querySelector("[data-tiles]");
+    var age = el("div", "bi-prev-age");
+    age.appendChild(el("span", null, payload.age));
+    if (payload.cached) {
+      var refresh = el("button", "bi-prev-refresh", "\u21bb");
+      refresh.type = "button";
+      refresh.title = (host && host.getAttribute("data-refresh-label")) || "";
+      refresh.addEventListener("click", function () {
+        box.innerHTML = '<div class="bi-tile-skel"><span></span><span></span><span></span></div>';
+        load(box, true);
+      });
+      age.appendChild(refresh);
+    }
+    box.appendChild(age);
   }
 
   function run() {

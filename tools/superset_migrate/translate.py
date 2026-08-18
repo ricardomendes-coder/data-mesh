@@ -853,9 +853,15 @@ def filters_of(json_metadata: str) -> list[dict]:
         name = f.get("name") or column
         default = ""
         mask = ((f.get("defaultDataMask") or {}).get("filterState") or {}).get("value")
-        if isinstance(mask, list) and mask:
-            default = str(mask[0])
-        elif isinstance(mask, (str, int, float)):
+        if isinstance(mask, list):
+            # JSON null arrives as Python None, and str(None) is the literal
+            # "None" — a value Postgres then tries to read. Against a boolean
+            # column that is a hard error, and because defaults apply on
+            # arrival it failed every tile the filter scoped, on every visit:
+            #   invalid input syntax for type boolean: "None"
+            # An absent default is absent, not the word for it.
+            mask = next((v for v in mask if v is not None), None)
+        if isinstance(mask, (str, int, float)):  # bool included, deliberately
             default = str(mask)
         scope = f.get("scope") or {}
         out.append(
