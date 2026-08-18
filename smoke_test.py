@@ -1969,6 +1969,135 @@ def test_tile_cache():
     print("tile cache: OK")
 
 
+def test_dashboard_text_renders_its_html_safely():
+    """Superset markdown carries raw HTML, and it has to render — but only some.
+
+    Nine of the 129 imported text blocks are small HTML tables of thresholds.
+    Escaping everything printed `<table border="1" cellpadding="8"...` on the
+    dashboard as text, which is what "the text boxes look terrible" was. So a
+    named few tags come back after escaping, with a named few attributes, and
+    nothing else does.
+    """
+    from app.main import _markdown_lite as md
+
+    # ── what must render ──
+    out = str(md('<table border="1"><tr><td align="center"><b>SPI</b></td></tr></table>'))
+    assert "<table>" in out and '<td align="center">' in out, out
+    assert "<b>SPI</b>" in out, out
+    # border is not on the list, so it does not survive
+    assert "border=" not in out, out
+    # A table must not be wrapped in a paragraph: the browser closes the <p>
+    # before it and the table falls out of the block it belongs to.
+    assert not out.startswith("<p><table"), out
+    # Entities are characters, not markup, and printed as source before.
+    assert "&ge;" in str(md("SPI &ge; 0,95")), str(md("SPI &ge; 0,95"))
+
+    # ── what must not ──
+    for bad in (
+        "<script>alert(1)</script>",
+        '<img src=x onerror=alert(1)>',
+        '<iframe src="evil"></iframe>',
+        '<a href="javascript:evil()">x</a>',
+        '<svg onload=alert(1)>',
+    ):
+        rendered = str(md(bad))
+        assert "<script" not in rendered.lower(), rendered
+        assert "onerror" not in rendered.lower() or "&lt;" in rendered, rendered
+        assert "<iframe" not in rendered.lower(), rendered
+        assert "javascript:" not in rendered.lower() or "&lt;" in rendered, rendered
+
+    # An attribute that is not on the list is dropped, tag and text kept.
+    out = str(md('<td style="background:url(x)" onclick="evil()">y</td>'))
+    assert out.count("<td>") == 1 and "onclick" not in out and "style" not in out, out
+
+    # "img" must not match the "i" in the allowed list and leave a stray tag
+    # that italicises the rest of the dashboard.
+    assert "<i>" not in str(md("<img src=x>")), str(md("<img src=x>"))
+
+    # Ordinary markdown still works.
+    assert "<strong>x</strong>" in str(md("**x**"))
+    assert "<h2>T</h2>" in str(md("# T"))
+    print("dashboard text renders its html safely: OK")
+
+
+def test_editor_does_not_reflow_placed_tiles():
+    """Opening the editor must not move anything, and tabs stay apart.
+
+    dashboard-layout.js seeds coordinates onto tiles that have none, skipping
+    any marked data-placed. The template never emitted that attribute, so
+    seed() reflowed *every* tile into a left-to-right stream on load and the
+    next drag saved the stream — one small edit rewrote a whole imported
+    dashboard. Two of the sixty-three were destroyed that way before it was
+    found, both with 100% of their blocks moved.
+
+    The editor also put every tab in one grid. Each tab starts at y=0, so they
+    piled onto the same corner and their coordinates stopped meaning what they
+    mean on the view page.
+    """
+    from datetime import datetime
+
+    from app import store
+
+    chart = store.Chart(
+        id=1, slug="vendas", title="Vendas", source_db="analytics",
+        sql="SELECT a, b FROM t", chart_type="bar", x_column="a", y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    placed = store.DashboardItem(
+        id=11, position=0, chart=chart, grid_x=0, grid_y=52, grid_w=6, grid_h=50,
+        section_id=3,
+    )
+    unplaced = store.DashboardItem(id=12, position=1, chart=chart, section_id=3)
+    loose = store.DashboardItem(
+        id=13, position=2, chart=chart, grid_x=6, grid_y=0, grid_w=6, grid_h=50
+    )
+    dash = store.Dashboard(slug="d", title="D", id=5, items=[placed, unplaced, loose])
+    dash.sections = [store.DashboardSection(id=3, title="Resumo", items=[placed, unplaced])]
+
+    saved = (
+        store.available, store.get_dashboard, store.list_charts, store.slug_for,
+        store.upsert_user, store.list_filters,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if s == "d" else None
+    store.list_charts = lambda with_sql=False: [chart]
+    store.slug_for = lambda table, ident: "d" if str(ident) == "5" else str(ident)
+    store.upsert_user = _no_op_user
+    store.list_filters = lambda s: []
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            body = client.get("/dashboards/5/edit").text
+
+            # A tile with coordinates says so, or seed() will move it.
+            assert body.count('data-placed="1"') == 2, (
+                "placed tiles are not marked — seed() will reflow the dashboard "
+                "on load and the next drag will save the damage"
+            )
+            # ...and one without coordinates must NOT be marked, or it never
+            # gets a position at all.
+            assert body.count('data-item="12"') == 1
+            import re as _re
+            twelve = _re.search(r'data-item="12"[^>]*>', body).group(0)
+            assert "data-placed" not in twelve, "an unplaced tile was marked placed"
+
+            # One grid per tab, so coordinates keep their meaning. Counted on
+            # data-save, which only a grid carries: the class name also appears
+            # in the inlined stylesheet, so counting it matched three times on
+            # a page with two grids and asserted nothing.
+            assert body.count('data-save="') == 2, (
+                f"expected one editing grid per tab, found {body.count(chr(39))and body.count('data-save=')} — "
+                "if they share one grid, every tab starts at y=0 and they pile "
+                "onto each other"
+            )
+    finally:
+        (
+            store.available, store.get_dashboard, store.list_charts, store.slug_for,
+            store.upsert_user, store.list_filters,
+        ) = saved
+    print("editor does not reflow placed tiles: OK")
+
+
 def test_imported_layout_mirrors_superset():
     """An imported dashboard must be the original, not a tidied-up version.
 
@@ -2971,6 +3100,8 @@ if __name__ == "__main__":
     test_filter_defaults_are_never_the_word_none()
     test_chart_page_does_not_wait_on_the_query()
     test_tile_cache()
+    test_dashboard_text_renders_its_html_safely()
+    test_editor_does_not_reflow_placed_tiles()
     test_imported_layout_mirrors_superset()
     test_every_resource_type_is_grantable()
     test_user_detail_page()

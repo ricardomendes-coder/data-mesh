@@ -820,6 +820,11 @@ class DashboardItem:
         return self.kind == "divider"
 
     @property
+    def is_missing(self) -> bool:
+        """A chart that could not be imported, holding its place."""
+        return self.kind == "missing"
+
+    @property
     def display_title(self) -> str:
         """What this tile is called *here*."""
         return self.title_override or (self.chart.title if self.chart else "")
@@ -1134,14 +1139,19 @@ def add_text_item(
     section_id: int | None = None,
     width: str = "full",
     kind: str = "text",
+    title: str = "",
 ) -> int | None:
-    """Append a chartless tile — a heading, a note, or a rule between charts.
+    """Append a chartless tile — a heading, a rule, or a marker for a gap.
+
+    `missing` is a chart that could not be imported. Its slot is kept rather
+    than closed up: every other tile holds the position Superset gave it, so
+    the gap exists either way and is better labelled than blank.
 
     Returns the new tile's id, so an importer can place it on the grid.
     """
     if width not in WIDTHS:
         width = "full"
-    if kind not in ("text", "divider"):
+    if kind not in ("text", "divider", "missing"):
         kind = "text"
     with engine().begin() as conn:
         dash_id = conn.execute(
@@ -1159,13 +1169,96 @@ def add_text_item(
         new_id = conn.execute(
             text(
                 "INSERT INTO dashboard_items "
-                "(dashboard_id, chart_id, position, width, kind, content, section_id) "
-                "VALUES (:d, NULL, :p, :w, :k, :c, :s) RETURNING id"
+                "(dashboard_id, chart_id, position, width, kind, content, section_id, "
+                " title_override) "
+                "VALUES (:d, NULL, :p, :w, :k, :c, :s, :t) RETURNING id"
             ),
-            {"d": dash_id, "p": position, "w": width, "c": content, "s": section_id, "k": kind},
+            {
+                "d": dash_id,
+                "p": position,
+                "w": width,
+                "c": content,
+                "s": section_id,
+                "k": kind,
+                "t": title,
+            },
         ).scalar()
         _touch(conn, dash_id)
         return new_id
+
+
+def sync_sections(dashboard_slug: str, titles: list[str]) -> dict[str, int]:
+    """Make this dashboard's tabs be exactly `titles`, in that order.
+
+    Creates the ones that are missing and renumbers the rest, so the tab strip
+    reads the way Superset's does. Tabs whose charts all failed to import were
+    dropped as empty; once those charts are marked rather than omitted, the tab
+    has content again and has to come back — in its original place, not
+    appended after the ones that survived.
+
+    Returns title -> section id. Existing tabs keep their id, so the tiles
+    already on them are untouched.
+    """
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return {}
+        existing = {
+            r[1]: r[0]
+            for r in conn.execute(
+                text("SELECT id, title FROM dashboard_sections WHERE dashboard_id = :d"),
+                {"d": dash_id},
+            )
+        }
+        out: dict[str, int] = {}
+        for position, title in enumerate(titles):
+            section_id = existing.get(title)
+            if section_id is None:
+                section_id = conn.execute(
+                    text(
+                        "INSERT INTO dashboard_sections (dashboard_id, title, position) "
+                        "VALUES (:d, :t, :p) RETURNING id"
+                    ),
+                    {"d": dash_id, "t": title, "p": position},
+                ).scalar()
+            else:
+                conn.execute(
+                    text("UPDATE dashboard_sections SET position = :p WHERE id = :i"),
+                    {"p": position, "i": section_id},
+                )
+            out[title] = section_id
+        return out
+
+
+def add_gap_markers(markers: list[dict]) -> int:
+    """Insert placeholders for charts that could not be imported, in one go.
+
+    `markers` is [{dashboard_id, section_id, title, content, x, y, w, h}, ...]
+    across every dashboard at once. One statement and one transaction: doing
+    this a marker at a time meant 451 separate transactions over an SSH tunnel,
+    which is minutes of round trips for a few kilobytes of rows.
+    """
+    if not markers:
+        return 0
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_items "
+                "(dashboard_id, chart_id, position, width, kind, content, section_id, "
+                " title_override, grid_x, grid_y, grid_w, grid_h) "
+                "VALUES (:dashboard_id, NULL, :position, 'full', 'missing', :content, "
+                "        :section_id, :title, :x, :y, :w, :h)"
+            ),
+            markers,
+        )
+        touched = {m["dashboard_id"] for m in markers}
+        conn.execute(
+            text("UPDATE dashboards SET updated_at = now() WHERE id = ANY(:ids)"),
+            {"ids": list(touched)},
+        )
+    return len(markers)
 
 
 def save_layout(dashboard_slug: str, placements: list[dict]) -> int:

@@ -148,11 +148,35 @@
 {% endif %}
 
 {% if tiles %}
-<div class="bi-tiles bi-tiles-editing" data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles" data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}" data-save="{{ url_for('dashboard_save_layout', slug=dashboard.id) }}">
-  {% for t in tiles %}
+{# One grid per tab, exactly as the view page renders them.
+   Every tab's tiles used to go into a single grid here. Each tab legitimately
+   starts at y=0, so in one shared space they all piled onto the same corner —
+   and since a save posts every tile, one small drag rewrote the whole
+   dashboard into that flattened arrangement. The coordinates are per tab, so
+   the editor has to be per tab too. #}
+{% macro editgrid(group, section_id) -%}
+<div class="bi-tiles bi-tiles-editing"
+     data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles"
+     data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}"
+     data-section="{{ section_id or '' }}"
+     data-save="{{ url_for('dashboard_save_layout', slug=dashboard.id) }}">
+  {% for t in group %}
   {{ tile(t, t.canvas_id, editing=true, widths=widths, dashboard=dashboard) }}
   {% endfor %}
 </div>
+{%- endmacro %}
+
+{% set loose = tiles|selectattr('item.section_id', 'none')|list %}
+{% if loose %}{{ editgrid(loose, None) }}{% endif %}
+
+{% for s in dashboard.sections %}
+{% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
+<div class="bi-editsec">
+  <div class="bi-group-hd"><span class="bi-group-nm">{{ s.title }}</span></div>
+  {% if in_tab %}{{ editgrid(in_tab, s.id) }}
+  {% else %}<div class="bi-empty-lg">{{ _('Nothing on this tab yet.') }}</div>{% endif %}
+</div>
+{% endfor %}
 
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>

@@ -378,6 +378,12 @@
        ends two rows short of the next). A row-gap here would multiply — a tile
        50 rows tall would gain 49 gaps — so vertical spacing lives in the y. */
     .bi-tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:8px;column-gap:16px;row-gap:0;align-items:stretch;}
+    /* A chart that didn't import, holding its slot. Deliberately quiet: it is
+       a note about the dashboard, not an error the reader caused. */
+    .bi-tile-missing{display:flex;align-items:center;justify-content:center;gap:.6rem;padding:.8rem;background:none;border:1px dashed var(--border-strong);box-shadow:none;color:var(--muted);text-align:left;overflow:hidden;}
+    .bi-tile-missing svg{flex-shrink:0;opacity:.7;}
+    .bi-missing-nm{font-size:.82rem;font-weight:600;color:var(--body);}
+    .bi-missing-why{font-size:.74rem;margin-top:.1rem;}
     .bi-tile-divider{grid-column:1/-1;align-self:center;height:1px;background:var(--border);border:0;box-shadow:none;}
     @media(max-width:900px){
       /* One column on a phone: a 12-col drag layout is meaningless there, and
@@ -459,7 +465,20 @@
        renders taller than its allocation has nowhere to push. Scrolling keeps
        every word reachable without disturbing the charts around it. */
     .bi-tile-text{background:none;border:none;box-shadow:none;padding:.2rem 0;position:relative;overflow:auto;}
-    .bi-textblock{color:var(--body);font-size:.86rem;line-height:1.5;}
+    /* A text block is a tile like any other: on a grey page, bare text next to
+       white cards reads as something that failed to render. Superset shows the
+       same markdown on a white dashboard, so this is what matches it here. */
+    .bi-textblock{color:var(--body);font-size:.86rem;line-height:1.5;height:100%;overflow:auto;padding:.85rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-1);}
+    .bi-textblock>:first-child{margin-top:0;}
+    .bi-textblock>:last-child{margin-bottom:0;}
+    .bi-textblock h1,.bi-textblock h2,.bi-textblock h3,.bi-textblock h4{color:var(--title);margin:.5rem 0 .35rem;line-height:1.25;}
+    .bi-textblock h1{font-size:1.15rem;} .bi-textblock h2{font-size:1rem;}
+    .bi-textblock h3{font-size:.9rem;}   .bi-textblock h4{font-size:.84rem;}
+    .bi-textblock p{margin:.35rem 0;}
+    /* Tables written as raw HTML inside a Superset markdown block. */
+    .bi-textblock table{border-collapse:collapse;margin:.5rem 0;font-size:.8rem;}
+    .bi-textblock th,.bi-textblock td{border:1px solid var(--border);padding:.25rem .5rem;text-align:left;}
+    .bi-textblock th{background:var(--g-50,#F4F5F6);font-weight:650;}
     .bi-textblock h2,.bi-textblock h3,.bi-textblock h4{color:var(--title);letter-spacing:-.01em;margin:.1rem 0 .3rem;}
     .bi-textblock h2{font-size:1.05rem;} .bi-textblock h3{font-size:.94rem;} .bi-textblock h4{font-size:.86rem;}
     .bi-textblock hr{border:none;border-top:1px solid var(--border);margin:.5rem 0;}
@@ -475,8 +494,12 @@
     .bi-tile-table .bi-restbl{font-size:.74rem;}
     .bi-tile-table .bi-restbl th{font-size:.67rem;padding:.4rem .55rem;}
     .bi-tile-table .bi-restbl td{padding:.34rem .55rem;}
-    .bi-tile-number{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:150px;gap:.3rem;}
+    /* The tile's height comes from Superset and can be short, so the number
+       is sized against the box rather than fixed: a 2.6rem "78" simply fell
+       out the bottom of a tile Superset had given four rows. */
+    .bi-tile-number{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;height:100%;gap:.3rem;overflow:hidden;container-type:size;}
     .bi-kpi{font-size:2.6rem;line-height:1.05;font-weight:650;color:var(--title);letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+    @supports (container-type:size){.bi-tile-number .bi-kpi{font-size:clamp(1.1rem,42cqh,2.6rem);}}
     .bi-kpi-lg{font-size:4rem;}
     .bi-kpi-cap{font-size:.78rem;color:var(--muted);}
     .bi-kpi-box{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:220px;}

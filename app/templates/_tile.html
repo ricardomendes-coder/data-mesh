@@ -16,21 +16,37 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (14 if item.
 {% macro tile(t, canvas_id, editing=false, widths=(), dashboard=None) -%}
 {% set item = t.item %}
 
-{% if item.kind == 'divider' %}
+{% if item.kind == 'missing' %}
+{# A chart Superset draws here that could not be imported. The slot is kept so
+   every other tile holds its original position; saying what is missing and why
+   is more use than a blank rectangle nobody can account for. #}
+<div class="bi-tile bi-tile-missing{{ ' bi-draggable' if editing else '' }}"
+     style="{{ geometry(item) }}" data-item="{{ item.id }}"
+     data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
+     data-w="{{ item.span }}" data-h="{{ item.grid_h or 50 }}"
+     data-section="{{ item.section_id or '' }}"{% if item.placed %} data-placed="1"{% endif %}>
+  <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.8l6.2 10.7H1.8z"/><path d="M8 6.4v3M8 11.2h.01"/></svg>
+  <div>
+    <div class="bi-missing-nm">{{ item.title_override or _('Chart not imported') }}</div>
+    <div class="bi-missing-why">{{ _(item.content) if item.content else '' }}</div>
+  </div>
+</div>
+
+{% elif item.kind == 'divider' %}
 {# A rule Superset drew between blocks. It carries no content, so it is a line
    and nothing else — but it is still a tile, so it can be moved like one. #}
 <hr class="bi-tile bi-tile-divider{{ ' bi-draggable' if editing else '' }}"
     style="{{ geometry(item) }}" data-item="{{ item.id }}"
     data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
-    data-w="{{ item.span }}" data-h="{{ item.grid_h or 2 }}"
-    data-section="{{ item.section_id or '' }}">
+    data-w="{{ item.span }}" data-h="{{ item.grid_h or 14 }}"
+    data-section="{{ item.section_id or '' }}"{% if item.placed %} data-placed="1"{% endif %}>
 
 {% elif item.kind == 'text' %}
 <div class="bi-tile bi-tile-text{{ ' bi-draggable' if editing else '' }}"
      style="{{ geometry(item) }}" data-item="{{ item.id }}"
      data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
-     data-w="{{ item.span }}" data-h="{{ item.grid_h or 2 }}"
-     data-section="{{ item.section_id or '' }}">
+     data-w="{{ item.span }}" data-h="{{ item.grid_h or 14 }}"
+     data-section="{{ item.section_id or '' }}"{% if item.placed %} data-placed="1"{% endif %}>
   <div class="bi-textblock">{{ item.content|markdown_lite }}</div>
   {% if editing %}
   <div class="bi-tile-ctl">
@@ -49,8 +65,8 @@ grid-column: span {{ item.span }}; grid-row: span {{ item.grid_h or (14 if item.
 <div class="bi-tile{{ ' bi-draggable' if editing else '' }}"
      style="{{ geometry(item) }}" data-item="{{ item.id }}"
      data-x="{{ item.grid_x or 0 }}" data-y="{{ item.grid_y or 0 }}"
-     data-w="{{ item.span }}" data-h="{{ item.grid_h or 5 }}"
-     data-section="{{ item.section_id or '' }}">
+     data-w="{{ item.span }}" data-h="{{ item.grid_h or 50 }}"
+     data-section="{{ item.section_id or '' }}"{% if item.placed %} data-placed="1"{% endif %}>
   <div class="bi-tile-hd">
     {% if editing %}<span class="bi-drag" title="{{ _('Drag to move') }}">⠿</span>{% endif %}
     {# The name this dashboard gives the chart, which is not always the chart's

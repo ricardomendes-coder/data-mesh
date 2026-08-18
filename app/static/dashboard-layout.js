@@ -11,8 +11,13 @@
 (function () {
   "use strict";
 
-  var grid = document.querySelector(".bi-tiles-editing");
-  if (!grid) return;
+  // One grid per tab, so a tile's coordinates keep the meaning they have on
+  // the view page. They used to share a single grid: every tab starts at y=0,
+  // so the tabs piled onto each other, and since a save posts every tile one
+  // small drag rewrote the whole dashboard into that flattened arrangement.
+  var grids = document.querySelectorAll(".bi-tiles-editing");
+  if (!grids.length) return;
+  var grid = grids[0];  // any of them: they share columns, row height and URL
 
   var COLUMNS = parseInt(grid.getAttribute("data-columns"), 10) || 12;
   // One row is 8px, Superset's unit, and rows do not gap — vertical spacing is
@@ -26,9 +31,11 @@
 
   var dragging = null;
 
-  function cellSize() {
-    var width = grid.clientWidth;
-    return (width - GAP_PX * (COLUMNS - 1)) / COLUMNS;
+  function cellSize(tile) {
+    // Measure the grid this tile actually sits in — they can differ in width
+    // once tabs are laid out separately.
+    var host = (tile && tile.closest(".bi-tiles-editing")) || grid;
+    return (host.clientWidth - GAP_PX * (COLUMNS - 1)) / COLUMNS;
   }
 
   function readTile(tile) {
@@ -36,7 +43,8 @@
       x: parseInt(tile.getAttribute("data-x"), 10) || 0,
       y: parseInt(tile.getAttribute("data-y"), 10) || 0,
       w: parseInt(tile.getAttribute("data-w"), 10) || 6,
-      h: parseInt(tile.getAttribute("data-h"), 10) || 5,
+      // 50, not 5: a row is 8px now, so the old default was a 40px sliver.
+      h: parseInt(tile.getAttribute("data-h"), 10) || 50,
     };
   }
 
@@ -54,22 +62,36 @@
      was dragged. So the first thing the editor does is give every tile the
      position it is already being shown at. */
   function seed() {
-    var x = 0;
-    var y = 0;
-    var rowHeight = 0;
-    Array.prototype.forEach.call(grid.querySelectorAll(".bi-tile"), function (tile) {
-      var box = readTile(tile);
-      if (tile.hasAttribute("data-placed")) return;
-      if (x + box.w > COLUMNS) {
-        x = 0;
-        y += rowHeight || box.h;
-        rowHeight = 0;
-      }
-      box.x = x;
-      box.y = y;
-      place(tile, box);
-      x += box.w;
-      rowHeight = Math.max(rowHeight, box.h);
+    // Per grid, and only the tiles that have no coordinates yet. This used to
+    // run over one shared grid and — because the template never emitted
+    // data-placed — reflowed *every* tile into a left-to-right stream on load.
+    // The next drag saved that stream, which is how one small edit rewrote a
+    // whole imported dashboard.
+    Array.prototype.forEach.call(grids, function (host) {
+      var x = 0;
+      var y = 0;
+      var rowHeight = 0;
+      // Start below whatever is already placed, so a new tile lands in free
+      // space instead of on top of an imported one.
+      Array.prototype.forEach.call(host.querySelectorAll(".bi-tile[data-placed]"), function (t) {
+        var b = readTile(t);
+        y = Math.max(y, b.y + b.h + 2);
+      });
+      Array.prototype.forEach.call(host.querySelectorAll(".bi-tile"), function (tile) {
+        if (tile.hasAttribute("data-placed")) return;
+        var box = readTile(tile);
+        if (x + box.w > COLUMNS) {
+          x = 0;
+          y += rowHeight || box.h;
+          rowHeight = 0;
+        }
+        box.x = x;
+        box.y = y;
+        place(tile, box);
+        tile.setAttribute("data-placed", "1");
+        x += box.w;
+        rowHeight = Math.max(rowHeight, box.h);
+      });
     });
   }
 
@@ -81,7 +103,10 @@
   }
 
   function collect() {
-    return Array.prototype.map.call(grid.querySelectorAll(".bi-tile"), function (tile) {
+    // Every grid, not just the one that was dragged: save_layout writes the
+    // dashboard's whole geometry, so omitting the other tabs would blank them.
+    var all = document.querySelectorAll(".bi-tiles-editing .bi-tile");
+    return Array.prototype.map.call(all, function (tile) {
       var box = readTile(tile);
       return {
         id: parseInt(tile.getAttribute("data-item"), 10),
@@ -116,7 +141,7 @@
 
   function startDrag(event, tile, mode) {
     event.preventDefault();
-    var cell = cellSize();
+    var cell = cellSize(tile);
     dragging = {
       tile: tile,
       mode: mode,
@@ -132,7 +157,7 @@
     var handle = event.target.closest(".bi-drag");
     var resizer = event.target.closest(".bi-resize");
     var tile = event.target.closest(".bi-tile");
-    if (!tile || !grid.contains(tile)) return;
+    if (!tile || !tile.closest(".bi-tiles-editing")) return;
     if (resizer) startDrag(event, tile, "resize");
     else if (handle) startDrag(event, tile, "move");
   });

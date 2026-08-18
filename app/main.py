@@ -46,6 +46,42 @@ def _inline_code(value: str) -> Markup:
     return Markup(re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped))
 
 
+# The HTML a Superset markdown block is allowed to keep. Nine of the 129
+# imported blocks carry raw HTML — small tables of thresholds, mostly — and
+# escaping all of it printed `<table border="1" cellpadding="8"...` on screen
+# as text. Everything is still escaped first; only these come back, and only
+# with these attributes, so nothing an author writes can introduce script,
+# styling or a link target of their choosing.
+_HTML_TAGS = (
+    "table|thead|tbody|tfoot|tr|td|th|b|strong|i|em|u|br|p|ul|ol|li|code|small|h1|h2|h3|h4"
+)
+_HTML_ATTRS = {"align", "colspan", "rowspan", "width", "valign"}
+_ESCAPED_ENTITY = re.compile(r"&amp;(#\d{1,6}|#x[0-9a-fA-F]{1,5}|[a-zA-Z][a-zA-Z0-9]{1,10});")
+_BLOCK_HTML = re.compile(r"&lt;(table|ul|ol|p|div|h[1-6])(?![a-zA-Z0-9])", re.I)
+_ESCAPED_TAG = re.compile(rf"&lt;(/?)({_HTML_TAGS})(?![a-zA-Z0-9])((?:[^&]|&(?!gt;))*?)/?&gt;", re.I)
+_ESCAPED_ATTR = re.compile(r"([a-zA-Z-]+)\s*=\s*(?:&#34;|&#39;)([^&<>\"]*)(?:&#34;|&#39;)")
+
+
+def _restore_allowed_html(html: str) -> str:
+    """Turn the escaped form of a few safe tags back into markup."""
+
+    def one(match: re.Match) -> str:
+        closing, tag, raw = match.group(1), match.group(2).lower(), match.group(3) or ""
+        if closing:
+            return f"</{tag}>"
+        kept = [
+            f'{name.lower()}="{value}"'
+            for name, value in _ESCAPED_ATTR.findall(raw)
+            if name.lower() in _HTML_ATTRS and '"' not in value
+        ]
+        return f"<{tag}{(' ' + ' '.join(kept)) if kept else ''}>"
+
+    html = _ESCAPED_TAG.sub(one, html)
+    # `&ge;` came out as `&amp;ge;` and printed as the source text. An entity
+    # can only ever produce a character, so putting these back is safe.
+    return _ESCAPED_ENTITY.sub(r"&\1;", html)
+
+
 def _markdown_lite(value: str) -> Markup:
     """The small slice of Markdown that dashboard text blocks actually use.
 
@@ -82,9 +118,17 @@ def _markdown_lite(value: str) -> Markup:
         if re.match(r"^-{3,}$", block):
             out.append("<hr>")
             continue
+        # A block that is itself HTML — a table of thresholds, say — goes
+        # through as it stands. Wrapping it in <p> and turning its newlines
+        # into <br> is what made those tables vanish: a browser closes the
+        # paragraph before the table, and the stray <br>s land outside it.
+        if _BLOCK_HTML.search(block):
+            out.append(block)
+            continue
         out.append("<p>" + block.replace("\n", "<br>") + "</p>")
 
     html = "".join(out)
+    html = _restore_allowed_html(html)
     html = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", html)
     html = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", html)
     html = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", html)
@@ -1438,7 +1482,7 @@ def _render_tiles(items: list, active: list | None = None) -> list[dict]:
             )
         except Exception:
             logger.exception("Dashboard tile %r failed", item.chart.slug)
-            tile["error"] = "This chart's query failed."
+            tile["error"] = i18n.t("This chart's query failed.")
         tiles.append(tile)
     return tiles
 

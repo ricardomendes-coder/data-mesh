@@ -580,6 +580,30 @@ class Tile:
     content: str = ""
 
 
+# Why a chart didn't make it, in words a reader of the dashboard can use. The
+# raw reason is a psycopg2 traceback or an internal phrase; the dashboard shows
+# the short form, translated, in the hole the chart left behind.
+MISSING_REASONS = (
+    ("UndefinedColumn", "a column it reads no longer exists"),
+    ("UndefinedTable", "a table it reads no longer exists"),
+    ("too many series", "too many series to draw"),
+    ("more than one series dimension", "it is split two ways at once"),
+    ("no metric", "no measure could be recognised"),
+    ("multiple metrics", "several measures on one time series"),
+    ("cannot pivot", "its measure cannot be split into series"),
+    ("viz_type", "this chart type has no equivalent yet"),
+    ("did not plan", "its query no longer runs"),
+)
+
+
+def missing_reason(raw: str) -> str:
+    """One short phrase for why a chart is absent. Falls back to the generic."""
+    for needle, phrase in MISSING_REASONS:
+        if needle in (raw or ""):
+            return phrase
+    return "it could not be translated"
+
+
 def layout_of(position_json: str) -> tuple[list[Tile], list[str]]:
     """Every block Superset draws, at Superset's coordinates. One traversal.
 

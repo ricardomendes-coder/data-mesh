@@ -338,6 +338,10 @@ def main():
     # in place and no dashboards.
     store.init_schema()
 
+    # slice id -> (name, why it failed), for the markers left in the holes.
+    failed_by_id = {row[0]: (row[1], row[4]) for row in failed}
+    gaps = 0
+
     columns_of = dataset_columns()
 
     # ── charts ──
@@ -409,7 +413,31 @@ def main():
             if tile.kind == "chart":
                 chart_slug = slug_of.get(tile.chart_id)
                 if not chart_slug:
-                    continue  # the chart itself didn't migrate; skip its tile
+                    # The chart didn't migrate. Leave a marker in its place
+                    # rather than a hole: the positions of everything else are
+                    # preserved on purpose, so the gap is going to be there
+                    # either way — better that it says what is missing.
+                    name, raw = failed_by_id.get(tile.chart_id, (tile.title, ""))
+                    item_id = store.add_text_item(
+                        slug,
+                        T.missing_reason(raw),
+                        section_id=sid,
+                        kind="missing",
+                        title=(name or tile.title or "")[:200],
+                    )
+                    if item_id:
+                        gaps += 1
+                        placements.append(
+                            {
+                                "id": item_id,
+                                "x": tile.x,
+                                "y": tile.y,
+                                "w": tile.w,
+                                "h": tile.h,
+                                "section_id": sid,
+                            }
+                        )
+                    continue
                 item_id = store.add_item(
                     slug,
                     chart_slug,
@@ -493,7 +521,7 @@ def main():
 
         print(
             f"  [{made}/{total_dash}] {title[:44]:46} "
-            f"{len(mine):3} tiles  {len(section_id):2} tabs  "
+            f"{len(mine):3} tiles  {len(section_id):2} tabs  {gaps:3} gaps  "
             f"{filters_made:3} filters so far",
             flush=True,
         )
