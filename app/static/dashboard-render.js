@@ -143,7 +143,7 @@
     box.appendChild(age);
   }
 
-  function run() {
+  function run(force) {
     var queue = Array.prototype.slice.call(document.querySelectorAll("[data-tile]"));
     var active = 0;
 
@@ -152,7 +152,7 @@
       if (active >= CONCURRENCY) return;
       var box = queue.shift();
       active++;
-      load(box).then(function () {
+      load(box, force).then(function () {
         active--;
         next();
       });
@@ -162,7 +162,39 @@
   }
 
   function start() {
-    run();
+    run(false);
+    wireRefreshAll();
+  }
+
+  /* "Atualizar" in the topbar: rebuild every tile at once, rather than making
+     someone click the per-tile ↻ fourteen times. With a day-long cache this is
+     the one obvious way to ask for this minute's numbers, so it says it's
+     working and can't be fired twice at once. */
+  function wireRefreshAll() {
+    var button = document.getElementById("refresh-dashboard");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      if (button.getAttribute("aria-busy") === "true") return;
+      button.setAttribute("aria-busy", "true");
+      document.querySelectorAll("[data-tile]").forEach(function (box) {
+        box.innerHTML =
+          '<div class="bi-tile-skel"><span></span><span></span><span></span></div>';
+      });
+      var pending = document.querySelectorAll("[data-tile]").length;
+      var queue = Array.prototype.slice.call(document.querySelectorAll("[data-tile]"));
+      var active = 0;
+      function next() {
+        if (!queue.length || active >= CONCURRENCY) return;
+        active++;
+        load(queue.shift(), true).then(function () {
+          active--;
+          if (--pending <= 0) button.removeAttribute("aria-busy");
+          next();
+        });
+        next();
+      }
+      for (var i = 0; i < CONCURRENCY; i++) next();
+    });
   }
 
   if (document.readyState === "loading") {

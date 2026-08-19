@@ -1048,6 +1048,16 @@ def name_tab_anchors(sections: list[DashboardSection]) -> None:
         section.anchor = base if used[base] == 1 else f"{base}-{used[base]}"
 
 
+def rename_dashboard(slug: str, title: str) -> bool:
+    """Change a dashboard's title, leaving its slug and everything else intact."""
+    with engine().begin() as conn:
+        n = conn.execute(
+            text("UPDATE dashboards SET title = :t, updated_at = now() WHERE slug = :s"),
+            {"t": title, "s": slug},
+        ).rowcount
+    return bool(n)
+
+
 def save_dashboard(dash: Dashboard) -> Dashboard:
     """Insert, or update title/description in place when the slug exists."""
     with engine().begin() as conn:

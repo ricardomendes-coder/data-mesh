@@ -1,9 +1,18 @@
 {% extends "_shell.html" %}
 {# `with context` is required — the macro uses url_for. See dashboard_show.html. #}
 {% from "_tile.html" import tile with context %}
-{% block page_title %}{{ dashboard.title }}{% endblock %}
+{% block page_title %}
+  {# Rename in place — a new dashboard arrives named "Untitled" and this is
+     where it gets its real name, the way a chart is named in the builder.
+     Submits on blur or Enter; the slug never changes, so links hold. #}
+  <form method="post" action="{{ url_for('dashboard_rename', slug=dashboard.id) }}"
+        class="bi-titleedit">
+    <input name="title" value="{{ dashboard.title }}" required aria-label="{{ _('Title') }}"
+           onblur="if(this.value.trim() && this.value !== this.defaultValue) this.form.submit()">
+  </form>
+{% endblock %}
 {% block page_sub %}
-  <a href="{{ url_for('dashboards_index') }}">Dashboards</a> / editing
+  <a href="{{ url_for('dashboards_index') }}">{{ _('Dashboards') }}</a> / {{ _('editing') }}
 {% endblock %}
 {% block topbar_extra %}
 <a class="bi-btn" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">Done</a>

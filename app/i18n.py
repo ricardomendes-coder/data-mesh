@@ -139,6 +139,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "{n} min ago": "há {n} min",
         "{n} h ago": "há {n} h",
         "Refresh": "Atualizar",
+        "Rebuild every chart with the latest data": "Reconstruir todos os gráficos com os dados mais recentes",
         # ── charts ──
         "New chart": "Novo gráfico",
         "{n} saved": "{n} salvos",
@@ -210,6 +211,11 @@ CATALOG: dict[str, dict[str, str]] = {
         "Nothing on this dashboard yet. Add a chart above.": "Nada neste painel ainda. Adicione um gráfico acima.",
         "No dashboards yet. Name one above, then add charts to it.": "Nenhum painel ainda. Dê um nome acima e depois adicione gráficos.",
         "Name a new dashboard…": "Nomeie um novo painel…",
+        "Search charts…": "Buscar gráficos…",
+        "Search dashboards…": "Buscar painéis…",
+        "Nothing matches your search.": "Nada corresponde à busca.",
+        "Untitled dashboard": "Painel sem título",
+
         "This chart's query failed.": "A consulta deste gráfico falhou.",
         "Could not load this chart.": "Não foi possível carregar este gráfico.",
         "This chart took too long to answer.": "Este gráfico demorou demais para responder.",

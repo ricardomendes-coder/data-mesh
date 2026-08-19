@@ -68,3 +68,18 @@
 <script type="application/json" id="bi-tagvocab">{{ vocab|map(attribute='name')|list|tojson }}</script>
 <script src="{{ url_for('static', path='tag-editor.js') }}"></script>
 {%- endmacro %}
+
+{# The listing's own search: a live, client-side filter of what is already on
+   the page — no reload, so it doesn't re-fire the lazy preview fetches. Shared
+   by Charts and Dashboards so the two read identically. Each item carries
+   data-search-item + data-search-text; listing-search.js hides the rest. #}
+{% macro search_bar(placeholder) -%}
+<div class="bi-listtools">
+  <div class="bi-search" role="search">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+    <input type="search" data-search placeholder="{{ placeholder }}" autocomplete="off" aria-label="{{ placeholder }}">
+  </div>
+</div>
+<p class="bi-search-empty" data-search-empty hidden>{{ _('Nothing matches your search.') }}</p>
+<script src="{{ url_for('static', path='listing-search.js') }}"></script>
+{%- endmacro %}

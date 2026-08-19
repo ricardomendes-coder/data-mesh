@@ -1969,6 +1969,85 @@ def test_tile_cache():
     print("tile cache: OK")
 
 
+def test_listings_share_search_and_create_layout():
+    """Charts and Dashboards must read the same: a search bar in the body, the
+    create action in the top bar, and no name field on the listing.
+
+    The dashboard listing used to carry a name-a-new-dashboard input that
+    looked exactly like a search box but wasn't one. Now both pages get a real
+    search and name the thing later — a chart in the builder, a dashboard in
+    the editor.
+    """
+    from datetime import datetime
+
+    from app import store
+
+    chart = store.Chart(
+        id=1, slug="vendas", title="Vendas Mensais", source_db="analytics",
+        sql="SELECT 1", chart_type="bar", x_column="a", y_columns=["b"],
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    dash = store.Dashboard(slug="operacao", title="Operação", id=9)
+    created = {"title": None}
+
+    saved = (
+        store.available, store.list_charts, store.list_dashboards, store.list_tags,
+        store.tags_for, store.get_dashboard, store.save_dashboard, store.rename_dashboard,
+        store.unique_slug, store.slug_for, store.upsert_user,
+    )
+    store.available = lambda: True
+    store.list_charts = lambda with_sql=False: [chart]
+    store.list_dashboards = lambda: [dash]
+    store.list_tags = lambda resource_type=None: []
+    store.tags_for = lambda rt, keys: {}
+    store.get_dashboard = lambda s, with_items=True: dash if str(s) in ("operacao", "9") else None
+    store.unique_slug = lambda title, exists=None: "novo-painel"
+    store.slug_for = lambda table, ident: "operacao" if str(ident) == "9" else str(ident)
+    store.upsert_user = _no_op_user
+
+    def _save(d):
+        created["title"] = d.title
+        d.id = 9
+        return d
+
+    store.save_dashboard = _save
+    renamed = {}
+    store.rename_dashboard = lambda slug, title: renamed.__setitem__(slug, title) or True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            for path in ("/charts", "/dashboards"):
+                body = client.get(path).text
+                assert "listing-search.js" in body, f"{path}: no search"
+                assert "data-search" in body, f"{path}: search input missing"
+                assert "data-search-item" in body, f"{path}: items not searchable"
+            # The dashboard listing must no longer carry a name field.
+            assert 'name="title"' not in client.get("/dashboards").text, (
+                "the name-a-new-dashboard bar is still there"
+            )
+
+            # Create with no title → a default, straight into the editor.
+            r = client.post("/dashboards", data={}, follow_redirects=False)
+            assert r.status_code == 303, r.status_code
+            assert "/edit" in r.headers["location"], r.headers["location"]
+            assert created["title"], "a dashboard was created with no title at all"
+
+            # Rename from the editor updates the title, not the slug.
+            r = client.post(
+                "/dashboards/9/rename", data={"title": "Operação Diária"}, follow_redirects=False
+            )
+            assert r.status_code == 303
+            assert renamed == {"operacao": "Operação Diária"}, renamed
+    finally:
+        (
+            store.available, store.list_charts, store.list_dashboards, store.list_tags,
+            store.tags_for, store.get_dashboard, store.save_dashboard, store.rename_dashboard,
+            store.unique_slug, store.slug_for, store.upsert_user,
+        ) = saved
+    print("listings share search and create layout: OK")
+
+
 def test_a_dashboard_grant_carries_its_charts():
     """Granting a dashboard has to show the dashboard.
 
@@ -3171,6 +3250,7 @@ if __name__ == "__main__":
     test_filter_defaults_are_never_the_word_none()
     test_chart_page_does_not_wait_on_the_query()
     test_tile_cache()
+    test_listings_share_search_and_create_layout()
     test_a_dashboard_grant_carries_its_charts()
     test_dashboard_text_renders_its_html_safely()
     test_editor_does_not_reflow_placed_tiles()

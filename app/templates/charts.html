@@ -1,5 +1,5 @@
 {% extends "_shell.html" %}
-{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab with context %}
+{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab, search_bar with context %}
 {% block page_title %}{{ _('Charts') }}{% endblock %}
 {% block page_sub %}{{ _('{n} saved', n=charts|length) }}{% endblock %}
 {% block topbar_extra %}
@@ -11,6 +11,7 @@
 {% endblock %}
 
 {% block content %}
+{{ search_bar(_('Search charts…')) }}
 {{ tag_bar('charts_index', all_tags, tag, view) }}
 
 {% if charts %}
@@ -27,7 +28,7 @@
     </thead>
     <tbody>
       {% for c in charts %}
-      <tr>
+      <tr data-search-item data-search-text="{{ c.title }}">
         <td><a href="{{ url_for('chart_detail', slug=c.id) }}">{{ c.title }}</a></td>
         <td><span class="bi-kind bi-kind-view">{{ _(c.chart_type) }}</span></td>
         <td><code>{{ c.source_db }}</code></td>
@@ -47,7 +48,7 @@
      data-preview="{{ url_for('charts_index') }}"
      data-err-timeout="{{ _('This chart took too long to answer.') }}">
   {% for c in charts %}
-  <div class="bi-card">
+  <div class="bi-card" data-search-item data-search-text="{{ c.title }}">
     <div class="bi-card-ic bi-card-ic-chart">
       <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14h12"/><rect x="3" y="8" width="2.6" height="5"/><rect x="7" y="4.5" width="2.6" height="8.5"/><rect x="11" y="6.5" width="2.6" height="6.5"/></svg>
     </div>

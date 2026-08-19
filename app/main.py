@@ -1690,7 +1690,7 @@ def dashboards_index(
 @app.post("/dashboards")
 def dashboard_create(
     request: Request,
-    title: str = Form(...),
+    title: str = Form(""),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
@@ -1700,7 +1700,8 @@ def dashboard_create(
         return _forbidden(
             request, user, i18n.t("You don't have access to the dashboard builder."), access=access
         )
-    title = title.strip() or "Untitled dashboard"
+    # Named in the editor, like a chart is named in the builder.
+    title = title.strip() or i18n.t("Untitled dashboard")
     dash = store.save_dashboard(
         store.Dashboard(
             slug=store.unique_slug(
@@ -2136,6 +2137,26 @@ def _may_edit_dashboard(access: store.Access, slug: str) -> bool:
     return access.allows(store.DASHBOARD, slug) and access.allows(
         store.FEATURE, "dashboard_builder"
     )
+
+
+@app.post("/dashboards/{slug}/rename")
+def dashboard_rename(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    title: str = Form(...),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Rename a dashboard in place. The slug (and so every link) stays put —
+    URLs address dashboards by id now, so the title is free to change."""
+    if not _may_edit_dashboard(access, slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to edit that dashboard."), access=access
+        )
+    title = title.strip()
+    if title and store.available():
+        store.rename_dashboard(slug, title)
+    return _back_to(request, "dashboard_edit", "dashboards", slug)
 
 
 @app.post("/dashboards/{slug}/sections")

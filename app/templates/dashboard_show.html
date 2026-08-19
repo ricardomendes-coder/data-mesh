@@ -8,6 +8,14 @@
   {{ _('{n} chart', n=tiles|length) if tiles|length == 1 else _('{n} charts', n=tiles|length) }}
 {% endblock %}
 {% block topbar_extra %}
+{# Rebuilds every tile against the source. With a day-long cache this is the
+   deliberate way to get this minute's numbers; the per-tile ↻ still exists for
+   one chart at a time. aria-busy is toggled by dashboard-render.js. #}
+<button class="bi-btn ghost" id="refresh-dashboard" type="button"
+        title="{{ _('Rebuild every chart with the latest data') }}">
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/></svg>
+  {{ _('Refresh') }}
+</button>
 <a class="bi-btn ghost" href="{{ url_for('dashboard_edit', slug=dashboard.id) }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>
   {{ _('Edit') }}
