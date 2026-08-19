@@ -41,17 +41,21 @@
    the canvas would distort every imported dashboard. Closed until asked for.
    A GET form, so an applied filter is a shareable link. #}
 {% set active = filters|selectattr('values')|list|length %}
-<details class="bi-filterdrawer"
-         data-options-url="{{ url_for('dashboard_filter_options', slug=dashboard.id) }}"
-         data-all-label="{{ _('All') }}"
-         data-search-label="{{ _('Search…') }}"
-         data-loading-label="{{ _('loading options…') }}">
-  <summary class="bi-btn ghost">
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M4.5 8h7M6.5 12h3"/></svg>
-    {{ _('Filters') }}{% if active %} <span class="bi-tagn">{{ active }}</span>{% endif %}
-  </summary>
+{# Active-filter bar above the tiles — the drawer's toggle plus a removable
+   pill per applied filter, mirroring the reference. Each pill's × is a link
+   that drops just that filter, so the applied state stays a shareable URL. #}
+<div class="bi-filterbar-top">
+  <details class="bi-filterdrawer"
+           data-options-url="{{ url_for('dashboard_filter_options', slug=dashboard.id) }}"
+           data-all-label="{{ _('All') }}"
+           data-search-label="{{ _('Search…') }}"
+           data-loading-label="{{ _('loading options…') }}">
+    <summary class="bi-filtertoggle">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M4.5 8h7M6.5 12h3"/></svg>
+      {{ _('Filters') }}{% if active %} <span class="bi-filtercount">{{ active }}</span>{% endif %}
+    </summary>
 
-  <div class="bi-drawer-scrim" data-drawer-close></div>
+    <div class="bi-drawer-scrim" data-drawer-close></div>
   <form class="bi-filterpanel" method="get" action="{{ url_for('dashboard_show', slug=dashboard.id) }}">
     <div class="bi-drawer-hd">
       <span class="bi-drawer-tt">{{ _('Filters') }}</span>
@@ -120,13 +124,27 @@
     </div>
   </form>
 
-  {# The save-view form lives outside the GET filter form (forms can't nest),
-     tied to the fields above by form="saveview". It carries the current
-     selection as the page's own query string. #}
-  <form id="saveview" method="post" action="{{ url_for('dashboard_save_view', slug=dashboard.id) }}">
-    <input type="hidden" name="qs" value="{{ request.url.query }}">
-  </form>
-</details>
+    {# The save-view form lives outside the GET filter form (forms can't nest),
+       tied to the fields above by form="saveview". It carries the current
+       selection as the page's own query string. #}
+    <form id="saveview" method="post" action="{{ url_for('dashboard_save_view', slug=dashboard.id) }}">
+      <input type="hidden" name="qs" value="{{ request.url.query }}">
+    </form>
+  </details>
+
+  {% if filter_pills %}
+  <div class="bi-activepills">
+    {% for p in filter_pills %}
+    <span class="bi-activepill">
+      <span class="bi-activepill-lb">{{ p.label }}</span>
+      {% if p.text %}<span class="bi-activepill-vl">{{ p.text }}</span>{% endif %}
+      <a class="bi-activepill-x" href="{{ p.remove_url }}" title="{{ _('Remove') }}">×</a>
+    </span>
+    {% endfor %}
+    <a class="bi-clearfilters" href="{{ clear_url }}">{{ _('Clear') }}</a>
+  </div>
+  {% endif %}
+</div>
 <script src="{{ url_for('static', path='filter-drawer.js') }}"></script>
 {% endif %}
 

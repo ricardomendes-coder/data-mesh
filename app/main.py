@@ -1772,6 +1772,24 @@ def dashboard_show(
         saved_views = []
     current = {f.key: list(f.values) for f in active if f.is_set}
 
+    # Active-filter pills for the bar above the tiles: each is what's applied,
+    # with a link that drops just that one. The whole thing is a link, so the
+    # applied state stays a shareable URL and works with JS off.
+    base_url = str(request.url_for("dashboard_show", slug=slug))
+    pairs = [(k, v) for k in request.query_params for v in request.query_params.getlist(k)]
+    pills = []
+    for f in active:
+        if not f.is_set:
+            continue
+        rest = [(k, v) for (k, v) in pairs if k != f.key]
+        pills.append(
+            {
+                "label": f.label,
+                "text": ", ".join(str(v) for v in f.values if v not in (None, "")),
+                "remove_url": base_url + (("?" + urlencode(rest)) if rest else ""),
+            }
+        )
+
     tiles = _tile_shells(dash.items)
     context = _shell_context(
         user,
@@ -1782,6 +1800,8 @@ def dashboard_show(
         filters=active,
         saved_views=saved_views,
         current_filters=current,
+        filter_pills=pills,
+        clear_url=base_url,
         # Deliberately empty: the drawer fetches its own options when opened.
         # Building them here is what made this page take minutes.
         filter_options={},
