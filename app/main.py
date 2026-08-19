@@ -2119,6 +2119,14 @@ def dashboard_add_item(
         return _forbidden(
             request, user, i18n.t("You don't have access to edit that dashboard."), access=access
         )
+    # You can only put on a dashboard what you can already see. Holding a
+    # dashboard now grants the charts on it, so without this rule anyone who
+    # may edit one could add any chart in the instance and hand it to everyone
+    # who holds that dashboard — composition would be a way around the grants.
+    if not access.allows(store.CHART, chart_slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that chart."), access=access
+        )
     if store.available():
         store.add_item(slug, chart_slug, width)
     return _back_to(request, "dashboard_edit", "dashboards", slug)

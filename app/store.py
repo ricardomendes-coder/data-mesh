@@ -1877,6 +1877,27 @@ def access_for(username: str) -> Access:
         if ANY in granted.get(ANY, set()):
             return Access(username=username, everything=True)
 
+        # Holding a dashboard grants the charts on it. Without this, granting a
+        # dashboard produced a page of nothing: every tile was filtered out by
+        # a chart grant the person didn't have, with no explanation. A
+        # dashboard *is* its charts — sharing one and withholding them is a
+        # distinction nobody using it would recognise.
+        #
+        # Resolved here rather than at each check so it holds everywhere at
+        # once: the tile, the chart's own page, its SQL and the builder.
+        dashboards = granted.get(DASHBOARD, set())
+        if dashboards:
+            inherited = conn.execute(
+                text(
+                    "SELECT DISTINCT c.slug FROM dashboard_items i "
+                    "JOIN dashboards d ON d.id = i.dashboard_id "
+                    "JOIN charts c ON c.id = i.chart_id "
+                    "WHERE :all = ANY(:keys) OR d.slug = ANY(:keys)"
+                ),
+                {"keys": list(dashboards), "all": ANY},
+            )
+            granted.setdefault(CHART, set()).update(r[0] for r in inherited)
+
     return Access(username=username, granted=granted)
 
 

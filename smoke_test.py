@@ -1969,6 +1969,77 @@ def test_tile_cache():
     print("tile cache: OK")
 
 
+def test_a_dashboard_grant_carries_its_charts():
+    """Granting a dashboard has to show the dashboard.
+
+    Tiles are filtered by chart grant, so a role given a dashboard and none of
+    its charts opened a page of nothing — no tiles, no explanation. A dashboard
+    *is* its charts; sharing one and withholding them is a distinction nobody
+    using it would recognise. So the grant carries them, and with them the
+    chart's own page, its SQL and the builder.
+
+    The rule that keeps that from being a way around the grants lives in
+    dashboard_add_item: you can only put on a dashboard what you can already
+    see. Without it, anyone who may edit a dashboard could add any chart in the
+    instance and hand it to everyone holding that dashboard.
+    """
+    from app import store
+
+    saved = (store.engine, store.available)
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def __iter__(self):
+            return iter(self._rows)
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "FROM users" in sql:
+                return _Result([_Row({"id": 1, "is_admin": False, "is_active": True})])
+            if "role_permissions" in sql:
+                return _Result([(store.DASHBOARD, "vendas-mensal")])
+            if "dashboard_items" in sql:
+                # The charts that sit on the dashboards in `keys`.
+                assert "vendas-mensal" in (params or {}).get("keys", []), params
+                return _Result([("receita",), ("margem",)])
+            return _Result([])
+
+    class _Row:
+        def __init__(self, mapping):
+            self._mapping = mapping
+
+    class _Engine:
+        def connect(self):
+            return _Conn()
+
+    store.engine = _Engine
+    store.available = lambda: True
+    try:
+        access = store.access_for("ana")
+        assert access.allows(store.DASHBOARD, "vendas-mensal")
+        # The charts on it come with it — this is the whole point.
+        assert access.allows(store.CHART, "receita"), access.granted
+        assert access.allows(store.CHART, "margem"), access.granted
+        # ...and nothing else does.
+        assert not access.allows(store.CHART, "folha-de-pagamento"), access.granted
+        assert not access.allows(store.DASHBOARD, "outro"), access.granted
+    finally:
+        (store.engine, store.available) = saved
+    print("a dashboard grant carries its charts: OK")
+
+
 def test_dashboard_text_renders_its_html_safely():
     """Superset markdown carries raw HTML, and it has to render — but only some.
 
@@ -3100,6 +3171,7 @@ if __name__ == "__main__":
     test_filter_defaults_are_never_the_word_none()
     test_chart_page_does_not_wait_on_the_query()
     test_tile_cache()
+    test_a_dashboard_grant_carries_its_charts()
     test_dashboard_text_renders_its_html_safely()
     test_editor_does_not_reflow_placed_tiles()
     test_imported_layout_mirrors_superset()
