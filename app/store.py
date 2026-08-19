@@ -2284,7 +2284,6 @@ def drop_chart_preview(chart_id: int, variant: str | None = None) -> None:
 
 
 @dataclass
-@dataclass
 class SavedFilterView:
     """A named filter combination on a dashboard, shared by everyone.
 
@@ -2369,6 +2368,7 @@ def delete_filter_view(dashboard_slug: str, view_id: int) -> bool:
     return bool(n)
 
 
+@dataclass
 class DashboardFilter:
     """One control on a dashboard's filter bar. See app/filters.py."""
 
