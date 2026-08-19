@@ -139,6 +139,18 @@ CATALOG: dict[str, dict[str, str]] = {
         "{n} min ago": "há {n} min",
         "{n} h ago": "há {n} h",
         "Refresh": "Atualizar",
+        "Close": "Fechar",
+        "Search…": "Buscar…",
+        "from": "de",
+        "to": "até",
+        "contains…": "contém…",
+        "Saved views": "Visões salvas",
+        "Save current view": "Salvar visão atual",
+        "Name this view…": "Nomeie esta visão…",
+        "None yet. Apply filters below, then save the combination.": (
+            "Nenhuma ainda. Aplique filtros abaixo e salve a combinação."
+        ),
+
         "Rebuild every chart with the latest data": "Reconstruir todos os gráficos com os dados mais recentes",
         # ── charts ──
         "New chart": "Novo gráfico",

@@ -36,50 +36,98 @@
    form: the choices end up in the URL, so a filtered dashboard is a link
    somebody can send. #}
 {% if filters %}
-{# Closed until asked for. It overlays the tiles, so opening it by default
-   would hide the right-hand third of every dashboard on arrival — which is
-   what it did. The count on the button is how you know filters are on. #}
+{# Filters live in a drawer over the right edge — it overlays rather than
+   pushing, because the tiles sit at Superset's own column widths and narrowing
+   the canvas would distort every imported dashboard. Closed until asked for.
+   A GET form, so an applied filter is a shareable link. #}
 {% set active = filters|selectattr('values')|list|length %}
 <details class="bi-filterdrawer"
          data-options-url="{{ url_for('dashboard_filter_options', slug=dashboard.id) }}"
+         data-all-label="{{ _('All') }}"
+         data-search-label="{{ _('Search…') }}"
          data-loading-label="{{ _('loading options…') }}">
-  <summary title="{{ _('Filters') }}">
+  <summary class="bi-btn ghost">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M4.5 8h7M6.5 12h3"/></svg>
     {{ _('Filters') }}{% if active %} <span class="bi-tagn">{{ active }}</span>{% endif %}
   </summary>
-<form class="bi-filterpanel" method="get" action="{{ url_for('dashboard_show', slug=dashboard.id) }}">
-  {% for f in filters %}
-  <div class="bi-filter">
-    <label for="flt-{{ f.key }}">{{ f.label }}</label>
-    {% if f.filter_type == 'select' %}
-    {# Starts with only what's already chosen, so a filtered link still posts
-       the right values with JavaScript off. The rest of the list arrives from
-       filter-options when the drawer is opened — those queries are slow and
-       most visits never open this. #}
-    {% set opts = filter_options.get(f.key, []) %}
-    <select id="flt-{{ f.key }}" name="{{ f.key }}" data-options="{{ f.key }}" multiple size="1">
-      <option value="">{{ _('All') }}</option>
-      {% for o in (opts or f.values) %}
-      <option value="{{ o }}" {% if o in f.values %}selected{% endif %}>{{ o }}</option>
-      {% endfor %}
-    </select>
-    {% elif f.filter_type == 'daterange' %}
-    <span class="bi-daterange">
-      <input type="date" name="{{ f.key }}" value="{{ f.values[0] if f.values|length > 0 else '' }}" aria-label="{{ f.label }} from">
-      <input type="date" name="{{ f.key }}" value="{{ f.values[1] if f.values|length > 1 else '' }}" aria-label="{{ f.label }} to">
-    </span>
-    {% else %}
-    <input id="flt-{{ f.key }}" name="{{ f.key }}" value="{{ f.values[0] if f.values else '' }}" placeholder="contains…">
-    {% endif %}
-  </div>
-  {% endfor %}
-  <div class="bi-filter-actions">
-    <button class="bi-btn sm" type="submit">{{ _('Apply') }}</button>
-    <a class="bi-btn sm ghost" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">{{ _('Clear') }}</a>
-  </div>
-</form>
+
+  <div class="bi-drawer-scrim" data-drawer-close></div>
+  <form class="bi-filterpanel" method="get" action="{{ url_for('dashboard_show', slug=dashboard.id) }}">
+    <div class="bi-drawer-hd">
+      <span class="bi-drawer-tt">{{ _('Filters') }}</span>
+      <button class="bi-icobtn" type="button" data-drawer-close aria-label="{{ _('Close') }}">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </div>
+
+    {# ── saved views: shared, one-click recall, and the list the overnight
+       warmer reads. A view is a link back to its query string. ── #}
+    <div class="bi-savedviews">
+      <div class="bi-savedviews-hd">{{ _('Saved views') }}</div>
+      {% if saved_views %}
+      <div class="bi-viewchips">
+        {% for v in saved_views %}
+        <span class="bi-viewchip">
+          <a href="{{ url_for('dashboard_show', slug=dashboard.id) }}{% if v.query_string() %}?{{ v.query_string() }}{% endif %}">{{ v.name }}</a>
+          <button class="bi-viewchip-x" type="submit" title="{{ _('Delete') }}"
+                  formmethod="post" formaction="{{ url_for('dashboard_delete_view', slug=dashboard.id, view_id=v.id) }}">×</button>
+        </span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="bi-sub">{{ _('None yet. Apply filters below, then save the combination.') }}</p>
+      {% endif %}
+      {# Save the current selection. The name is asked for; the selection rides
+         along as the page's own query string. #}
+      <details class="bi-saveview">
+        <summary class="bi-linkbtn">+ {{ _('Save current view') }}</summary>
+        <div class="bi-saveview-row">
+          <input form="saveview" name="name" placeholder="{{ _('Name this view…') }}" maxlength="120" required>
+          <button class="bi-btn sm" form="saveview" type="submit">{{ _('Save') }}</button>
+        </div>
+      </details>
+    </div>
+
+    {# ── the filters ── #}
+    {% for f in filters %}
+    <div class="bi-filter">
+      <label for="flt-{{ f.key }}">{{ f.label }}</label>
+      {% if f.filter_type == 'select' %}
+      {# The <select> is the form control and stays authoritative; filter-drawer.js
+         hides it and builds a searchable chip picker over it. Starts with only
+         what's chosen, so a filtered link posts right with JS off; the full
+         list arrives from filter-options when the drawer opens. #}
+      {% set opts = filter_options.get(f.key, []) %}
+      <select id="flt-{{ f.key }}" name="{{ f.key }}" data-options="{{ f.key }}" multiple>
+        {% for o in (opts or f.values) %}
+        <option value="{{ o }}" {% if o in f.values %}selected{% endif %}>{{ o }}</option>
+        {% endfor %}
+      </select>
+      {% elif f.filter_type == 'daterange' %}
+      <span class="bi-daterange">
+        <input type="date" name="{{ f.key }}" value="{{ f.values[0] if f.values|length > 0 else '' }}" aria-label="{{ f.label }} {{ _('from') }}">
+        <input type="date" name="{{ f.key }}" value="{{ f.values[1] if f.values|length > 1 else '' }}" aria-label="{{ f.label }} {{ _('to') }}">
+      </span>
+      {% else %}
+      <input id="flt-{{ f.key }}" name="{{ f.key }}" value="{{ f.values[0] if f.values else '' }}" placeholder="{{ _('contains…') }}">
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="bi-filter-actions">
+      <button class="bi-btn" type="submit">{{ _('Apply') }}</button>
+      <a class="bi-btn ghost" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">{{ _('Clear') }}</a>
+    </div>
+  </form>
+
+  {# The save-view form lives outside the GET filter form (forms can't nest),
+     tied to the fields above by form="saveview". It carries the current
+     selection as the page's own query string. #}
+  <form id="saveview" method="post" action="{{ url_for('dashboard_save_view', slug=dashboard.id) }}">
+    <input type="hidden" name="qs" value="{{ request.url.query }}">
+  </form>
 </details>
-<script src="{{ url_for('static', path='filter-options.js') }}"></script>
+<script src="{{ url_for('static', path='filter-drawer.js') }}"></script>
 {% endif %}
 
 {% if tiles %}

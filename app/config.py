@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     # Hard ceiling on rows fetched by an ad-hoc query. A user can ask for less
     # (there's a box in the console) but never more — without it, one
     # `SELECT * FROM anticipation` pulls 1.8M rows into the app's memory.
+    # Per-session work_mem for warehouse queries, set on each connection the
+    # app opens (SET, not the RDS parameter group — this only touches our own
+    # connections, so a big value here can't multiply across every system that
+    # shares the instance). The Automatismo charts sort ~10M rows; at the RDS
+    # default of 4MB that spills to disk. Empty string leaves the server default.
+    warehouse_work_mem: str = "256MB"
     query_max_rows: int = 100_000
     # What the limit box starts at.
     query_default_rows: int = 1_000

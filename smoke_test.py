@@ -1969,6 +1969,97 @@ def test_tile_cache():
     print("tile cache: OK")
 
 
+def test_saved_filter_views():
+    """Filter combinations can be saved per dashboard, shared, and replayed.
+
+    They are how the team declares which combinations matter — a one-click way
+    back, and the list the overnight warmer reads to know what to pre-build. A
+    saved view can only carry this dashboard's own filters: resolve() drops
+    anything else, so a view can't smuggle in an arbitrary parameter.
+    """
+    from app import filters as filters_mod
+    from app import store
+
+    class F:
+        key = "cliente"
+        label = "Cliente"
+        filter_type = "select"
+        column_expr = "c_id"
+        values_sql = ""
+        source_db = "analytics"
+        default_value = ""
+        applies_to = ["vendas"]
+
+    dash = store.Dashboard(slug="operacao", title="Operação", id=9)
+    saved_rows = []
+    calls = {"saved": None, "deleted": None}
+
+    stash = (
+        store.available, store.get_dashboard, store.slug_for, store.upsert_user,
+        store.list_filters, store.list_filter_views, store.save_filter_view,
+        store.delete_filter_view,
+    )
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if str(s) in ("operacao", "9") else None
+    store.slug_for = lambda table, ident: "operacao" if str(ident) == "9" else str(ident)
+    store.upsert_user = _no_op_user
+    store.list_filters = lambda s: [F()]
+    store.list_filter_views = lambda s: list(saved_rows)
+    def _save(slug, name, params, created_by=""):
+        calls["saved"] = (slug, name, params, created_by)
+        saved_rows.append(store.SavedFilterView(id=1, dashboard_id=9, name=name, params=params))
+        return True
+    store.save_filter_view = _save
+    store.delete_filter_view = lambda slug, vid: calls.__setitem__("deleted", (slug, vid)) or True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            # The drawer shows the saved-views section and the picker script.
+            body = client.get("/dashboards/9").text
+            assert "filter-drawer.js" in body, "the new drawer script is missing"
+            assert "Saved views" in body or "Visões salvas" in body, "no saved-views section"
+
+            # Save the current selection, posted as the page's query string.
+            r = client.post(
+                "/dashboards/9/views",
+                data={"name": "Só ACME", "qs": "cliente=acme&cliente=vale&bogus=x"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303, r.status_code
+            slug, name, params, _by = calls["saved"]
+            assert name == "Só ACME", calls["saved"]
+            # Only the real filter survived; the bogus key was dropped.
+            assert params == {"cliente": ["acme", "vale"]}, params
+            assert "bogus" not in params
+
+            # It now renders as a chip linking back to its query string.
+            body = client.get("/dashboards/9").text
+            assert "Só ACME" in body, "saved view not listed"
+            assert "cliente=acme" in body, "the view doesn't link to its filters"
+
+            # And it can be deleted.
+            r = client.post("/dashboards/9/views/1/delete", follow_redirects=False)
+            assert r.status_code == 303
+            assert calls["deleted"] == ("operacao", 1), calls["deleted"]
+
+            # query_string() round-trips the params.
+            v = store.SavedFilterView(id=2, dashboard_id=9, name="x",
+                                      params={"cliente": ["a", "b"]})
+            assert v.query_string() == "cliente=a&cliente=b", v.query_string()
+
+            # A saved view with no filters is possible (means "clear"), and
+            # resolve() gives it back empty rather than choking.
+            assert filters_mod.resolve([F()], {}) is not None
+    finally:
+        (
+            store.available, store.get_dashboard, store.slug_for, store.upsert_user,
+            store.list_filters, store.list_filter_views, store.save_filter_view,
+            store.delete_filter_view,
+        ) = stash
+    print("saved filter views: OK")
+
+
 def test_listings_share_search_and_create_layout():
     """Charts and Dashboards must read the same: a search bar in the body, the
     create action in the top bar, and no name field on the listing.
@@ -3250,6 +3341,7 @@ if __name__ == "__main__":
     test_filter_defaults_are_never_the_word_none()
     test_chart_page_does_not_wait_on_the_query()
     test_tile_cache()
+    test_saved_filter_views()
     test_listings_share_search_and_create_layout()
     test_a_dashboard_grant_carries_its_charts()
     test_dashboard_text_renders_its_html_safely()

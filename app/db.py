@@ -8,7 +8,7 @@ take an optional `database` argument that overrides just that part of the URL.
 from dataclasses import dataclass, field
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import URL
 
 from .config import get_settings
@@ -31,7 +31,30 @@ def build_url(database: str | None = None) -> URL:
 
 
 def _engine(database: str | None = None):
-    return create_engine(build_url(database))
+    engine = create_engine(build_url(database))
+    _tune_work_mem(engine)
+    return engine
+
+
+def _tune_work_mem(engine) -> None:
+    """Give this app's warehouse connections a larger work_mem than the server
+    default, so big sorts/hashes stay in memory instead of spilling to disk.
+
+    Per-connection via a SET on checkout, not the RDS parameter group: the
+    instance is shared, and work_mem is allocated per sort per connection, so a
+    global bump multiplies memory across every system on it. Scoped here it only
+    ever affects our own queries. See settings.warehouse_work_mem.
+    """
+    mem = get_settings().warehouse_work_mem
+    if not mem:
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set(dbapi_conn, _record):
+        with dbapi_conn.cursor() as cur:
+            # A literal, not a bound param: SET doesn't take parameters. The
+            # value is our own config, never user input.
+            cur.execute(f"SET work_mem = '{mem}'")
 
 
 def run_query(sql: str, database: str | None = None) -> pd.DataFrame:

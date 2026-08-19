@@ -446,16 +446,47 @@
        tiles sit at Superset's own column widths, and narrowing the canvas to
        make room would distort every imported dashboard. */
     .bi-filterdrawer{display:flex;justify-content:flex-end;margin-bottom:.6rem;}
-    .bi-filterdrawer>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .6rem;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--surface);color:var(--body);font-size:.76rem;font-weight:600;}
+    .bi-filterdrawer>summary{list-style:none;cursor:pointer;}
     .bi-filterdrawer>summary::-webkit-details-marker{display:none;}
-    .bi-filterdrawer>summary:hover{border-color:var(--orange);color:var(--orange);}
     .bi-filterdrawer[open]>summary{border-color:var(--orange);color:var(--orange);}
-    .bi-filterpanel{position:fixed;top:0;right:0;z-index:60;display:flex;flex-direction:column;align-items:stretch;gap:.85rem;width:296px;max-width:88vw;height:100vh;overflow-y:auto;padding:1.1rem 1rem;border-left:1px solid var(--border-strong);background:var(--surface);box-shadow:var(--sh-3);}
-    .bi-filterpanel .bi-filter{display:flex;flex-direction:column;gap:.25rem;}
-    .bi-filterpanel .bi-filter select,.bi-filterpanel .bi-filter input{width:100%;}
+    /* Dim the page behind the open drawer, and give a click target to close. */
+    .bi-drawer-scrim{position:fixed;inset:0;z-index:59;background:rgba(0,0,45,.18);}
+    .bi-filterpanel{position:fixed;top:0;right:0;z-index:60;display:flex;flex-direction:column;align-items:stretch;gap:1rem;width:340px;max-width:92vw;height:100vh;overflow-y:auto;padding:1.1rem 1.15rem;border-left:1px solid var(--border-strong);background:var(--surface);box-shadow:var(--sh-3);}
+    .bi-drawer-hd{display:flex;align-items:center;justify-content:space-between;padding-bottom:.6rem;border-bottom:1px solid var(--border);}
+    .bi-drawer-tt{font-size:1rem;font-weight:700;color:var(--title);letter-spacing:-.01em;}
+    .bi-filterpanel .bi-filter{display:flex;flex-direction:column;gap:.3rem;}
+    .bi-filterpanel .bi-filter>label{font-size:.78rem;font-weight:600;color:var(--body);}
+    .bi-filterpanel .bi-filter input[type=date],.bi-filterpanel .bi-filter>input{width:100%;height:34px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font-family:inherit;font-size:.82rem;color:var(--title);background:var(--surface);}
     .bi-filterpanel .bi-daterange{display:flex;gap:.3rem;}
-    .bi-filterpanel .bi-filter-actions{position:sticky;bottom:0;display:flex;gap:.4rem;padding-top:.6rem;background:var(--surface);}
+    .bi-filter-actions{position:sticky;bottom:0;display:flex;gap:.5rem;margin-top:auto;padding:.7rem 0 .2rem;background:var(--surface);border-top:1px solid var(--border);}
     @media (max-width:720px){.bi-filterpanel{width:100%;max-width:100%;}}
+
+    /* ── saved views ── */
+    .bi-savedviews{padding-bottom:.9rem;border-bottom:1px solid var(--border);}
+    .bi-savedviews-hd{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.5rem;}
+    .bi-viewchips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.55rem;}
+    .bi-viewchip{display:inline-flex;align-items:center;gap:.15rem;padding:.2rem .2rem .2rem .6rem;border-radius:var(--r-pill);background:var(--orange-50);border:1px solid var(--orange-100);}
+    .bi-viewchip a{color:var(--orange-600);font-size:.76rem;font-weight:600;}
+    .bi-viewchip-x{border:0;background:none;cursor:pointer;color:var(--orange-600);opacity:.6;font-size:1rem;line-height:1;padding:0 .25rem;}
+    .bi-viewchip-x:hover{opacity:1;}
+    .bi-saveview>summary{list-style:none;cursor:pointer;}
+    .bi-saveview>summary::-webkit-details-marker{display:none;}
+    .bi-saveview-row{display:flex;gap:.4rem;margin-top:.5rem;}
+    .bi-saveview-row input{flex:1;min-width:0;height:32px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font-family:inherit;font-size:.82rem;}
+
+    /* ── searchable multi-select (replaces the native size=1 multi-select) ── */
+    .bi-ms{position:relative;}
+    .bi-ms-control{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;min-height:34px;padding:.2rem .35rem;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);cursor:text;}
+    .bi-ms-control:focus-within{border-color:var(--orange);box-shadow:var(--ring);}
+    .bi-ms-chip{display:inline-flex;align-items:center;gap:.15rem;padding:.1rem .1rem .1rem .45rem;border-radius:var(--r-pill);background:var(--purple-soft);color:var(--purple);font-size:.74rem;font-weight:600;}
+    .bi-ms-chip-x{border:0;background:none;cursor:pointer;color:inherit;opacity:.6;font-size:.95rem;line-height:1;padding:0 .2rem;}
+    .bi-ms-chip-x:hover{opacity:1;}
+    .bi-ms-input{flex:1;min-width:70px;border:0;outline:none;background:none;font-family:inherit;font-size:.82rem;color:var(--title);height:24px;}
+    .bi-ms-menu{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 2px);max-height:230px;overflow-y:auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-sm);box-shadow:var(--sh-3);padding:.25rem;}
+    .bi-ms-opt{display:flex;align-items:center;gap:.4rem;padding:.28rem .4rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--title);cursor:pointer;}
+    .bi-ms-opt:hover{background:var(--orange-50);}
+    .bi-ms-opt input{width:13px;height:13px;accent-color:var(--orange);}
+    .bi-ms-none,.bi-ms-more{padding:.35rem .4rem;color:var(--muted);font-size:.76rem;}
     .bi-filter{display:flex;flex-direction:column;gap:.22rem;}
     .bi-filter label{font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.01em;}
     .bi-filter select,.bi-filter input{height:30px;min-width:150px;max-width:230px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .4rem;font-size:.78rem;color:var(--title);background:var(--surface);outline:none;}

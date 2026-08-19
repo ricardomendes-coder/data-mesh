@@ -1763,6 +1763,15 @@ def dashboard_show(
     chosen = {key: request.query_params.getlist(key) for key in request.query_params}
     active = filters.resolve(definitions, chosen)
 
+    # Saved views, shared by everyone on this dashboard: one-click recall, and
+    # the list the overnight warmer reads to know which combinations to build.
+    try:
+        saved_views = store.list_filter_views(slug) if store.available() else []
+    except Exception:
+        logger.exception("Could not read saved views for %r", slug)
+        saved_views = []
+    current = {f.key: list(f.values) for f in active if f.is_set}
+
     tiles = _tile_shells(dash.items)
     context = _shell_context(
         user,
@@ -1771,6 +1780,8 @@ def dashboard_show(
         dashboard=dash,
         tiles=tiles,
         filters=active,
+        saved_views=saved_views,
+        current_filters=current,
         # Deliberately empty: the drawer fetches its own options when opened.
         # Building them here is what made this page take minutes.
         filter_options={},
@@ -1779,6 +1790,61 @@ def dashboard_show(
         row_height=store.ROW_HEIGHT_PX,
     )
     return templates.TemplateResponse(request, "dashboard_show.html", context)
+
+
+@app.post("/dashboards/{slug}/views")
+def dashboard_save_view(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    name: str = Form(...),
+    qs: str = Form(""),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Save the current filter selection as a named, shared view.
+
+    The values that count are the ones the dashboard's filters define — the
+    form posts every active key, and resolve() drops anything not a real
+    filter, so a saved view can't smuggle in an arbitrary parameter.
+    """
+    if not access.allows(store.DASHBOARD, slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that dashboard."), access=access
+        )
+    if store.available():
+        definitions = _dashboard_filters(slug)
+        # The current selection is posted as the page's own query string, so
+        # what's saved is exactly what's applied. resolve() drops anything that
+        # isn't one of this dashboard's filters, so a saved view can't carry an
+        # arbitrary parameter.
+        from urllib.parse import parse_qs
+
+        chosen = parse_qs(qs)
+        active = filters.resolve(definitions, chosen)
+        params = {f.key: list(f.values) for f in active if f.is_set}
+        store.save_filter_view(slug, name, params, created_by=user)
+    return RedirectResponse(
+        f"{request.url_for('dashboard_show', slug=slug)}?{qs}" if qs else
+        str(request.url_for('dashboard_show', slug=slug)),
+        status_code=303,
+    )
+
+
+@app.post("/dashboards/{slug}/views/{view_id}/delete")
+def dashboard_delete_view(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    view_id: int = PathParam(...),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    if not access.allows(store.DASHBOARD, slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that dashboard."), access=access
+        )
+    if store.available():
+        store.delete_filter_view(slug, view_id)
+    return _back_to(request, "dashboard_show", "dashboards", slug)
 
 
 @app.get("/dashboards/{slug}/filter-options")

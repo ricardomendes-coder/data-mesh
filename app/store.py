@@ -494,6 +494,30 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON dashboard_tile_cache (built_at);
         """,
     ),
+    (
+        "0018_saved_filter_views",
+        """
+        -- A named filter combination on a dashboard, shared by everyone who
+        -- sees that dashboard. Two jobs: a one-click way back to a view people
+        -- use often, and a record of which combinations are worth pre-warming
+        -- overnight — the warmer reads straight from here.
+        --
+        -- `params` is the same shape the URL query string carries
+        -- ({key: [values]}), so applying a saved view is just replaying it.
+        CREATE TABLE IF NOT EXISTS dashboard_filter_views (
+            id            bigserial   PRIMARY KEY,
+            dashboard_id  bigint      NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+            name          text        NOT NULL,
+            params        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+            created_by    text        NOT NULL DEFAULT '',
+            created_at    timestamptz NOT NULL DEFAULT now(),
+            UNIQUE (dashboard_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS dashboard_filter_views_dash_idx
+            ON dashboard_filter_views (dashboard_id);
+        """,
+    ),
 ]
 
 
@@ -2260,6 +2284,91 @@ def drop_chart_preview(chart_id: int, variant: str | None = None) -> None:
 
 
 @dataclass
+@dataclass
+class SavedFilterView:
+    """A named filter combination on a dashboard, shared by everyone.
+
+    `params` mirrors the URL query string — {key: [values]} — so applying a
+    saved view is replaying it, and the overnight warmer can read the same
+    shape to know which combinations to pre-build.
+    """
+
+    id: int
+    dashboard_id: int
+    name: str
+    params: dict = field(default_factory=dict)
+    created_by: str = ""
+
+    def query_string(self) -> str:
+        """The view as a URL query string, ready to hang off the dashboard."""
+        from urllib.parse import urlencode
+
+        pairs = [(k, v) for k, values in self.params.items() for v in (values or [])]
+        return urlencode(pairs)
+
+
+def list_filter_views(dashboard_slug: str) -> list[SavedFilterView]:
+    """Every saved view on a dashboard, oldest first."""
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT v.id, v.dashboard_id, v.name, v.params, v.created_by "
+                "FROM dashboard_filter_views v JOIN dashboards d ON d.id = v.dashboard_id "
+                "WHERE d.slug = :s ORDER BY v.created_at, v.id"
+            ),
+            {"s": dashboard_slug},
+        ).fetchall()
+    out = []
+    for r in rows:
+        params = r[3]
+        if isinstance(params, str):
+            params = json.loads(params)
+        out.append(
+            SavedFilterView(
+                id=r[0], dashboard_id=r[1], name=r[2], params=params or {}, created_by=r[4]
+            )
+        )
+    return out
+
+
+def save_filter_view(dashboard_slug: str, name: str, params: dict, created_by: str = "") -> bool:
+    """Create or overwrite a named view. False if the dashboard is gone or the
+    name is empty. Same name replaces, so saving twice tidies rather than
+    duplicates."""
+    name = " ".join(str(name or "").split())[:120]
+    if not name:
+        return False
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return False
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_filter_views (dashboard_id, name, params, created_by) "
+                "VALUES (:d, :n, cast(:p AS jsonb), :c) "
+                "ON CONFLICT (dashboard_id, name) DO UPDATE "
+                "SET params = excluded.params, created_by = excluded.created_by, "
+                "    created_at = now()"
+            ),
+            {"d": dash_id, "n": name, "p": json.dumps(params or {}), "c": created_by},
+        )
+    return True
+
+
+def delete_filter_view(dashboard_slug: str, view_id: int) -> bool:
+    with engine().begin() as conn:
+        n = conn.execute(
+            text(
+                "DELETE FROM dashboard_filter_views v USING dashboards d "
+                "WHERE v.dashboard_id = d.id AND d.slug = :s AND v.id = :i"
+            ),
+            {"s": dashboard_slug, "i": view_id},
+        ).rowcount
+    return bool(n)
+
+
 class DashboardFilter:
     """One control on a dashboard's filter bar. See app/filters.py."""
 
