@@ -451,17 +451,18 @@
     .bi-filterdrawer{display:inline-flex;}
     .bi-filterdrawer>summary{list-style:none;cursor:pointer;}
     .bi-filterdrawer>summary::-webkit-details-marker{display:none;}
-    .bi-filtertoggle{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .8rem;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--surface);color:var(--body);font-size:.8rem;font-weight:600;transition:border-color .13s,color .13s;}
-    .bi-filtertoggle:hover{border-color:var(--orange);color:var(--orange);}
-    .bi-filterdrawer[open] .bi-filtertoggle{border-color:var(--orange);color:var(--orange);background:var(--orange-50);}
-    .bi-filtercount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 .3rem;border-radius:var(--r-pill);background:var(--orange);color:#fff;font-size:.68rem;font-weight:700;}
-    .bi-activepills{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;}
-    .bi-activepill{display:inline-flex;align-items:center;gap:.3rem;height:30px;padding:0 .3rem 0 .65rem;border-radius:var(--r-pill);background:var(--orange-50);border:1px solid var(--orange-100);font-size:.76rem;}
-    .bi-activepill-lb{color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:.66rem;font-weight:700;}
-    .bi-activepill-vl{color:var(--orange-600);font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .bi-activepill-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--r-pill);color:var(--orange-600);opacity:.6;font-size:1rem;line-height:1;}
-    .bi-activepill-x:hover{opacity:1;background:var(--orange-100);}
-    .bi-clearfilters{margin-left:.2rem;color:var(--muted);font-size:.78rem;font-weight:600;}
+    .bi-filtertoggle{display:inline-flex;align-items:center;gap:.35rem;height:28px;padding:0 .6rem;border-radius:var(--r-pill);color:var(--body);font-size:.74rem;font-weight:600;transition:color .13s;}
+    .bi-filtertoggle:hover{color:var(--orange);}
+    .bi-filterdrawer[open] .bi-filtertoggle{color:var(--orange);}
+    .bi-filtertoggle svg{color:var(--muted);}
+    .bi-filtercount{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 .28rem;border-radius:var(--r-pill);background:var(--orange);color:#fff;font-size:.64rem;font-weight:700;}
+    .bi-activepills{display:flex;align-items:center;flex-wrap:wrap;gap:.3rem;}
+    .bi-activepill{display:inline-flex;align-items:center;gap:.28rem;height:24px;padding:0 .2rem 0 .5rem;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border-strong);font-size:.72rem;}
+    .bi-activepill-lb{color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-size:.62rem;font-weight:700;}
+    .bi-activepill-vl{color:var(--title);font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .bi-activepill-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:var(--r-sm);color:var(--muted);opacity:.7;font-size:.9rem;line-height:1;}
+    .bi-activepill-x:hover{opacity:1;color:var(--danger);background:var(--page);}
+    .bi-clearfilters{margin-left:.15rem;color:var(--muted);font-size:.72rem;font-weight:600;}
     .bi-clearfilters:hover{color:var(--danger);}
     /* Dim the page behind the open drawer, and give a click target to close. */
     .bi-drawer-scrim{position:fixed;inset:0;z-index:59;background:rgba(0,0,45,.18);}
