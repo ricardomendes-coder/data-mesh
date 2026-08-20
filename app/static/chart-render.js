@@ -86,6 +86,10 @@
     if (el._chart) el._chart.destroy();
 
     var chartType = spec.type === "area" ? "line" : spec.type;
+    // Many series get a scrollable HTML legend instead of the on-canvas one,
+    // which would eat the whole chart and can't scroll. Like Superset.
+    var HTML_LEGEND_AT = 8;
+    var manySeries = !!spec.showLegend && (spec.datasets || []).length > HTML_LEGEND_AT;
     el._chart = new Chart(el.getContext("2d"), {
       type: chartType,
       data: { labels: spec.labels, datasets: buildDatasets(spec) },
@@ -95,8 +99,9 @@
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: {
-            // One series needs no legend — the chart title names it.
-            display: !!spec.showLegend,
+            // One series needs no legend — the chart title names it. Many
+            // series use the HTML legend below instead of this one.
+            display: !!spec.showLegend && !manySeries,
             position: "bottom",
             labels: {
               color: "#515669",
@@ -122,6 +127,39 @@
         scales: scales(spec),
       },
     });
+    if (manySeries) buildHtmlLegend(el, el._chart);
     return el._chart;
   };
+
+  /* A scrollable HTML legend for charts with many series. Each entry toggles
+     its series; the box scrolls rather than pushing the chart off screen. */
+  function buildHtmlLegend(canvas, chart) {
+    if (canvas._legend && canvas._legend.parentNode) {
+      canvas._legend.parentNode.removeChild(canvas._legend);
+    }
+    var box = document.createElement("div");
+    box.className = "bi-chart-legend";
+    (chart.data.datasets || []).forEach(function (ds, i) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "bi-legend-item";
+      var dot = document.createElement("span");
+      dot.className = "bi-legend-dot";
+      dot.style.background = ds.borderColor || ds.backgroundColor || "#888";
+      var label = document.createElement("span");
+      label.textContent = ds.label;
+      item.appendChild(dot);
+      item.appendChild(label);
+      item.addEventListener("click", function () {
+        var vis = chart.isDatasetVisible(i);
+        chart.setDatasetVisibility(i, !vis);
+        item.classList.toggle("off", vis);
+        chart.update();
+      });
+      box.appendChild(item);
+    });
+    // Sits right after the canvas, inside the same chart box.
+    if (canvas.parentNode) canvas.parentNode.appendChild(box);
+    canvas._legend = box;
+  }
 })();

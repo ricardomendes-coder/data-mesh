@@ -58,6 +58,12 @@ CANVAS_TYPES = {"bar", "line", "area", "pie"}
 # on a dashboard and the query wants a LIMIT or the Reports tab.
 MAX_TABLE_ROWS = 200
 
+# Long-format charts (a series per group) have no hard series limit — the
+# legend scrolls, like Superset. This is only a defensive ceiling so a runaway
+# grouping can't lock the browser; beyond it the extra series are dropped with
+# a note, never a refusal.
+MAX_LONG_SERIES = 100
+
 
 @dataclass
 class ChartSpec:
@@ -138,12 +144,73 @@ def numeric_columns(columns: list[str], rows: list[tuple]) -> list[str]:
     return out
 
 
+def _long_form_spec(spec, columns, rows, x_column, series_column, y_columns, chart_type):
+    """Pivot long rows (x, series, value) into one dataset per series.
+
+    The query already grouped by (x, series); here we lay each series out along
+    the shared x axis. No series cap beyond a defensive ceiling — the renderer
+    gives many series a scrollable legend.
+    """
+    xi = columns.index(x_column)
+    si = columns.index(series_column)
+    value = next((c for c in y_columns if c in columns), None)
+    if value is None:
+        value = next(
+            (c for c in numeric_columns(columns, rows) if c not in (x_column, series_column)),
+            None,
+        )
+    if value is None:
+        spec.warnings.append(t("Pick at least one numeric column to plot."))
+        return spec
+    vi = columns.index(value)
+
+    labels, seen_x = [], set()
+    series_order, cells = [], {}
+    for r in rows:
+        xv = "" if r[xi] is None else str(r[xi])
+        sv = "" if r[si] is None else str(r[si])
+        if xv not in seen_x:
+            seen_x.add(xv)
+            labels.append(xv)
+        if sv not in cells:
+            cells[sv] = {}
+            series_order.append(sv)
+        cells[sv][xv] = _numeric(r[vi]) if vi < len(r) else None
+
+    if len(labels) > MAX_POINTS:
+        spec.warnings.append(
+            f"{len(labels):,} points on the x axis — plotting the first {MAX_POINTS:,}."
+        )
+        labels = labels[:MAX_POINTS]
+
+    if len(series_order) > MAX_LONG_SERIES:
+        dropped = len(series_order) - MAX_LONG_SERIES
+        series_order = series_order[:MAX_LONG_SERIES]
+        spec.warnings.append(
+            f"{dropped} more series not shown (of {len(series_order) + dropped}); "
+            "scroll the legend for the rest."
+        )
+
+    spec.labels = labels
+    for i, sv in enumerate(series_order):
+        row = cells[sv]
+        spec.datasets.append(
+            {
+                "label": sv,
+                "data": [row.get(x) for x in labels],
+                "color": SERIES_COLORS[i % MAX_SERIES],
+            }
+        )
+    return spec
+
+
 def build_spec(
     columns: list[str],
     rows: list[tuple],
     chart_type: str,
     x_column: str,
     y_columns: list[str],
+    series_column: str = "",
 ) -> ChartSpec:
     """Shape a result set into a chart spec, or explain why it can't be one."""
     spec = ChartSpec(chart_type=chart_type)
@@ -193,6 +260,12 @@ def build_spec(
     if x_column not in columns:
         spec.warnings.append(f"Column {x_column!r} is not in the result.")
         return spec
+
+    # Long format: (x, series, value) rows -> one dataset per series. This is
+    # how a chart split by 112 clients renders — no pivot in SQL, no cap, a
+    # scrollable legend on the page.
+    if series_column and series_column in columns and chart_type in ("bar", "line", "area"):
+        return _long_form_spec(spec, columns, rows, x_column, series_column, y_columns, chart_type)
 
     usable = [c for c in y_columns if c in columns]
     missing = [c for c in y_columns if c not in columns]

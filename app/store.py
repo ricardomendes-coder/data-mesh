@@ -518,6 +518,18 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON dashboard_filter_views (dashboard_id);
         """,
     ),
+    (
+        "0019_chart_series_column",
+        """
+        -- Long-format charts: the query returns (x, series, value) rows and the
+        -- renderer groups them into one line/bar per series, with a scrollable
+        -- legend. `series_column` names which column carries the series key;
+        -- empty means the old wide layout (one column per series). This is what
+        -- lets a time chart split by 112 clients render at all — no pivot, no
+        -- per-series column, no cap.
+        ALTER TABLE charts ADD COLUMN IF NOT EXISTS series_column text NOT NULL DEFAULT '';
+        """,
+    ),
 ]
 
 
@@ -585,6 +597,9 @@ class Chart:
     chart_type: str
     x_column: str
     y_columns: list[str] = field(default_factory=list)
+    # When set, the result is long format: this column holds the series key and
+    # y_columns[0] the value. Empty = wide (one column per series). See 0019.
+    series_column: str = ""
     description: str = ""
     created_by: str = ""
     id: int | None = None
@@ -621,6 +636,7 @@ def _row_to_chart(row: Any) -> Chart:
         chart_type=m["chart_type"],
         x_column=m["x_column"],
         y_columns=list(y or []),
+        series_column=m["series_column"] if "series_column" in m else "",
         created_by=m["created_by"],
         folder_id=m["folder_id"],
         created_at=m["created_at"],
@@ -630,7 +646,7 @@ def _row_to_chart(row: Any) -> Chart:
 
 _SELECT = (
     "SELECT id, slug, title, description, source_db, sql, chart_type, "
-    "x_column, y_columns, created_by, folder_id, created_at, updated_at FROM charts"
+    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at FROM charts"
 )
 
 
@@ -643,7 +659,7 @@ _SELECT = (
 # dashboard editor shows names, the permissions screen shows slugs.
 _LIST_SELECT = (
     "SELECT id, slug, title, description, source_db, chart_type, "
-    "x_column, y_columns, created_by, folder_id, created_at, updated_at FROM charts"
+    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at FROM charts"
 )
 
 
@@ -681,6 +697,66 @@ def unique_slug(title: str, exists=None) -> str:
     return candidate
 
 
+def all_slugs(table: str = "charts") -> set[str]:
+    """Every slug in a table, for computing unique slugs without a query each."""
+    if table not in ("charts", "dashboards"):
+        raise ValueError(table)
+    with engine().connect() as conn:
+        return {r[0] for r in conn.execute(text(f"SELECT slug FROM {table}"))}  # noqa: S608
+
+
+def save_charts_bulk(charts: list[Chart]) -> int:
+    """Insert many charts in one transaction — the migration writes hundreds.
+
+    One round trip instead of one per chart: over the import's SSH tunnel that
+    was ~2.5s each (a transaction plus a slug-uniqueness lookup), i.e. tens of
+    minutes for the catalogue. Slugs must already be unique — the caller sets
+    them with all_slugs(); ON CONFLICT keeps a re-run idempotent.
+    """
+    if not charts:
+        return 0
+    rows = [
+        {
+            "slug": c.slug,
+            "title": c.title,
+            "description": c.description,
+            "source_db": c.source_db,
+            "sql": c.sql,
+            "chart_type": c.chart_type,
+            "x_column": c.x_column,
+            "y_columns": json.dumps(c.y_columns),
+            "series_column": c.series_column,
+            "created_by": c.created_by,
+        }
+        for c in charts
+    ]
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO charts (slug, title, description, source_db, sql,
+                                    chart_type, x_column, y_columns, series_column,
+                                    created_by)
+                VALUES (:slug, :title, :description, :source_db, :sql,
+                        :chart_type, :x_column, CAST(:y_columns AS jsonb),
+                        :series_column, :created_by)
+                ON CONFLICT (slug) DO UPDATE SET
+                    title       = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    source_db   = EXCLUDED.source_db,
+                    sql         = EXCLUDED.sql,
+                    chart_type  = EXCLUDED.chart_type,
+                    x_column    = EXCLUDED.x_column,
+                    y_columns   = EXCLUDED.y_columns,
+                    series_column = EXCLUDED.series_column,
+                    updated_at  = now()
+                """
+            ),
+            rows,
+        )
+    return len(rows)
+
+
 def save_chart(chart: Chart) -> Chart:
     """Insert, or update in place when the slug already exists."""
     params = {
@@ -692,6 +768,7 @@ def save_chart(chart: Chart) -> Chart:
         "chart_type": chart.chart_type,
         "x_column": chart.x_column,
         "y_columns": json.dumps(chart.y_columns),
+        "series_column": chart.series_column,
         "created_by": chart.created_by,
     }
     with engine().begin() as conn:
@@ -699,9 +776,11 @@ def save_chart(chart: Chart) -> Chart:
             text(
                 """
                 INSERT INTO charts (slug, title, description, source_db, sql,
-                                    chart_type, x_column, y_columns, created_by)
+                                    chart_type, x_column, y_columns, series_column,
+                                    created_by)
                 VALUES (:slug, :title, :description, :source_db, :sql,
-                        :chart_type, :x_column, CAST(:y_columns AS jsonb), :created_by)
+                        :chart_type, :x_column, CAST(:y_columns AS jsonb),
+                        :series_column, :created_by)
                 ON CONFLICT (slug) DO UPDATE SET
                     title       = EXCLUDED.title,
                     description = EXCLUDED.description,
@@ -710,12 +789,13 @@ def save_chart(chart: Chart) -> Chart:
                     chart_type  = EXCLUDED.chart_type,
                     x_column    = EXCLUDED.x_column,
                     y_columns   = EXCLUDED.y_columns,
+                    series_column = EXCLUDED.series_column,
                     updated_at  = now()
                 -- folder_id is absent from both the INSERT and the UPDATE on
                 -- purpose: saving a chart must never move it. It is returned so
                 -- the mapper stays whole, and it is set only by set_item_folder.
                 RETURNING id, slug, title, description, source_db, sql, chart_type,
-                          x_column, y_columns, created_by, folder_id,
+                          x_column, y_columns, series_column, created_by, folder_id,
                           created_at, updated_at
                 """
             ),
@@ -966,7 +1046,7 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
                 SELECT i.id, i.position, i.width, i.kind, i.content, i.section_id,
                        i.grid_x, i.grid_y, i.grid_w, i.grid_h, i.title_override,
                        c.id AS c_id, c.slug, c.title, c.description, c.source_db,
-                       c.sql, c.chart_type, c.x_column, c.y_columns, c.created_by,
+                       c.sql, c.chart_type, c.x_column, c.y_columns, c.series_column, c.created_by,
                        c.created_at, c.updated_at
                 FROM dashboard_items i
                 LEFT JOIN charts c ON c.id = i.chart_id
@@ -1004,6 +1084,7 @@ def get_dashboard(slug: str, with_items: bool = True) -> Dashboard | None:
                 chart_type=m["chart_type"],
                 x_column=m["x_column"],
                 y_columns=list(y or []),
+                series_column=m["series_column"] if "series_column" in m else "",
                 created_by=m["created_by"],
                 created_at=m["created_at"],
                 updated_at=m["updated_at"],
@@ -2419,6 +2500,103 @@ def list_filters(dashboard_slug: str) -> list[DashboardFilter]:
             {"s": dashboard_slug},
         ).fetchall()
     return [_row_to_filter(r) for r in rows]
+
+
+def add_dashboard_items_bulk(dashboard_slug: str, items: list[dict]) -> int:
+    """Insert a whole dashboard's tiles in one statement, geometry included.
+
+    Replaces the old add_item / add_text_item / save_layout dance (one round
+    trip per tile plus one for the layout) with a single write — over the
+    import's SSH tunnel that per-tile cost was the bulk of the run. Each item:
+    {kind, chart_slug|None, content, width, section_id, title_override,
+     x, y, w, h}. `position` follows list order.
+    """
+    if not items:
+        return 0
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return 0
+        rows = [
+            {
+                "d": dash_id,
+                "chart_slug": it.get("chart_slug"),
+                "p": i,
+                "w": it.get("width", "full"),
+                "k": it.get("kind", "chart"),
+                "c": it.get("content", ""),
+                "s": it.get("section_id"),
+                "t": it.get("title_override", ""),
+                "gx": it.get("x"),
+                "gy": it.get("y"),
+                "gw": it.get("w"),
+                "gh": it.get("h"),
+            }
+            for i, it in enumerate(items)
+        ]
+        conn.execute(
+            text(
+                # chart_id resolves from the slug in-statement; NULL for text /
+                # divider / missing tiles, which carry no chart.
+                "INSERT INTO dashboard_items "
+                "(dashboard_id, chart_id, position, width, kind, content, section_id, "
+                " title_override, grid_x, grid_y, grid_w, grid_h) "
+                "VALUES (:d, (SELECT id FROM charts WHERE slug = :chart_slug), :p, :w, :k, "
+                "        :c, :s, :t, :gx, :gy, :gw, :gh)"
+            ),
+            rows,
+        )
+        _touch(conn, dash_id)
+    return len(rows)
+
+
+def add_filters_bulk(dashboard_slug: str, flts: list[DashboardFilter]) -> int:
+    """Insert a dashboard's filters in one statement. Duplicate keys within the
+    batch are dropped, keeping the first — same end state as adding one by one."""
+    if not flts:
+        return 0
+    seen: set[str] = set()
+    unique = []
+    for f in flts:
+        if f.key in seen:
+            continue
+        seen.add(f.key)
+        unique.append(f)
+    with engine().begin() as conn:
+        dash_id = conn.execute(
+            text("SELECT id FROM dashboards WHERE slug = :s"), {"s": dashboard_slug}
+        ).scalar()
+        if dash_id is None:
+            return 0
+        rows = [
+            {
+                "d": dash_id,
+                "k": f.key,
+                "l": f.label,
+                "t": f.filter_type,
+                "c": f.column_expr,
+                "v": f.values_sql,
+                "db": f.source_db,
+                "def": f.default_value,
+                "scope": json.dumps(list(f.applies_to or [])),
+                "p": i,
+            }
+            for i, f in enumerate(unique)
+        ]
+        conn.execute(
+            text(
+                "INSERT INTO dashboard_filters "
+                "(dashboard_id, key, label, filter_type, column_expr, values_sql, "
+                " source_db, default_value, applies_to, position) "
+                "VALUES (:d, :k, :l, :t, :c, :v, :db, :def, CAST(:scope AS jsonb), :p) "
+                "ON CONFLICT DO NOTHING"
+            ),
+            rows,
+        )
+        _touch(conn, dash_id)
+    return len(rows)
 
 
 def add_filter(dashboard_slug: str, flt: DashboardFilter) -> bool:

@@ -270,6 +270,14 @@
     .bi-card-ic-chart{background:var(--orange-50);color:var(--orange-600);}
     .bi-chartbox{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.1rem 1.15rem;box-shadow:var(--sh-1);position:relative;height:340px;}
     .bi-chartbox-lg{height:400px;margin-bottom:1.4rem;}
+    /* Scrollable HTML legend for charts with many series (built in
+       chart-render.js). Sits under the canvas and scrolls instead of shoving
+       the chart off screen — the many-series answer, like Superset. */
+    .bi-chart-legend{display:flex;flex-wrap:wrap;gap:.15rem .8rem;max-height:76px;overflow-y:auto;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--border);}
+    .bi-legend-item{display:inline-flex;align-items:center;gap:.35rem;border:0;background:none;cursor:pointer;font-family:inherit;font-size:.72rem;color:var(--body);padding:.1rem .1rem;}
+    .bi-legend-item:hover{color:var(--title);}
+    .bi-legend-item.off{opacity:.4;text-decoration:line-through;}
+    .bi-legend-dot{width:9px;height:9px;border-radius:var(--r-pill);flex-shrink:0;}
     .bi-chart-grid{display:grid;grid-template-columns:268px 1fr;gap:1.3rem;align-items:start;margin-top:1.5rem;}
     @media(max-width:900px){.bi-chart-grid{grid-template-columns:1fr;}}
     .bi-chart-cfg{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);}

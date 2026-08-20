@@ -436,6 +436,44 @@ def _chart_spec_body(ch):
     assert ch.numeric_columns(["a"], [("hello",)]) == []
 
 
+def test_long_format_pivots_into_series():
+    """Long format: (x, series, value) rows -> one dataset per series, no cap.
+
+    This is how a time chart split by 112 clients renders — the migration used
+    to refuse it as "too many series". series_column names the split; the pivot
+    happens here, and the legend scrolls on the page.
+    """
+    import app.charts as ch
+
+    cols = ["semana", "cliente", "total"]
+    rows = [
+        ("2026-01", "acme", 10), ("2026-01", "vale", 5),
+        ("2026-02", "acme", 12), ("2026-02", "vale", 7),
+        ("2026-03", "vale", 9),  # acme absent this week -> should gap to None
+    ]
+    spec = ch.build_spec(cols, rows, "line", "semana", ["total"], series_column="cliente")
+    assert spec.renders_as == "canvas"
+    assert spec.labels == ["2026-01", "2026-02", "2026-03"], spec.labels
+    by = {d["label"]: d["data"] for d in spec.datasets}
+    assert set(by) == {"acme", "vale"}, by
+    assert by["acme"] == [10, 12, None], by["acme"]  # missing week is a gap
+    assert by["vale"] == [5, 7, 9], by["vale"]
+    assert spec.show_legend is True
+
+    # No series cap: 40 clients all come through (the old limit was 8/12).
+    many = [(f"w{w}", f"c{c}", w + c) for w in range(3) for c in range(40)]
+    wide = ch.build_spec(["w", "c", "v"], many, "bar", "w", ["v"], series_column="c")
+    assert len(wide.datasets) == 40, len(wide.datasets)
+    assert not any("series" in warn.lower() and "shown" in warn.lower() for warn in wide.warnings)
+
+    # Beyond the defensive ceiling it draws what it can and says so — never
+    # refuses (the whole point).
+    huge = [("w0", f"c{c}", c) for c in range(ch.MAX_LONG_SERIES + 25)]
+    hspec = ch.build_spec(["w", "c", "v"], huge, "line", "w", ["v"], series_column="c")
+    assert len(hspec.datasets) == ch.MAX_LONG_SERIES
+    assert any("more series not shown" in w for w in hspec.warnings), hspec.warnings
+
+
 def test_dashboard_layout_ordering():
     """move_item swaps neighbours and rewrites positions densely.
 
@@ -3324,6 +3362,7 @@ if __name__ == "__main__":
     test_inline_code_filter()
     test_dataset_preview_is_not_injectable()
     test_chart_spec()
+    test_long_format_pivots_into_series()
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()
     test_dashboard_pages_render()

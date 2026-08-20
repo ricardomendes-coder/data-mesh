@@ -1295,7 +1295,8 @@ def chart_data(
             sql, chart.source_db, max_rows=None if full else charts.MAX_POINTS + 1
         )
         spec = charts.build_spec(
-            result.columns, result.rows, chart.chart_type, chart.x_column, chart.y_columns
+            result.columns, result.rows, chart.chart_type, chart.x_column,
+            chart.y_columns, chart.series_column
         )
     except Exception:
         logger.exception("Chart %r failed to render for the listing", slug)
@@ -1479,6 +1480,7 @@ def _render_tiles(items: list, active: list | None = None) -> list[dict]:
                 item.chart.chart_type,
                 item.chart.x_column,
                 item.chart.y_columns,
+                item.chart.series_column,
             )
         except Exception:
             logger.exception("Dashboard tile %r failed", item.chart.slug)

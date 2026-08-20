@@ -87,21 +87,36 @@ def lit(value) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _column_sql(entry) -> tuple[str, str]:
+def _column_sql(entry, calc: dict | None = None) -> tuple[str, str]:
+    """SQL and label for a dimension. `calc` maps a Superset calculated column
+    (a CASE-WHEN etc. defined in the tool, not the table) to its expression, so
+    a groupby on one of those expands instead of pointing at a column that
+    doesn't physically exist — 82 of the failed charts referenced one."""
+    calc = calc or {}
     if isinstance(entry, str):
+        if entry in calc:
+            return f"({calc[entry]})", entry
         return qi(entry), entry
     if isinstance(entry, dict):
         if entry.get("sqlExpression"):
             return entry["sqlExpression"], entry.get("label") or "expr"
         if entry.get("column_name"):
-            return qi(entry["column_name"]), entry.get("label") or entry["column_name"]
+            name = entry["column_name"]
+            expr = f"({calc[name]})" if name in calc else qi(name)
+            return expr, entry.get("label") or name
     raise Unsupported(f"unrecognised column entry: {entry!r}")
 
 
-def _metric_sql(metric, saved: dict[str, str]) -> tuple[str, str]:
+def _metric_sql(metric, saved: dict[str, str], calc: dict | None = None) -> tuple[str, str]:
+    calc = calc or {}
     if isinstance(metric, str):
         if metric in saved:
             return saved[metric], metric
+        # Superset's built-in COUNT(*) metric, named "count", lives nowhere in
+        # sql_metrics — it's implicit. Very common; without it the chart reads
+        # as "no metric".
+        if metric.lower() == "count":
+            return "COUNT(*)", "count"
         raise Unsupported(f"unknown saved metric {metric!r}")
     if not isinstance(metric, dict):
         raise Unsupported(f"unrecognised metric: {metric!r}")
@@ -117,17 +132,21 @@ def _metric_sql(metric, saved: dict[str, str]) -> tuple[str, str]:
         name = (metric.get("column") or {}).get("column_name")
         if not agg or not name:
             raise Unsupported("incomplete simple metric")
+        col = f"({calc[name]})" if name in calc else qi(name)
         if agg == "COUNT_DISTINCT":
-            return f"COUNT(DISTINCT {qi(name)})", label
+            return f"COUNT(DISTINCT {col})", label
         if agg not in ("COUNT", "SUM", "AVG", "MIN", "MAX"):
             raise Unsupported(f"unsupported aggregate {agg!r}")
-        return f"{agg}({qi(name)})", label
+        return f"{agg}({col})", label
     raise Unsupported(f"unsupported metric expressionType {kind!r}")
 
 
-def _filter_sql(flt) -> str | None:
+def _filter_sql(flt, calc: dict | None = None) -> str | None:
+    calc = calc or {}
     if not isinstance(flt, dict):
         return None
+    def col(name):
+        return f"({calc[name]})" if name in calc else qi(name)
     if (flt.get("clause") or "WHERE").upper() != "WHERE":
         return None
     if flt.get("expressionType") == "SQL":
@@ -138,20 +157,20 @@ def _filter_sql(flt) -> str | None:
         return None
     comparator, op = flt.get("comparator"), operator.upper()
     if op in ("IS NULL", "IS_NULL"):
-        return f"{qi(subject)} IS NULL"
+        return f"{col(subject)} IS NULL"
     if op in ("IS NOT NULL", "IS_NOT_NULL"):
-        return f"{qi(subject)} IS NOT NULL"
+        return f"{col(subject)} IS NOT NULL"
     if op in ("IN", "NOT IN", "NOT_IN"):
         values = comparator if isinstance(comparator, list) else [comparator]
         values = [v for v in values if v is not None]
         if not values:
             return None
         negate = "NOT " if op.startswith("NOT") else ""
-        return f"{qi(subject)} {negate}IN ({', '.join(lit(v) for v in values)})"
+        return f"{col(subject)} {negate}IN ({', '.join(lit(v) for v in values)})"
     if op in ("LIKE", "ILIKE"):
-        return f"{qi(subject)} {op} {lit(comparator)}"
+        return f"{col(subject)} {op} {lit(comparator)}"
     if op in OPS and comparator is not None:
-        return f"{qi(subject)} {OPS[op]} {lit(comparator)}"
+        return f"{col(subject)} {OPS[op]} {lit(comparator)}"
     return None
 
 
@@ -180,9 +199,11 @@ def _assemble(select, source, where, group_terms, order, limit) -> str:
 
 
 def translate(
-    slice_row: dict, dataset: dict, saved_metrics: dict[str, str], series_values=None
+    slice_row: dict, dataset: dict, saved_metrics: dict[str, str], series_values=None,
+    calc_columns: dict | None = None,
 ) -> dict:
     params = json.loads(slice_row["params"] or "{}")
+    calc = calc_columns or {}
     viz = slice_row["viz_type"]
     if viz not in VIZ:
         raise Unsupported(f"viz_type {viz!r} has no Report Hub equivalent")
@@ -194,7 +215,7 @@ def translate(
     except (TypeError, ValueError):
         limit = 10000
 
-    where = [f for f in (_filter_sql(f) for f in (params.get("adhoc_filters") or [])) if f]
+    where = [f for f in (_filter_sql(f, calc) for f in (params.get("adhoc_filters") or [])) if f]
     source = source_sql(dataset)
 
     # ── raw table mode: columns straight through, no aggregation ──
@@ -204,7 +225,7 @@ def translate(
             raise Unsupported("raw table with no columns")
         select, labels = [], []
         for entry in raw_columns:
-            expression, label = _column_sql(entry)
+            expression, label = _column_sql(entry, calc)
             select.append(f"{expression} AS {qi(label)}")
             labels.append(label)
         sql = _assemble(select, source, where, [], None, limit)
@@ -225,8 +246,14 @@ def translate(
     if isinstance(raw_metrics, (str, dict)):
         raw_metrics = [raw_metrics]
     if not raw_metrics:
-        raise Unsupported("chart has no metric")
-    metrics = [_metric_sql(m, saved_metrics) for m in raw_metrics]
+        # A table can be just its grouped dimensions — "the distinct combos of
+        # these columns", with no aggregate. Only a table: a bar/line with no
+        # measure is meaningless. 48 migrated tables are this shape.
+        if kind == "table":
+            raw_metrics = []
+        else:
+            raise Unsupported("chart has no metric")
+    metrics = [_metric_sql(m, saved_metrics, calc) for m in raw_metrics]
 
     # ── a single number: one metric, no dimension ──
     if kind == "number":
@@ -248,23 +275,24 @@ def translate(
     grain = GRAIN.get(params.get("time_grain_sqla") or "")
     x_axis = params.get("x_axis")
     if x_axis:
-        expression, label = _column_sql(x_axis)
+        expression, label = _column_sql(x_axis, calc)
         time_expr = f"date_trunc('{grain}', {expression})" if grain else expression
         time_label = label
     elif params.get("granularity_sqla"):
         col = params["granularity_sqla"]
         if isinstance(col, str) and col.strip():
-            time_expr = f"date_trunc('{grain}', {qi(col)})" if grain else qi(col)
+            gcol = f"({calc[col]})" if col in calc else qi(col)
+            time_expr = f"date_trunc('{grain}', {gcol})" if grain else gcol
             time_label = col
 
     groupby = [g for g in (params.get("groupby") or []) if g]
     # A pivot table's rows and columns are both just dimensions once flattened.
     for key in ("groupbyRows", "groupbyColumns"):
         groupby += [g for g in (params.get(key) or []) if g]
-    dims = [_column_sql(g) for g in groupby]
+    dims = [_column_sql(g, calc) for g in groupby]
     for extra in params.get("columns") or []:
         if extra:
-            dims.append(_column_sql(extra))
+            dims.append(_column_sql(extra, calc))
 
     if viz == "pie":
         time_expr = None
@@ -279,37 +307,44 @@ def translate(
     if not time_expr and not dims:
         raise Unsupported("chart has no dimension to plot against")
 
-    # ── time + series: one column per series, or the x axis repeats ──
+    # ── time + series: LONG format (one row per time × series) ──
+    #
+    # This used to pivot each series into its own column with a FILTER, which
+    # meant probing the distinct series values first, capping at 12, and giving
+    # up on any metric a regex couldn't rewrite (ratios, especially). Long
+    # format sidesteps all of it: emit (time, series, value) rows and let the
+    # renderer group them, with a scrollable legend. No cap, no probe, and the
+    # value can be any expression — so ratios and two-way splits just work.
     if time_expr and dims and kind != "table":
-        if series_values is None:
-            raise Unsupported("time+series chart needs its series values resolved")
-        if len(dims) > 1:
-            raise Unsupported("more than one series dimension")
         if len(metrics) != 1:
+            # One value column per row; several measures don't fit long format.
             raise Unsupported("time+series chart with multiple metrics")
-        series_expr = dims[0][0]
-        agg = metrics[0][0]
-        select = [f"{time_expr} AS {qi(time_label)}"]
-        y_columns = []
-        for value in series_values:
-            # `value` is bound as a default: re.sub calls this immediately, but
-            # binding it makes that explicit rather than relying on it.
-            def _pivot(m, _v=value, _s=series_expr):
-                return f"{m.group(1)}({m.group(2)}) FILTER (WHERE {_s} = {lit(_v)})"
-
-            pivoted = re.sub(r"^(\w+)\((.*)\)$", _pivot, agg, count=1)
-            if pivoted == agg:
-                raise Unsupported("cannot pivot this metric expression")
-            select.append(f"{pivoted} AS {qi(str(value))}")
-            y_columns.append(str(value))
-        sql = _assemble(select, source, where, [time_expr], "1 ASC", limit)
+        # Two split dimensions collapse into one series key ("A / B"), which is
+        # how you'd read them off a legend anyway.
+        if len(dims) == 1:
+            series_expr, series_label = dims[0]
+        else:
+            parts = ", ".join(f"({e})::text" for e, _ in dims)
+            series_expr = f"concat_ws(' / ', {parts})"
+            series_label = " / ".join(lbl for _, lbl in dims)
+        agg, value_label = metrics[0]
+        select = [
+            f"{time_expr} AS {qi(time_label)}",
+            f"{series_expr} AS {qi(series_label)}",
+            f"{agg} AS {qi(value_label)}",
+        ]
+        # No row cap here: the grouped result is (distinct time × distinct
+        # series), and truncating it would drop whole series. build_spec bounds
+        # what actually gets drawn.
+        sql = _assemble(select, source, where, [time_expr, series_expr], "1 ASC", None)
         return {
             "sql": sql,
             "chart_type": kind,
             "x_column": time_label,
-            "y_columns": y_columns,
-            "needs_series": True,
-            "series_expr": series_expr,
+            "y_columns": [value_label],
+            "series_column": series_label,
+            "needs_series": False,
+            "series_expr": None,
             "where": where,
         }
 

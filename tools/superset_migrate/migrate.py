@@ -180,6 +180,17 @@ def load_charts(pivot: bool):
     ):
         saved[table_id][name] = expression
 
+    # Superset calculated columns (a CASE-WHEN etc. defined in the tool, not the
+    # table). A groupby/filter/metric can reference one by name; without these
+    # the translator points at a physical column that doesn't exist. 165 of
+    # them across 64 datasets; 82 failed charts use one.
+    calc = defaultdict(dict)
+    for table_id, name, expression in q(
+        "SELECT table_id, column_name, expression FROM table_columns "
+        "WHERE expression IS NOT NULL AND expression <> ''"
+    ):
+        calc[table_id][name] = expression
+
     ok, failed, reasons = [], [], Counter()
     total = len(rows)
     timeouts = []
@@ -193,43 +204,13 @@ def load_charts(pivot: bool):
         slice_row = {"params": params, "viz_type": viz}
         dataset = {"table_name": table_name, "schema": schema, "sql": dataset_sql}
         try:
-            spec = T.translate(slice_row, dataset, saved.get(ds_id, {}))
+            # Long format now, so time+series translates in one pass — no probe
+            # for series values, no pivot, no cap.
+            spec = T.translate(
+                slice_row, dataset, saved.get(ds_id, {}), calc_columns=calc.get(ds_id, {})
+            )
         except T.Unsupported as exc:
-            if "needs its series values resolved" not in str(exc):
-                return ("fail", sid, name, viz, db, str(exc)[:110], str(exc)[:70], False)
-            if not pivot:
-                return (
-                    "fail",
-                    sid,
-                    name,
-                    viz,
-                    db,
-                    "needs pivot",
-                    "time+series (pivot pass skipped)",
-                    False,
-                )
-            try:
-                probe = T.translate(slice_row, dataset, saved.get(ds_id, {}), series_values=["_"])
-                values = series_values(
-                    db, T.source_sql(dataset), probe["series_expr"], probe["where"]
-                )
-            except T.Unsupported as exc2:
-                return ("fail", sid, name, viz, db, str(exc2)[:110], str(exc2)[:70], False)
-            if not values:
-                return (
-                    "fail",
-                    sid,
-                    name,
-                    viz,
-                    db,
-                    "too many series",
-                    "too many series to pivot",
-                    False,
-                )
-            try:
-                spec = T.translate(slice_row, dataset, saved.get(ds_id, {}), series_values=values)
-            except T.Unsupported as exc3:
-                return ("fail", sid, name, viz, db, str(exc3)[:110], str(exc3)[:70], False)
+            return ("fail", sid, name, viz, db, str(exc)[:110], str(exc)[:70], False)
 
         error, timed_out = explain(db, spec["sql"])
         if error:
@@ -344,30 +325,40 @@ def main():
 
     columns_of = dataset_columns()
 
-    # ── charts ──
+    # ── charts (one bulk write) ──
+    # Slugs are made unique in Python against a single snapshot of what exists,
+    # then every chart is inserted in one transaction. The old loop did a
+    # uniqueness lookup plus a save per chart — two round trips each over the
+    # tunnel, ~2.5s apiece, tens of minutes for the catalogue.
     slug_of: dict[int, str] = {}
-    # The chart's own name, so a dashboard's sliceNameOverride is only stored
-    # when it actually says something different.
     charts_by_id: dict[int, str] = {}
-    for n, c in enumerate(charts, 1):
-        slug = store.unique_slug(c["name"] or f"chart-{c['id']}", exists=store.get_chart)
-        saved = store.save_chart(
+    taken = store.all_slugs("charts")
+    to_write = []
+    for c in charts:
+        base = store.slugify(c["name"] or f"chart-{c['id']}")
+        slug, k = base, 1
+        while slug in taken:
+            k += 1
+            slug = f"{base}-{k}"
+        taken.add(slug)
+        title = (c["name"] or f"Chart {c['id']}")[:200]
+        slug_of[c["id"]] = slug
+        charts_by_id[c["id"]] = title
+        to_write.append(
             store.Chart(
                 slug=slug,
-                title=(c["name"] or f"Chart {c['id']}")[:200],
+                title=title,
                 description=f"Migrated from Superset chart #{c['id']} ({c['viz']}).",
                 source_db=c["db"],
                 sql=c["sql"],
                 chart_type=c["chart_type"],
                 x_column=c["x_column"],
                 y_columns=c["y_columns"],
+                series_column=c.get("series_column", ""),
                 created_by=STAMP,
             )
         )
-        slug_of[c["id"]] = saved.slug
-        charts_by_id[c["id"]] = saved.title
-        if n % 50 == 0:
-            print(f"  ...{n}/{len(charts)} charts", flush=True)
+    store.save_charts_bulk(to_write)
     print(f"created {len(slug_of)} charts")
 
     # ── dashboards, with their tabs, text and filters ──
@@ -395,7 +386,6 @@ def main():
         # separate walks that had to agree, and blocks Superset drew but that
         # list didn't mention — headings, rules — were invisible here.
         layout, tab_order = T.layout_of(position_json)
-        placements: list[dict] = []
         # The slices actually drawn here, in reading order. This used to come
         # from dashboard_slices, which can list a chart the layout doesn't
         # draw — a filter would then claim a scope wider than the dashboard.
@@ -408,8 +398,12 @@ def main():
                 section_id[tab_title] = new_id
                 tabs += 1
 
+        # Build every tile in reading order, then write them in one go
+        # (geometry included). Text/divider/missing tiles carry no chart.
+        items: list[dict] = []
         for tile in layout:
             sid = section_id.get(tile.tab) if tile.tab else None
+            box = {"x": tile.x, "y": tile.y, "w": tile.w, "h": tile.h, "section_id": sid}
             if tile.kind == "chart":
                 chart_slug = slug_of.get(tile.chart_id)
                 if not chart_slug:
@@ -418,67 +412,46 @@ def main():
                     # preserved on purpose, so the gap is going to be there
                     # either way — better that it says what is missing.
                     name, raw = failed_by_id.get(tile.chart_id, (tile.title, ""))
-                    item_id = store.add_text_item(
-                        slug,
-                        T.missing_reason(raw),
-                        section_id=sid,
-                        kind="missing",
-                        title=(name or tile.title or "")[:200],
+                    gaps += 1
+                    items.append(
+                        {
+                            "kind": "missing",
+                            "content": T.missing_reason(raw),
+                            "title_override": (name or tile.title or "")[:200],
+                            "width": "full",
+                            **box,
+                        }
                     )
-                    if item_id:
-                        gaps += 1
-                        placements.append(
-                            {
-                                "id": item_id,
-                                "x": tile.x,
-                                "y": tile.y,
-                                "w": tile.w,
-                                "h": tile.h,
-                                "section_id": sid,
-                            }
-                        )
                     continue
-                item_id = store.add_item(
-                    slug,
-                    chart_slug,
-                    width="half",
-                    section_id=sid,
-                    # Only when it differs, so an unchanged name keeps tracking
-                    # the chart if someone renames it later.
-                    title_override=(
-                        tile.title
-                        if tile.title and tile.title != charts_by_id.get(tile.chart_id, "")
-                        else ""
-                    ),
+                tiles += 1
+                items.append(
+                    {
+                        "kind": "chart",
+                        "chart_slug": chart_slug,
+                        "width": "half",
+                        # Only when it differs, so an unchanged name keeps
+                        # tracking the chart if someone renames it later.
+                        "title_override": (
+                            tile.title
+                            if tile.title and tile.title != charts_by_id.get(tile.chart_id, "")
+                            else ""
+                        ),
+                        **box,
+                    }
                 )
-                if item_id:
-                    tiles += 1
             else:
-                item_id = store.add_text_item(
-                    slug, tile.content[:2000], section_id=sid, kind=tile.kind
+                texts += 1
+                items.append(
+                    {"kind": tile.kind, "content": tile.content[:2000], "width": "full", **box}
                 )
-                if item_id:
-                    texts += 1
-            if not item_id:
-                continue
-            placements.append(
-                {
-                    "id": item_id,
-                    "x": tile.x,
-                    "y": tile.y,
-                    "w": tile.w,
-                    "h": tile.h,
-                    "section_id": sid,
-                }
-            )
 
-        # One write for the whole layout, so the dashboard opens looking like
-        # the Superset one rather than as a generic two-column flow.
-        if placements:
-            placed += store.save_layout(slug, placements)
+        # One write for the whole dashboard's tiles, geometry and all — so it
+        # opens looking like the Superset one, in a single round trip.
+        placed += store.add_dashboard_items_bulk(slug, items)
 
         # A filter only reaches charts whose dataset actually has that column —
         # pointing one at a chart without it would just break that tile.
+        dash_filters = []
         for f in T.filters_of(json_metadata):
             scope = [
                 slug_of[s]
@@ -505,8 +478,7 @@ def main():
                     f"SELECT DISTINCT {column} FROM {target['source']} "
                     f"WHERE {column} IS NOT NULL ORDER BY 1 LIMIT 1000"
                 )
-            filters_made += store.add_filter(
-                slug,
+            dash_filters.append(
                 store.DashboardFilter(
                     key=f["key"],
                     label=f["label"],
@@ -516,8 +488,9 @@ def main():
                     source_db=target["db"],
                     default_value=f["default_value"],
                     applies_to=scope,
-                ),
+                )
             )
+        filters_made += store.add_filters_bulk(slug, dash_filters)
 
         print(
             f"  [{made}/{total_dash}] {title[:44]:46} "
