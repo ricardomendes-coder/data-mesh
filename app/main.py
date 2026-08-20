@@ -1784,6 +1784,7 @@ def dashboard_show(
         rest = [(k, v) for (k, v) in pairs if k != f.key]
         pills.append(
             {
+                "key": f.key,
                 "label": f.label,
                 "text": ", ".join(str(v) for v in f.values if v not in (None, "")),
                 "remove_url": base_url + (("?" + urlencode(rest)) if rest else ""),

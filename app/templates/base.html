@@ -451,18 +451,17 @@
     .bi-filterdrawer{display:inline-flex;}
     .bi-filterdrawer>summary{list-style:none;cursor:pointer;}
     .bi-filterdrawer>summary::-webkit-details-marker{display:none;}
-    .bi-filtertoggle{display:inline-flex;align-items:center;gap:.35rem;height:28px;padding:0 .6rem;border-radius:var(--r-pill);color:var(--body);font-size:.74rem;font-weight:600;transition:color .13s;}
-    .bi-filtertoggle:hover{color:var(--orange);}
-    .bi-filterdrawer[open] .bi-filtertoggle{color:var(--orange);}
-    .bi-filtertoggle svg{color:var(--muted);}
-    .bi-filtercount{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 .28rem;border-radius:var(--r-pill);background:var(--orange);color:#fff;font-size:.64rem;font-weight:700;}
-    .bi-activepills{display:flex;align-items:center;flex-wrap:wrap;gap:.3rem;}
-    .bi-activepill{display:inline-flex;align-items:center;gap:.28rem;height:24px;padding:0 .2rem 0 .5rem;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border-strong);font-size:.72rem;}
-    .bi-activepill-lb{color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-size:.62rem;font-weight:700;}
-    .bi-activepill-vl{color:var(--title);font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .bi-activepill-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:var(--r-sm);color:var(--muted);opacity:.7;font-size:.9rem;line-height:1;}
-    .bi-activepill-x:hover{opacity:1;color:var(--danger);background:var(--page);}
-    .bi-clearfilters{margin-left:.15rem;color:var(--muted);font-size:.72rem;font-weight:600;}
+    .bi-filtertoggle{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .8rem;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--surface);color:var(--body);font-size:.8rem;font-weight:600;transition:border-color .13s,color .13s;}
+    .bi-filtertoggle:hover{border-color:var(--orange);color:var(--orange);}
+    .bi-filterdrawer[open] .bi-filtertoggle{border-color:var(--orange);color:var(--orange);background:var(--orange-50);}
+    .bi-filtercount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 .3rem;border-radius:var(--r-pill);background:var(--orange);color:#fff;font-size:.68rem;font-weight:700;}
+    .bi-activepills{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;}
+    .bi-activepill{display:inline-flex;align-items:center;gap:.3rem;height:30px;padding:0 .3rem 0 .65rem;border-radius:var(--r-pill);background:var(--orange-50);border:1px solid var(--orange-100);font-size:.76rem;}
+    .bi-activepill-lb{color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:.66rem;font-weight:700;}
+    .bi-activepill-vl{color:var(--orange-600);font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .bi-activepill-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--r-pill);color:var(--orange-600);opacity:.6;font-size:1rem;line-height:1;}
+    .bi-activepill-x:hover{opacity:1;background:var(--orange-100);}
+    .bi-clearfilters{margin-left:.2rem;color:var(--muted);font-size:.78rem;font-weight:600;}
     .bi-clearfilters:hover{color:var(--danger);}
     /* Dim the page behind the open drawer, and give a click target to close. */
     .bi-drawer-scrim{position:fixed;inset:0;z-index:59;background:rgba(0,0,45,.18);}
@@ -493,22 +492,29 @@
     .bi-ms{position:relative;}
     /* The closed control reads as a proper dropdown: soft rounded field, a
        chevron on the right, chips for what's chosen. */
-    .bi-ms-control{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;min-height:38px;padding:.32rem 2rem .32rem .5rem;border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface);cursor:text;transition:border-color .13s,box-shadow .13s;}
+    .bi-ms-control{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;min-height:38px;padding:.32rem .5rem;border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface);cursor:text;transition:border-color .13s,box-shadow .13s;}
     .bi-ms-control:hover{border-color:var(--g-300);}
     .bi-ms-control:focus-within{border-color:var(--orange);box-shadow:var(--ring);}
-    .bi-ms::after{content:"";position:absolute;right:.75rem;top:15px;width:7px;height:7px;border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);transform:rotate(45deg);pointer-events:none;transition:transform .15s;}
-    .bi-ms:focus-within::after{transform:rotate(225deg);border-color:var(--orange);}
     .bi-ms-chip{display:inline-flex;align-items:center;gap:.1rem;padding:.16rem .1rem .16rem .55rem;border-radius:var(--r-pill);background:var(--orange-50);color:var(--orange-600);border:1px solid var(--orange-100);font-size:.75rem;font-weight:600;line-height:1.2;}
     .bi-ms-chip-x{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:0;border-radius:var(--r-pill);background:none;cursor:pointer;color:inherit;opacity:.55;font-size:.95rem;line-height:1;}
     .bi-ms-chip-x:hover{opacity:1;background:var(--orange-100);}
-    .bi-ms-input{flex:1;min-width:60px;border:0;outline:none;background:none;font-family:inherit;font-size:.82rem;color:var(--title);height:24px;}
-    .bi-ms-input::placeholder{color:var(--muted);}
-    .bi-ms-menu{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);max-height:240px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-3);padding:.3rem;}
-    .bi-ms-opt{display:flex;align-items:center;gap:.5rem;padding:.34rem .45rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--title);cursor:pointer;user-select:none;}
+    /* Closed control: clean, just chips or a "Todos" placeholder. No input box
+       in here — the search lives inside the open menu instead. */
+    .bi-ms-ph{flex:1;min-width:0;color:var(--muted);font-size:.82rem;line-height:24px;}
+    .bi-ms-menu{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);max-height:260px;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-3);overflow:hidden;}
+    /* The "Todos" search field at the top of the open menu — type to filter. */
+    .bi-ms-search{margin:.3rem;height:32px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .55rem;font-family:inherit;font-size:.82rem;color:var(--title);outline:none;}
+    .bi-ms-search:focus{border-color:var(--orange);box-shadow:var(--ring);}
+    .bi-ms-list{overflow-y:auto;overflow-x:hidden;padding:.15rem .25rem .25rem;}
+    /* A clean list, not a column of checkboxes: each row is the value, hover
+       tints, the chosen one is highlighted with a check on the right. The
+       checkbox stays for state but is never drawn. */
+    .bi-ms-opt{position:relative;display:block;padding:.4rem 1.7rem .4rem .55rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--title);cursor:pointer;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .bi-ms-opt:hover{background:var(--orange-50);}
-    .bi-ms-opt:has(input:checked){color:var(--orange-600);font-weight:600;}
-    .bi-ms-opt input{width:14px;height:14px;accent-color:var(--orange);flex-shrink:0;}
-    .bi-ms-none,.bi-ms-more{padding:.4rem .45rem;color:var(--muted);font-size:.76rem;}
+    .bi-ms-opt input{position:absolute;opacity:0;pointer-events:none;}
+    .bi-ms-opt:has(input:checked){background:var(--orange-50);color:var(--orange-600);font-weight:600;}
+    .bi-ms-opt:has(input:checked)::after{content:"✓";position:absolute;right:.6rem;top:50%;transform:translateY(-50%);color:var(--orange);font-size:.82rem;font-weight:700;}
+    .bi-ms-none,.bi-ms-more{padding:.4rem .55rem;color:var(--muted);font-size:.76rem;}
     .bi-ms-more{border-top:1px solid var(--border);margin-top:.2rem;}
     .bi-filter{display:flex;flex-direction:column;gap:.22rem;}
     .bi-filter label{font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.01em;}

@@ -16,7 +16,7 @@
   var url = drawer.getAttribute("data-options-url");
   var searchLabel = drawer.getAttribute("data-search-label") || "";
   var allLabel = drawer.getAttribute("data-all-label") || "";
-  var MENU_CAP = 200; // cap the rendered rows; typing narrows past it
+  var MENU_CAP = 3000; // no search now, so render the whole list
 
   function el(tag, cls) {
     var n = document.createElement(tag);
@@ -62,14 +62,23 @@
   function buildPicker(sel) {
     sel.hidden = true; // still the form control, just not shown
     var wrap = el("div", "bi-ms");
+    // Closed control: clean, just the chosen chips or a "Todos" placeholder —
+    // no input box in here (that was the box-inside-a-box).
     var control = el("div", "bi-ms-control");
     var chips = el("span", "bi-ms-chips");
-    var input = el("input", "bi-ms-input");
-    input.type = "text";
+    var placeholder = el("span", "bi-ms-ph");
+    control.appendChild(chips);
+    control.appendChild(placeholder);
+    // The type-to-filter field lives at the top of the open menu — the "Todos"
+    // box in the reference — followed by the list.
     var menu = el("div", "bi-ms-menu");
     menu.hidden = true;
-    control.appendChild(chips);
-    control.appendChild(input);
+    var search = el("input", "bi-ms-search");
+    search.type = "text";
+    search.placeholder = allLabel;
+    var list = el("div", "bi-ms-list");
+    menu.appendChild(search);
+    menu.appendChild(list);
     wrap.appendChild(control);
     wrap.appendChild(menu);
     sel.parentNode.insertBefore(wrap, sel.nextSibling);
@@ -98,11 +107,11 @@
         chip.appendChild(x);
         chips.appendChild(chip);
       });
-      input.placeholder = picked.length ? "" : allLabel;
+      placeholder.textContent = picked.length ? "" : allLabel;
     }
     function renderMenu() {
-      var q = norm(input.value.trim());
-      menu.innerHTML = "";
+      var q = norm(search.value.trim());
+      list.innerHTML = "";
       var shown = 0;
       var more = 0;
       Array.prototype.forEach.call(sel.options, function (o) {
@@ -117,21 +126,22 @@
         cb.addEventListener("change", function () { toggle(o.value, cb.checked); });
         row.appendChild(cb);
         row.appendChild(document.createTextNode(o.value));
-        menu.appendChild(row);
+        list.appendChild(row);
       });
       if (shown === 0) {
         var none = el("div", "bi-ms-none");
         none.textContent = "—";
-        menu.appendChild(none);
+        list.appendChild(none);
       } else if (more > 0) {
         var hint = el("div", "bi-ms-more");
         hint.textContent = "+" + more + "…";
-        menu.appendChild(hint);
+        list.appendChild(hint);
       }
     }
 
-    control.addEventListener("click", function () { menu.hidden = false; input.focus(); });
-    input.addEventListener("input", function () { menu.hidden = false; renderMenu(); });
+    // Click the clean control to open; focus the search so you can just type.
+    control.addEventListener("click", function () { menu.hidden = false; search.focus(); });
+    search.addEventListener("input", renderMenu);
     document.addEventListener("click", function (e) {
       if (!wrap.contains(e.target)) menu.hidden = true;
     });
@@ -154,7 +164,6 @@
           o.selected = picked.indexOf(v) !== -1;
           sel.appendChild(o);
         });
-        input.placeholder = searchLabel;
         renderChips();
         renderMenu();
       },
