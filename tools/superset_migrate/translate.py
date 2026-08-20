@@ -53,6 +53,15 @@ VIZ = {
     "big_number": "number",
 }
 
+# Viz types whose x-axis is a category, never time. For these, `granularity_sqla`
+# is only the time-range FILTER: promoting that column to the axis is what turned
+# "totals per client" into a group-by-every-raw-timestamp query that never
+# returns. Everything else (line, area, the NVD3 `bar`, echarts_timeseries_*) is
+# a genuine time-series where the granularity belongs on the x-axis — NVD3 `bar`
+# included, which is why only `dist_bar` (Distribution Bar) sits here. `pie` is
+# categorical too but drops its time expression separately below.
+CATEGORICAL_VIZ = {"dist_bar"}
+
 OPS = {
     "==": "=",
     "EQUALS": "=",
@@ -278,7 +287,7 @@ def translate(
         expression, label = _column_sql(x_axis, calc)
         time_expr = f"date_trunc('{grain}', {expression})" if grain else expression
         time_label = label
-    elif params.get("granularity_sqla"):
+    elif params.get("granularity_sqla") and viz not in CATEGORICAL_VIZ:
         col = params["granularity_sqla"]
         if isinstance(col, str) and col.strip():
             gcol = f"({calc[col]})" if col in calc else qi(col)
@@ -307,40 +316,56 @@ def translate(
     if not time_expr and not dims:
         raise Unsupported("chart has no dimension to plot against")
 
-    # ── time + series: LONG format (one row per time × series) ──
+    # ── x-axis + series: LONG format (one row per x × series) ──
     #
     # This used to pivot each series into its own column with a FILTER, which
     # meant probing the distinct series values first, capping at 12, and giving
     # up on any metric a regex couldn't rewrite (ratios, especially). Long
-    # format sidesteps all of it: emit (time, series, value) rows and let the
+    # format sidesteps all of it: emit (x, series, value) rows and let the
     # renderer group them, with a scrollable legend. No cap, no probe, and the
     # value can be any expression — so ratios and two-way splits just work.
+    #
+    # A time chart puts time on the x-axis and every dimension in the series. A
+    # categorical bar with a breakdown (dist_bar, no time) puts its first
+    # dimension on the x-axis and the rest in the series — the "composição por
+    # categoria" case, which otherwise drew one shapeless clump per client.
+    x_pair = series_dims = None
     if time_expr and dims and kind != "table":
+        x_pair, series_dims = (time_expr, time_label), dims
+    elif not time_expr and kind == "bar" and len(dims) >= 2 and len(metrics) == 1:
+        x_pair, series_dims = dims[0], dims[1:]
+
+    if x_pair is not None:
         if len(metrics) != 1:
             # One value column per row; several measures don't fit long format.
             raise Unsupported("time+series chart with multiple metrics")
+        x_expr, x_label = x_pair
         # Two split dimensions collapse into one series key ("A / B"), which is
         # how you'd read them off a legend anyway.
-        if len(dims) == 1:
-            series_expr, series_label = dims[0]
+        if len(series_dims) == 1:
+            series_expr, series_label = series_dims[0]
         else:
-            parts = ", ".join(f"({e})::text" for e, _ in dims)
+            parts = ", ".join(f"({e})::text" for e, _ in series_dims)
             series_expr = f"concat_ws(' / ', {parts})"
-            series_label = " / ".join(lbl for _, lbl in dims)
+            series_label = " / ".join(lbl for _, lbl in series_dims)
         agg, value_label = metrics[0]
         select = [
-            f"{time_expr} AS {qi(time_label)}",
+            f"{x_expr} AS {qi(x_label)}",
             f"{series_expr} AS {qi(series_label)}",
             f"{agg} AS {qi(value_label)}",
         ]
-        # No row cap here: the grouped result is (distinct time × distinct
-        # series), and truncating it would drop whole series. build_spec bounds
-        # what actually gets drawn.
-        sql = _assemble(select, source, where, [time_expr, series_expr], "1 ASC", None)
+        # Time keeps chronological order and no cap (truncating would drop whole
+        # series; build_spec bounds what is drawn). A categorical bar keeps the
+        # chart's row_limit and orders by the measure, so a "top-N" stays top-N.
+        if time_expr:
+            order, cap = "1 ASC", None
+        else:
+            order, cap = "3 DESC", limit
+        sql = _assemble(select, source, where, [x_expr, series_expr], order, cap)
         return {
             "sql": sql,
             "chart_type": kind,
-            "x_column": time_label,
+            "x_column": x_label,
             "y_columns": [value_label],
             "series_column": series_label,
             "needs_series": False,

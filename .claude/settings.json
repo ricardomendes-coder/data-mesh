@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(git status:*)",
       "Bash(git diff:*)",
@@ -15,8 +14,11 @@
       "Bash(python3 *)",
       "Bash(awk *)",
       "Bash(cd /home/marcelo/trabalho/data-mesh *)",
-      "Read(//usr/bin/**)"
+      "Read(//usr/bin/**)",
+      "Bash(timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/15432')",
+      "Bash(kill 120251)"
     ],
+    "defaultMode": "bypassPermissions",
     "additionalDirectories": [
       "/home/marcelo/trabalho/data-mesh/app"
     ]

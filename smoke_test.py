@@ -474,6 +474,49 @@ def test_long_format_pivots_into_series():
     assert any("more series not shown" in w for w in hspec.warnings), hspec.warnings
 
 
+def test_dist_bar_does_not_plot_its_time_filter_on_the_x_axis():
+    """A categorical bar's granularity_sqla is the time FILTER, not the x-axis.
+
+    "Totals per client" is a dist_bar with groupby=[c_id] and granularity_sqla
+    pointing at a raw creation timestamp used only by the time-range picker.
+    Promoting that timestamp to the axis produced GROUP BY (every distinct
+    timestamp, c_id) — millions of groups, a query that never returned. The
+    axis must be the groupby; the timestamp must not reach GROUP BY at all.
+    """
+    import json
+
+    from tools.superset_migrate import translate as T
+
+    dataset = {"table_name": "mview_automatismo", "schema": "public", "sql": None}
+    metric = {"expressionType": "SQL", "sqlExpression": "count(*)", "label": "total"}
+
+    params = json.dumps({
+        "metrics": [metric],
+        "groupby": ["c_id"],
+        "granularity_sqla": "criacao_tarefa",  # time filter column, not an axis
+        "time_grain_sqla": None,
+    })
+    spec = T.translate({"params": params, "viz_type": "dist_bar"}, dataset, {})
+    assert spec["x_column"] == "c_id", spec["x_column"]
+    assert not spec.get("series_column"), spec.get("series_column")
+    assert "criacao_tarefa" not in spec["sql"], spec["sql"]
+    assert "GROUP BY" in spec["sql"] and "c_id" in spec["sql"].split("GROUP BY")[1]
+
+    # A genuine time-series bar still plots time on the x-axis, bucketed by grain.
+    tsparams = json.dumps({
+        "metrics": [metric],
+        "groupby": ["c_id"],
+        "granularity_sqla": "criacao_tarefa",
+        "time_grain_sqla": "P1W",
+    })
+    tspec = T.translate(
+        {"params": tsparams, "viz_type": "echarts_timeseries_bar"}, dataset, {}
+    )
+    assert tspec["x_column"] == "criacao_tarefa", tspec["x_column"]
+    assert "date_trunc" in tspec["sql"], tspec["sql"]
+    assert tspec["series_column"] == "c_id", tspec["series_column"]
+
+
 def test_dashboard_layout_ordering():
     """move_item swaps neighbours and rewrites positions densely.
 
