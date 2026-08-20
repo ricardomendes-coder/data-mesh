@@ -94,16 +94,19 @@ class Settings(BaseSettings):
     initial_admin_user: str | None = None
     initial_admin_password: str | None = None
 
+    # Per-session work_mem for warehouse queries. Left EMPTY (server default)
+    # on purpose: a benchmark showed 256MB made the planner flip "Automatismo
+    # por semana" from an index scan (0.2s) to a full scan + hashagg of 23.8M
+    # rows (62s) — bigger work_mem lowered the modelled cost of the hash plan
+    # and tipped it into a far worse one. The filtered sorts are ~17MB and fit
+    # the 4MB default fine. Set this only if a specific query is proven to need
+    # it; a blanket value is a footgun here. See _tune_work_mem in app/db.py.
+    warehouse_work_mem: str = ""
+
     # ---- Query console limits ----
     # Hard ceiling on rows fetched by an ad-hoc query. A user can ask for less
     # (there's a box in the console) but never more — without it, one
     # `SELECT * FROM anticipation` pulls 1.8M rows into the app's memory.
-    # Per-session work_mem for warehouse queries, set on each connection the
-    # app opens (SET, not the RDS parameter group — this only touches our own
-    # connections, so a big value here can't multiply across every system that
-    # shares the instance). The Automatismo charts sort ~10M rows; at the RDS
-    # default of 4MB that spills to disk. Empty string leaves the server default.
-    warehouse_work_mem: str = "256MB"
     query_max_rows: int = 100_000
     # What the limit box starts at.
     query_default_rows: int = 1_000
