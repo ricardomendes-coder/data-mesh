@@ -6,6 +6,14 @@
 {% block page_sub %}
   <a href="{{ url_for('dashboards_index') }}">Dashboards</a> /
   {{ _('{n} chart', n=tiles|length) if tiles|length == 1 else _('{n} charts', n=tiles|length) }}
+  {# The description used to be a full-width banner pushing the dashboard down.
+     It's an ⓘ here instead — the text shows on hover, and the tiles start at
+     the top of the screen. #}
+  {% if dashboard.description %}
+  <span class="bi-ds-info" tabindex="0" title="{{ dashboard.description }}" aria-label="{{ dashboard.description }}">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v3.4" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".6" fill="currentColor" stroke="none"/></svg>
+  </span>
+  {% endif %}
 {% endblock %}
 {% block topbar_extra %}
 {# Rebuilds every tile against the source. With a day-long cache this is the
@@ -23,10 +31,6 @@
 {% endblock %}
 
 {% block content %}
-{% if dashboard.description %}
-<div class="bi-ds-desc">{{ dashboard.description|inline_code }}</div>
-{% endif %}
-
 {# Filters live in a drawer on the right rather than a bar across the top.
    The tiles are placed at Superset's own column widths, so anything that
    permanently narrows the canvas would distort every dashboard on the way in;
