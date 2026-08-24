@@ -202,15 +202,19 @@
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
 {% if dashboard.has_tabs %}
 <script>
-/* Tab switching. Every tile is rendered up front — charts on a hidden pane are
-   drawn too, so switching tabs never waits on a query. */
+/* Tab switching. A pane's tiles are fetched the first time it is shown, not up
+   front — a hidden tab's queries would otherwise run before anyone opened it. */
 (function () {
   var tabs = document.querySelectorAll('.bi-dash-tabs [data-tab]');
   function show(name) {
     tabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
+    var opened = null;
     document.querySelectorAll('.pane[data-pane]').forEach(function (p) {
-      p.classList.toggle('active', p.getAttribute('data-pane') === name);
+      var on = p.getAttribute('data-pane') === name;
+      p.classList.toggle('active', on);
+      if (on) opened = p;
     });
+    if (opened && window.dashboardLoadPane) window.dashboardLoadPane(opened);
     try { history.replaceState(null, '', '#' + name); } catch (e) { /* file:// */ }
   }
   tabs.forEach(function (t) {

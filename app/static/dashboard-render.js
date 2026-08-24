@@ -143,57 +143,85 @@
     box.appendChild(age);
   }
 
-  function run(force) {
-    var queue = Array.prototype.slice.call(document.querySelectorAll("[data-tile]"));
-    var active = 0;
+  // One global scheduler: every tile that needs loading — the ones here on
+  // arrival, and the ones on a tab opened later — goes through a single queue
+  // with a single concurrency cap. They all hit the same warehouse, so a shared
+  // cap stops a freshly-opened tab from firing a second burst on top of the
+  // first. A tile carries `data-queued` while it waits and `data-loaded` once
+  // it has run, so nothing is fetched twice.
+  var queue = [];
+  var active = 0;
 
-    function next() {
-      if (!queue.length) return;
-      if (active >= CONCURRENCY) return;
-      var box = queue.shift();
+  function pump() {
+    while (active < CONCURRENCY && queue.length) {
       active++;
-      load(box, force).then(function () {
-        active--;
-        next();
-      });
-      next();
+      (function (item) {
+        load(item.box, item.force).then(function () {
+          item.box.setAttribute("data-loaded", "1");
+          item.box.removeAttribute("data-queued");
+          active--;
+          if (item.onEach) item.onEach();
+          pump();
+        });
+      })(queue.shift());
     }
-    for (var i = 0; i < CONCURRENCY; i++) next();
   }
 
+  function enqueue(boxes, force, onEach) {
+    boxes.forEach(function (box) {
+      if (box.getAttribute("data-queued") === "1") return;
+      if (box.getAttribute("data-loaded") === "1" && !force) return;
+      box.setAttribute("data-queued", "1");
+      queue.push({ box: box, force: force, onEach: onEach });
+    });
+    pump();
+  }
+
+  function tilesIn(root) {
+    return Array.prototype.slice.call(root.querySelectorAll("[data-tile]"));
+  }
+
+  // A tile is "here now" unless it sits on a hidden tab. Loading only the
+  // visible pane on arrival is the whole point: a seven-tab dashboard used to
+  // fire every tab's queries at once, most for tabs no one opened.
+  function onVisiblePane(box) {
+    var pane = box.closest(".pane[data-pane]");
+    return !pane || pane.classList.contains("active");
+  }
+
+  // The tab strip calls this the first time a pane is shown. Already-loaded
+  // tiles are skipped, so flipping back and forth between tabs costs nothing.
+  window.dashboardLoadPane = function (pane) {
+    if (pane) enqueue(tilesIn(pane), false);
+  };
+
   function start() {
-    run(false);
+    enqueue(tilesIn(document).filter(onVisiblePane), false);
     wireRefreshAll();
   }
 
-  /* "Atualizar" in the topbar: rebuild every tile at once, rather than making
-     someone click the per-tile ↻ fourteen times. With a day-long cache this is
-     the one obvious way to ask for this minute's numbers, so it says it's
-     working and can't be fired twice at once. */
+  /* "Atualizar" in the topbar: rebuild the tiles that have actually loaded — the
+     visible pane, plus any tab already opened. A tab never opened stays lazy
+     instead of being pulled in by a refresh. Can't be fired twice at once. */
   function wireRefreshAll() {
     var button = document.getElementById("refresh-dashboard");
     if (!button) return;
     button.addEventListener("click", function () {
       if (button.getAttribute("aria-busy") === "true") return;
+      var boxes = Array.prototype.slice.call(
+        document.querySelectorAll('[data-tile][data-loaded="1"]')
+      );
+      if (!boxes.length) return;
       button.setAttribute("aria-busy", "true");
-      document.querySelectorAll("[data-tile]").forEach(function (box) {
+      var pending = boxes.length;
+      boxes.forEach(function (box) {
         box.innerHTML =
           '<div class="bi-tile-skel"><span></span><span></span><span></span></div>';
+        box.removeAttribute("data-loaded");
       });
-      var pending = document.querySelectorAll("[data-tile]").length;
-      var queue = Array.prototype.slice.call(document.querySelectorAll("[data-tile]"));
-      var active = 0;
-      function next() {
-        if (!queue.length || active >= CONCURRENCY) return;
-        active++;
-        load(queue.shift(), true).then(function () {
-          active--;
-          if (--pending <= 0) button.removeAttribute("aria-busy");
-          next();
-        });
-        next();
-      }
-      for (var i = 0; i < CONCURRENCY; i++) next();
+      enqueue(boxes, true, function () {
+        if (--pending <= 0) button.removeAttribute("aria-busy");
+      });
     });
   }
 
