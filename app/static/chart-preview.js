@@ -20,6 +20,14 @@
     return n;
   }
 
+  function fail(box, message, detail) {
+    box.innerHTML = "";
+    var err = el("div", "bi-tile-err");
+    err.appendChild(el("span", null, message));
+    if (detail) err.appendChild(el("code", "bi-tile-err-detail", detail));
+    box.appendChild(err);
+  }
+
   function draw(box, payload) {
     box.innerHTML = "";
     if (payload.renders_as === "number") {
@@ -66,15 +74,11 @@
         // Same distinction the dashboard tiles make: a chart that is merely
         // slow must not read as a broken one.
         if (!res.ok) {
-          box.innerHTML = "";
-          box.appendChild(
-            el("div", "bi-tile-err", payload.error || grid.getAttribute("data-err-timeout") || "")
-          );
+          fail(box, payload.error || grid.getAttribute("data-err-timeout") || "", payload.detail);
           return;
         }
         if (payload.error) {
-          box.innerHTML = "";
-          box.appendChild(el("div", "bi-tile-err", payload.error));
+          fail(box, payload.error, payload.detail);
           return;
         }
         draw(box, payload);

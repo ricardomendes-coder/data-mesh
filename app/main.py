@@ -2,6 +2,7 @@ import hashlib
 import logging
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -1052,8 +1053,12 @@ def charts_index(
     try:
         # Filtered by slug: a chart you can't open shouldn't be listed either.
         visible = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
-        context["charts"] = _apply_tag_filter(visible, store.CHART, context["tag"])
-        context["tags_map"] = _tags_of(store.CHART, [c.slug for c in context["charts"]])
+        matched = _apply_tag_filter(visible, store.CHART, context["tag"])
+        page, context["pagination"] = _search_and_paginate(matched, request, lambda c: c.title)
+        context["charts"] = page
+        # Tags only for the page's rows — a listing that shows twenty need not
+        # read tags for six hundred.
+        context["tags_map"] = _tags_of(store.CHART, [c.slug for c in page])
     except Exception:
         logger.exception("Could not list charts")
         context["db_ok"] = False
@@ -1235,6 +1240,18 @@ def chart_save(
     return RedirectResponse(request.url_for("chart_detail", slug=saved.id), status_code=303)
 
 
+def _db_error_detail(exc) -> str:
+    """A short, readable form of a warehouse error, for the person who can fix
+    it. This is a login-gated internal tool — the query console and the chart
+    builder already show the real database error — so a failing tile should say
+    'column "foo" does not exist', not just 'the query failed'. SQLAlchemy wraps
+    the driver error; `.orig` is the Postgres message, which is the useful line.
+    """
+    raw = str(getattr(exc, "orig", None) or exc)
+    detail = " ".join(raw.split())  # collapse the multi-line driver dump
+    return detail[:400]
+
+
 def _chart_preview(chart, full=False, force=False, cache_only=False):
     """Build, or fetch from cache, one chart's preview payload.
 
@@ -1273,9 +1290,12 @@ def _chart_preview(chart, full=False, force=False, cache_only=False):
             result.columns, result.rows, chart.chart_type, chart.x_column,
             chart.y_columns, chart.series_column
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Chart %r failed to render for the listing", chart.slug)
-        return {"error": i18n.t("This chart's query failed.")}, "error"
+        return {
+            "error": i18n.t("This chart's query failed."),
+            "detail": _db_error_detail(exc),
+        }, "error"
 
     payload = {"renders_as": spec.renders_as, "warnings": spec.warnings, "unfiltered": False}
     if spec.renders_as == "canvas":
@@ -1552,9 +1572,10 @@ def _render_tiles(items: list, active: list | None = None) -> list[dict]:
                 item.chart.y_columns,
                 item.chart.series_column,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Dashboard tile %r failed", item.chart.slug)
             tile["error"] = i18n.t("This chart's query failed.")
+            tile["detail"] = _db_error_detail(exc)
         tiles.append(tile)
     return tiles
 
@@ -1621,8 +1642,54 @@ def _listing_controls(request: Request, resource_type: str) -> dict:
         "view": view,
         "views": VIEWS,
         "tag": (request.query_params.get("tag") or "").strip(),
+        "q": (request.query_params.get("q") or "").strip(),
         "all_tags": tags,
         "vocab": vocab,
+    }
+
+
+LISTING_PER_PAGE = 20
+
+
+def _norm_text(s: str) -> str:
+    """Lower-cased and accent-stripped, so 'operacao' finds 'Operação'."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", (s or "").lower())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def _search_and_paginate(items: list, request: Request, text_of) -> tuple[list, dict]:
+    """Filter a listing by its ?q= and cut it to one ?page= of LISTING_PER_PAGE.
+
+    Server-side on purpose: the page ships twenty cards, not hundreds, so the DOM
+    stays light and only twenty previews can ever try to load. Search runs over
+    the whole set (not just the visible page), which is exactly why it moved off
+    the client — a client filter can only see what was rendered.
+    """
+    q = (request.query_params.get("q") or "").strip()
+    if q:
+        nq = _norm_text(q)
+        items = [it for it in items if nq in _norm_text(text_of(it))]
+    total = len(items)
+    pages = max(1, (total + LISTING_PER_PAGE - 1) // LISTING_PER_PAGE)
+    try:
+        page = int(request.query_params.get("page", "1"))
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, min(page, pages))
+    start = (page - 1) * LISTING_PER_PAGE
+    window = items[start:start + LISTING_PER_PAGE]
+    return window, {
+        "q": q,
+        "page": page,
+        "pages": pages,
+        "total": total,
+        "count": len(window),
+        "has_prev": page > 1,
+        "has_next": page < pages,
+        "start": start + 1 if window else 0,
+        "end": start + len(window),
     }
 
 
@@ -1744,8 +1811,10 @@ def dashboards_index(
     )
     try:
         visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
-        context["dashboards"] = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
-        context["tags_map"] = _tags_of(store.DASHBOARD, [d.slug for d in context["dashboards"]])
+        matched = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
+        page, context["pagination"] = _search_and_paginate(matched, request, lambda d: d.title)
+        context["dashboards"] = page
+        context["tags_map"] = _tags_of(store.DASHBOARD, [d.slug for d in page])
         # Preview mode draws a mosaic of each dashboard's first tiles, fetched
         # per card from /dashboards/<slug>/preview (cache-only) — no query here.
     except Exception:
@@ -2091,7 +2160,9 @@ def dashboard_tile_data(
     query_ms = int((time.perf_counter() - t_query) * 1000)
     if tile["error"]:
         _record_timing(dash, item, query_ms, None, bool(chosen), False)
-        return JSONResponse({"error": tile["error"]}, status_code=200)
+        return JSONResponse(
+            {"error": tile["error"], "detail": tile.get("detail")}, status_code=200
+        )
     spec = tile["spec"]
     payload = {
         "renders_as": spec.renders_as,

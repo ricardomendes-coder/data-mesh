@@ -1,9 +1,9 @@
 {% extends "_shell.html" %}
-{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab, search_bar with context %}
+{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab, search_bar, pager with context %}
 {% block page_title %}{{ _('Charts') }}{% endblock %}
-{% block page_sub %}{{ _('{n} saved', n=charts|length) }}{% endblock %}
+{% block page_sub %}{{ _('{n} saved', n=(pagination.total if pagination else charts|length)) }}{% endblock %}
 {% block topbar_extra %}
-{{ view_switcher('charts_index', view, views, tag) }}
+{{ view_switcher('charts_index', view, views, tag, q) }}
 {% if can_build %}<a class="bi-btn" href="{{ url_for('chart_new') }}">
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
   {{ _('New chart') }}
@@ -11,8 +11,8 @@
 {% endblock %}
 
 {% block content %}
-{{ search_bar(_('Search charts…')) }}
-{{ tag_bar('charts_index', all_tags, tag, view) }}
+{{ search_bar(_('Search charts…'), 'charts_index', view, tag, q) }}
+{{ tag_bar('charts_index', all_tags, tag, view, q) }}
 
 {% if charts %}
 
@@ -83,6 +83,8 @@
 </div>
 {% endif %}
 
+{{ pager('charts_index', pagination, view, tag, q) }}
+
 {% if view == 'preview' %}
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
@@ -91,7 +93,10 @@
 
 {% else %}
 <div class="bi-empty-lg">
-  {% if tag %}
+  {% if q %}
+  {{ _('Nothing matches “{q}”.', q=q) }}
+  <a href="{{ url_for('charts_index') }}?view={{ view }}{% if tag %}&amp;tag={{ tag }}{% endif %}">{{ _('Clear search') }}</a>
+  {% elif tag %}
   {{ _('Nothing tagged {tag}.', tag=tag) }}
   <a href="{{ url_for('charts_index') }}?view={{ view }}">{{ _('All') }}</a>
   {% else %}

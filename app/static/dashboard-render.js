@@ -57,10 +57,13 @@
     if (window.renderChart && payload.spec) window.renderChart(canvasId, payload.spec);
   }
 
-  function fail(box, message) {
+  function fail(box, message, detail) {
     box.innerHTML = "";
     var err = el("div", "bi-tile-err");
     err.appendChild(el("span", null, message));
+    // The real database error, for whoever can fix the chart — this is a
+    // login-gated internal tool, the same reason the query console shows it.
+    if (detail) err.appendChild(el("code", "bi-tile-err-detail", detail));
     box.appendChild(err);
   }
 
@@ -88,11 +91,11 @@
         // very different things, and printing one sentence for both is how a
         // tile that is merely slow reads as a broken chart.
         if (!res.ok) {
-          fail(box, payload.error || label("timeout"));
+          fail(box, payload.error || label("timeout"), payload.detail);
           return;
         }
         if (payload.error) {
-          fail(box, payload.error);
+          fail(box, payload.error, payload.detail);
           return;
         }
         if (payload.renders_as === "table") renderTable(box, payload);

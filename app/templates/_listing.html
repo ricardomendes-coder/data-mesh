@@ -3,11 +3,11 @@
 
 {# preview | box | list. The choice is remembered per listing in the session,
    so it survives navigating away and back. #}
-{% macro view_switcher(route, view, views, tag) -%}
+{% macro view_switcher(route, view, views, tag, q='') -%}
 <div class="bi-viewsw" role="group" aria-label="{{ _('View') }}">
   {% for name in views %}
   <a class="bi-viewbtn {{ 'active' if name == view else '' }}"
-     href="{{ url_for(route) }}?view={{ name }}{% if tag %}&amp;tag={{ tag }}{% endif %}"
+     href="{{ url_for(route) }}?view={{ name }}{% if tag %}&amp;tag={{ tag }}{% endif %}{% if q %}&amp;q={{ q|urlencode }}{% endif %}"
      title="{{ _(name) }}" {% if name == view %}aria-current="true"{% endif %}>
     {% if name == 'preview' %}
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M4.5 10.5l2.5-3 2 2.2 2.5-3.2"/></svg>
@@ -23,14 +23,15 @@
 {%- endmacro %}
 
 {# Only rendered when something is actually tagged: an empty bar is furniture. #}
-{% macro tag_bar(route, all_tags, tag, view) -%}
+{% macro tag_bar(route, all_tags, tag, view, q='') -%}
 {% if all_tags %}
+{% set qs = ('&q=' ~ (q|urlencode)) if q else '' %}
 <div class="bi-tagbar">
   <a class="bi-tagchip {{ 'active' if not tag else '' }}"
-     href="{{ url_for(route) }}?view={{ view }}">{{ _('All') }}</a>
+     href="{{ url_for(route) }}?view={{ view }}{{ qs }}">{{ _('All') }}</a>
   {% for g in all_tags %}
   <a class="bi-tagchip {{ 'active' if g.slug == tag else '' }}"
-     href="{{ url_for(route) }}?view={{ view }}&amp;tag={{ g.slug }}">
+     href="{{ url_for(route) }}?view={{ view }}&amp;tag={{ g.slug }}{{ qs }}">
     {{ g.name }}<span class="bi-tagn">{{ g.count }}</span>
   </a>
   {% endfor %}
@@ -69,17 +70,36 @@
 <script src="{{ url_for('static', path='tag-editor.js') }}"></script>
 {%- endmacro %}
 
-{# The listing's own search: a live, client-side filter of what is already on
-   the page — no reload, so it doesn't re-fire the lazy preview fetches. Shared
-   by Charts and Dashboards so the two read identically. Each item carries
-   data-search-item + data-search-text; listing-search.js hides the rest. #}
-{% macro search_bar(placeholder) -%}
-<div class="bi-listtools">
-  <div class="bi-search" role="search">
+{# The listing's search: a GET form so it filters the whole catalogue and then
+   paginates, not just the twenty cards on screen. listing-search.js submits it
+   a beat after you stop typing, so it still feels live. view/tag ride along as
+   hidden fields; omitting `page` sends you back to the first page of results. #}
+{% macro search_bar(placeholder, route, view, tag, q='') -%}
+<form class="bi-listtools" method="get" action="{{ url_for(route) }}" data-search-form role="search">
+  <input type="hidden" name="view" value="{{ view }}">
+  {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}
+  <div class="bi-search">
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
-    <input type="search" data-search placeholder="{{ placeholder }}" autocomplete="off" aria-label="{{ placeholder }}">
+    <input type="search" name="q" value="{{ q }}" data-search-input placeholder="{{ placeholder }}" autocomplete="off" aria-label="{{ placeholder }}">
+    {% if q %}<a class="bi-search-clear" href="{{ url_for(route) }}?view={{ view }}{% if tag %}&amp;tag={{ tag }}{% endif %}" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">&times;</a>{% endif %}
   </div>
-</div>
-<p class="bi-search-empty" data-search-empty hidden>{{ _('Nothing matches your search.') }}</p>
+</form>
 <script src="{{ url_for('static', path='listing-search.js') }}"></script>
+{%- endmacro %}
+
+{# Prev / next across pages of results, keeping the current view, tag and query.
+   Only drawn when there is more than one page — a lone page needs no controls. #}
+{% macro pager(route, pg, view, tag, q='') -%}
+{% if pg and pg.pages > 1 %}
+{% set base = url_for(route) ~ '?view=' ~ view ~ (('&tag=' ~ tag) if tag else '') ~ (('&q=' ~ (q|urlencode)) if q else '') %}
+<nav class="bi-pager" aria-label="{{ _('Pagination') }}">
+  {% if pg.has_prev %}
+  <a class="bi-pagebtn" href="{{ base }}&amp;page={{ pg.page - 1 }}" rel="prev">‹ {{ _('Previous') }}</a>
+  {% else %}<span class="bi-pagebtn disabled">‹ {{ _('Previous') }}</span>{% endif %}
+  <span class="bi-pageinfo">{{ _('Page {a} of {b}', a=pg.page, b=pg.pages) }}</span>
+  {% if pg.has_next %}
+  <a class="bi-pagebtn" href="{{ base }}&amp;page={{ pg.page + 1 }}" rel="next">{{ _('Next') }} ›</a>
+  {% else %}<span class="bi-pagebtn disabled">{{ _('Next') }} ›</span>{% endif %}
+</nav>
+{% endif %}
 {%- endmacro %}

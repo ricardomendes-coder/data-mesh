@@ -211,6 +211,15 @@
     .bi-search svg{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);color:var(--g-300);pointer-events:none;}
     .bi-search input{width:100%;height:38px;border:1px solid var(--border-strong);border-radius:var(--r);padding:0 .7rem 0 2.1rem;font-family:inherit;font-size:.85rem;color:var(--title);background:var(--surface);outline:none;transition:border-color .13s,box-shadow .13s;}
     .bi-search input:focus{border-color:var(--orange);box-shadow:var(--ring);}
+    .bi-search input[type="search"]{padding-right:2rem;}
+    .bi-search-clear{position:absolute;right:.55rem;top:50%;transform:translateY(-50%);color:var(--g-400);font-size:1.1rem;line-height:1;text-decoration:none;padding:0 .2rem;}
+    .bi-search-clear:hover{color:var(--orange);}
+    /* Pagination for the Charts and Dashboards listings. */
+    .bi-pager{display:flex;align-items:center;justify-content:center;gap:1rem;margin:1.6rem 0 .4rem;}
+    .bi-pagebtn{display:inline-flex;align-items:center;gap:.3rem;font-size:.83rem;font-weight:500;padding:.4rem .8rem;border:1px solid var(--border-strong);border-radius:var(--r);color:var(--title);text-decoration:none;background:var(--surface);}
+    .bi-pagebtn:hover{border-color:var(--orange);color:var(--orange);}
+    .bi-pagebtn.disabled{color:var(--g-300);border-color:var(--border);pointer-events:none;background:transparent;}
+    .bi-pageinfo{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums;}
     .bi-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-left:auto;}
     .bi-chip{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:var(--r-pill);border:1px solid var(--border-strong);background:var(--surface);color:var(--body);font-size:.78rem;font-weight:600;transition:all .13s;}
     .bi-chip:hover{border-color:var(--g-300);color:var(--title);}
@@ -323,8 +332,11 @@
     .bi-tile-ctl select{height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--body);font-family:inherit;font-size:.72rem;padding:0 .3rem;outline:none;}
     .bi-tile-canvas{padding:.85rem .9rem;height:248px;position:relative;}
     .bi-tile-full .bi-tile-canvas{height:320px;}
-    .bi-tile-err{display:flex;align-items:center;gap:.5rem;padding:1.4rem .9rem;font-size:.8rem;color:#9A3412;}
+    .bi-tile-err{display:flex;align-items:center;flex-wrap:wrap;justify-content:center;text-align:center;gap:.5rem;padding:1.4rem .9rem;font-size:.8rem;color:#9A3412;}
     .bi-tile-err svg{flex-shrink:0;color:#EA580C;}
+    /* The real database error, shown to whoever can fix the chart. */
+    .bi-err{flex-wrap:wrap;}
+    .bi-tile-err-detail{flex-basis:100%;margin-top:.45rem;font-family:var(--mono);font-size:.66rem;line-height:1.45;color:var(--danger);background:color-mix(in srgb,var(--danger) 9%,transparent);border:1px solid color-mix(in srgb,var(--danger) 28%,transparent);border-radius:var(--r-sm);padding:.35rem .55rem;max-height:6.5em;overflow:auto;text-align:left;white-space:pre-wrap;word-break:break-word;}
     .bi-tile-warn{padding:0 .9rem .7rem;font-size:.72rem;color:var(--muted);line-height:1.45;}
 
     .bi-icobtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--body);cursor:pointer;transition:all .12s;}

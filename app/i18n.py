@@ -152,6 +152,14 @@ CATALOG: dict[str, dict[str, str]] = {
         ),
 
         "Rebuild every chart with the latest data": "Reconstruir todos os gráficos com os dados mais recentes",
+        # ── listing search & pagination ──
+        "Page {a} of {b}": "Página {a} de {b}",
+        "Previous": "Anterior",
+        "Next": "Próxima",
+        "Pagination": "Paginação",
+        "Nothing matches “{q}”.": "Nada corresponde a “{q}”.",
+        "Clear search": "Limpar busca",
+        "Clear": "Limpar",
         # ── charts ──
         "New chart": "Novo gráfico",
         "{n} saved": "{n} salvos",

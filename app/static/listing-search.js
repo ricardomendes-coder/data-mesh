@@ -1,34 +1,30 @@
-/* Live filter for the Charts and Dashboards listings.
+/* Submits the Charts / Dashboards search a beat after you stop typing.
  *
- * Everything is already on the page (cards or rows), so this hides what
- * doesn't match rather than reloading — a reload would re-run the lazy preview
- * fetches on every keystroke. Accent-insensitive, because the titles are
- * Portuguese and nobody types "operação" to find "Operacao".
+ * The search is server-side now — it filters the whole catalogue and then
+ * paginates, which a client-side filter of the twenty rendered cards could not
+ * do. Debouncing keeps it feeling live without a reload on every keystroke, and
+ * the caret is restored to the end after the results come back.
  */
 (function () {
   "use strict";
 
-  var input = document.querySelector("[data-search]");
-  if (!input) return;
+  var form = document.querySelector("[data-search-form]");
+  var input = form && form.querySelector("[data-search-input]");
+  if (!form || !input) return;
 
-  function norm(s) {
-    return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // After a search reload the input is repainted; put the cursor back at the end.
+  if (input.value) {
+    input.focus();
+    var v = input.value;
+    input.value = "";
+    input.value = v;
   }
 
-  var empty = document.querySelector("[data-search-empty]");
-
-  function apply() {
-    var q = norm(input.value.trim());
-    var shown = 0;
-    document.querySelectorAll("[data-search-item]").forEach(function (el) {
-      var hay = norm(el.getAttribute("data-search-text") || el.textContent);
-      var match = !q || hay.indexOf(q) !== -1;
-      el.hidden = !match;
-      if (match) shown++;
-    });
-    // The note only makes sense once something has been typed.
-    if (empty) empty.hidden = shown > 0 || !q;
-  }
-
-  input.addEventListener("input", apply);
+  var timer;
+  input.addEventListener("input", function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () { form.submit(); }, 400);
+  });
+  // Enter (or the debounce firing) submits; either way, cancel the other.
+  form.addEventListener("submit", function () { clearTimeout(timer); });
 })();

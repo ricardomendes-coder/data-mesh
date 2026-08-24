@@ -29,10 +29,11 @@
     return host.getAttribute("data-" + name) || "";
   }
 
-  function fail(message) {
+  function fail(message, detail) {
     shell.innerHTML = "";
     var box = el("div", "bi-err");
     box.appendChild(el("span", null, message));
+    if (detail) box.appendChild(el("code", "bi-tile-err-detail", detail));
     shell.appendChild(box);
   }
 
@@ -101,8 +102,8 @@
         var payload = res.body || {};
         // "It never came back" and "the database said no" are different
         // things, and one sentence for both makes a slow chart look broken.
-        if (!res.ok) return fail(payload.error || label("err-timeout"));
-        if (payload.error) return fail(payload.error);
+        if (!res.ok) return fail(payload.error || label("err-timeout"), payload.detail);
+        if (payload.error) return fail(payload.error, payload.detail);
         drawChart(payload);
         drawRows(payload);
         stamp(payload);

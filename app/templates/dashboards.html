@@ -1,9 +1,9 @@
 {% extends "_shell.html" %}
-{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab, search_bar with context %}
+{% from "_listing.html" import view_switcher, tag_bar, tags_of, tag_vocab, search_bar, pager with context %}
 {% block page_title %}{{ _('Dashboards') }}{% endblock %}
-{% block page_sub %}{{ _('{n} saved', n=dashboards|length) }}{% endblock %}
+{% block page_sub %}{{ _('{n} saved', n=(pagination.total if pagination else dashboards|length)) }}{% endblock %}
 {% block topbar_extra %}
-{{ view_switcher('dashboards_index', view, views, tag) }}
+{{ view_switcher('dashboards_index', view, views, tag, q) }}
 {% if can_build %}
 {# Named later, in the editor — same flow as a new chart, which is named in the
    builder. No name bar on the listing; the bar there is search now. #}
@@ -17,8 +17,8 @@
 {% endblock %}
 
 {% block content %}
-{{ search_bar(_('Search dashboards…')) }}
-{{ tag_bar('dashboards_index', all_tags, tag, view) }}
+{{ search_bar(_('Search dashboards…'), 'dashboards_index', view, tag, q) }}
+{{ tag_bar('dashboards_index', all_tags, tag, view, q) }}
 
 {% if dashboards %}
 
@@ -84,6 +84,8 @@
 </div>
 {% endif %}
 
+{{ pager('dashboards_index', pagination, view, tag, q) }}
+
 {% if view == 'preview' %}
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
@@ -92,7 +94,10 @@
 
 {% else %}
 <div class="bi-empty-lg">
-  {% if tag %}
+  {% if q %}
+  {{ _('Nothing matches “{q}”.', q=q) }}
+  <a href="{{ url_for('dashboards_index') }}?view={{ view }}{% if tag %}&amp;tag={{ tag }}{% endif %}">{{ _('Clear search') }}</a>
+  {% elif tag %}
   {{ _('Nothing tagged {tag}.', tag=tag) }}
   <a href="{{ url_for('dashboards_index') }}?view={{ view }}">{{ _('All') }}</a>
   {% else %}

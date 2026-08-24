@@ -1053,6 +1053,87 @@ def test_dashboard_mosaic_is_cache_only():
     print("dashboard mosaic: OK")
 
 
+def test_a_failed_query_shows_the_real_database_error():
+    """A failing chart carries the actual database error, not just 'the query
+    failed' — this is a login-gated internal tool and the person looking is
+    usually the one who can fix the chart, exactly as the query console does."""
+    from app import db as db_mod
+    from app import store
+
+    chart = store.Chart(id=8, slug="oops", title="Oops", source_db="analytics",
+                       sql="SELECT nope FROM mview", chart_type="bar",
+                       x_column="a", y_columns=["b"])
+    saved = (store.available, store.get_chart, store.slug_for, store.upsert_user,
+             store.get_chart_preview, store.put_chart_preview, db_mod.execute)
+    store.available = lambda: True
+    store.get_chart = lambda s: chart if s == "oops" else None
+    store.slug_for = lambda table, ident: "oops" if str(ident) == "8" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_chart_preview = lambda cid, variant="preview": None
+    store.put_chart_preview = lambda *a, **k: None
+
+    def _boom(sql, database=None, max_rows=None, params=None):
+        raise Exception('column "nope" does not exist')
+
+    db_mod.execute = _boom
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            body = client.get("/charts/8/data").json()
+            assert body.get("error"), body
+            assert "nope" in (body.get("detail") or ""), "the real error was not surfaced"
+    finally:
+        (store.available, store.get_chart, store.slug_for, store.upsert_user,
+         store.get_chart_preview, store.put_chart_preview, db_mod.execute) = saved
+    print("query error detail: OK")
+
+
+def test_listing_paginates_and_searches_server_side():
+    """A listing ships one page of twenty, filters the whole catalogue by ?q=
+    (not just the visible page), and the pager walks across pages — so the DOM
+    and the preview fetches stay bounded however many charts exist."""
+    from datetime import datetime
+
+    from app import store
+
+    charts = [
+        store.Chart(id=i, slug=f"c{i}",
+                   title=(f"Vendas {i}" if i < 30 else f"Custos {i}"),
+                   source_db="analytics", sql="SELECT 1", chart_type="bar",
+                   x_column="a", y_columns=["b"], updated_at=datetime(2026, 1, 1, tzinfo=UTC))
+        for i in range(50)
+    ]
+    saved = (store.available, store.list_charts, store.list_tags, store.tags_for,
+             store.slug_for, store.upsert_user)
+    store.available = lambda: True
+    store.list_charts = lambda with_sql=False: charts
+    store.list_tags = lambda resource_type=None: []
+    store.tags_for = lambda rt, keys: {}
+    store.slug_for = lambda table, ident: f"c{ident}"
+    store.upsert_user = _no_op_user
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            body = client.get("/charts?view=box").text
+            assert body.count('class="bi-card"') == 20, "the page did not cap at twenty"
+            assert "1 of 3" in body or "1 de 3" in body, "no pager for fifty charts"
+
+            # Page two is the next slice, not the first one again.
+            p2 = client.get("/charts?view=box&page=2").text
+            assert "Vendas 20" in p2 and "Vendas 19" not in p2, "page 2 is not the next slice"
+
+            # Search reaches items on other pages, then paginates the matches.
+            s = client.get("/charts?view=box&q=custos").text
+            assert "Custos 30" in s, "search missed a match that was on another page"
+            assert "Vendas 0" not in s, "search did not filter the catalogue"
+            assert s.count('class="bi-card"') == 20, "search results are not paginated"
+    finally:
+        (store.available, store.list_charts, store.list_tags, store.tags_for,
+         store.slug_for, store.upsert_user) = saved
+    print("listing pagination: OK")
+
+
 def test_interface_language():
     """Portuguese by default, English by choice, and the choice sticks."""
     from app import i18n, store
