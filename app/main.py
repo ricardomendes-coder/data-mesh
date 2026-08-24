@@ -1247,7 +1247,9 @@ def _db_error_detail(exc) -> str:
     'column "foo" does not exist', not just 'the query failed'. SQLAlchemy wraps
     the driver error; `.orig` is the Postgres message, which is the useful line.
     """
-    raw = str(getattr(exc, "orig", None) or exc)
+    raw = str(getattr(exc, "orig", None) or exc).strip()
+    if not raw:  # some drivers raise with an empty message; name it at least
+        raw = exc.__class__.__name__
     detail = " ".join(raw.split())  # collapse the multi-line driver dump
     return detail[:400]
 
@@ -1353,9 +1355,12 @@ def chart_data(
         )
     try:
         chart = store.get_chart(slug)
-    except Exception:
+    except Exception as exc:
         logger.exception("Could not load chart %r", slug)
-        return JSONResponse({"error": i18n.t("This chart's query failed.")}, status_code=502)
+        return JSONResponse(
+            {"error": i18n.t("This chart's query failed."), "detail": _db_error_detail(exc)},
+            status_code=502,
+        )
     if chart is None:
         return JSONResponse({"error": i18n.t("Not found")}, status_code=404)
 
@@ -2110,9 +2115,12 @@ def dashboard_tile_data(
         return JSONResponse({"error": "No access to that dashboard."}, status_code=403)
     try:
         dash = store.get_dashboard(slug)
-    except Exception:
+    except Exception as exc:
         logger.exception("Could not load dashboard %r for tile %s", slug, item_id)
-        return JSONResponse({"error": "Could not load the dashboard."}, status_code=502)
+        return JSONResponse(
+            {"error": i18n.t("Could not load the dashboard."), "detail": _db_error_detail(exc)},
+            status_code=502,
+        )
     if dash is None:
         return JSONResponse({"error": "Unknown dashboard."}, status_code=404)
 
