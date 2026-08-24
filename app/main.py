@@ -267,9 +267,26 @@ app.add_middleware(
 )
 
 # Brand assets (logo favicon, login artwork). Mounted before the routes so
+class RevalidatingStatic(StaticFiles):
+    """Static files that the browser must revalidate before reusing.
+
+    The default StaticFiles sends an ETag but no Cache-Control, so a browser is
+    free to serve a heuristically-cached copy without asking — which is how a
+    rebuilt container can still be running last week's chart-render.js in the
+    tab. `no-cache` doesn't mean "don't cache"; it means "revalidate first", so
+    an unchanged file still comes back as a cheap 304 and a changed one is
+    fetched fresh. That is what makes a deploy actually reach the browser.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
 # `url_for('static', path=...)` resolves in the templates; behind nginx these
 # are served as /report/static/... via the app's root_path.
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/static", RevalidatingStatic(directory=str(BASE_DIR / "static")), name="static")
 
 
 @app.exception_handler(NotAuthenticated)
