@@ -1069,7 +1069,7 @@ def charts_index(
     )
     try:
         # Filtered by slug: a chart you can't open shouldn't be listed either.
-        visible = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        visible = [c for c in store.list_charts(include_inactive=False) if access.allows(store.CHART, c.slug)]
         matched = _apply_tag_filter(visible, store.CHART, context["tag"])
         page, context["pagination"] = _search_and_paginate(matched, request, lambda c: c.title)
         context["charts"] = page
@@ -1832,7 +1832,7 @@ def dashboards_index(
         **_listing_controls(request, store.DASHBOARD),
     )
     try:
-        visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
+        visible = [d for d in store.list_dashboards(include_inactive=False) if access.allows(store.DASHBOARD, d.slug)]
         matched = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
         page, context["pagination"] = _search_and_paginate(matched, request, lambda d: d.title)
         context["dashboards"] = page
@@ -2242,7 +2242,9 @@ def dashboard_edit(
 
     available_charts = []
     try:
-        available_charts = [c for c in store.list_charts() if access.allows(store.CHART, c.slug)]
+        available_charts = [
+            c for c in store.list_charts(include_inactive=False) if access.allows(store.CHART, c.slug)
+        ]
     except Exception:
         logger.exception("Could not list charts for the dashboard editor")
 
@@ -2663,6 +2665,65 @@ def admin_performance(request: Request, user: str = Depends(require_admin)):
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_performance.html", context)
+
+
+@app.get("/admin/visibility", response_class=HTMLResponse)
+def admin_visibility(request: Request, user: str = Depends(require_admin)):
+    """Retire or restore charts and dashboards, one at a time. This is the only
+    place an inactive resource shows — everywhere else the app hides it."""
+    kind = request.query_params.get("kind")
+    if kind not in ("charts", "dashboards"):
+        kind = "dashboards"
+    st = request.query_params.get("st")
+    if st not in ("active", "inactive"):
+        st = "all"
+    try:
+        items = (
+            store.list_charts(include_inactive=True) if kind == "charts"
+            else store.list_dashboards(include_inactive=True)
+        )
+    except Exception:
+        logger.exception("Could not list %s for the visibility screen", kind)
+        items = []
+    n_total = len(items)
+    n_active = sum(1 for i in items if i.active)
+    if st == "active":
+        items = [i for i in items if i.active]
+    elif st == "inactive":
+        items = [i for i in items if not i.active]
+    page, pagination = _search_and_paginate(items, request, lambda x: x.title)
+    context = _shell_context(
+        user, "admin", admin_tab="visibility",
+        kind=kind, st=st, items=page, pagination=pagination,
+        q=(request.query_params.get("q") or "").strip(),
+        n_active=n_active, n_inactive=n_total - n_active, n_total=n_total,
+        is_admin=True,
+    )
+    return templates.TemplateResponse(request, "admin_visibility.html", context)
+
+
+@app.post("/admin/visibility/toggle")
+def admin_visibility_toggle(
+    request: Request,
+    kind: str = Form(...),
+    slug: str = Form(...),
+    active: str = Form(...),
+    q: str = Form(""),
+    st: str = Form("all"),
+    page: str = Form("1"),
+    user: str = Depends(require_admin),
+):
+    """Flip one resource active/inactive, then return to the same filtered page."""
+    make_active = active == "1"
+    try:
+        if kind == "charts":
+            store.set_chart_active(slug, make_active)
+        else:
+            store.set_dashboard_active(slug, make_active)
+    except Exception:
+        logger.exception("Could not set %s %r active=%s", kind, slug, make_active)
+    qs = urlencode({"kind": kind, "st": st, "q": q, "page": page})
+    return RedirectResponse(str(request.url_for("admin_visibility")) + "?" + qs, status_code=303)
 
 
 @app.get("/admin/users/{username}", response_class=HTMLResponse)

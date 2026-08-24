@@ -556,6 +556,17 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON chart_load_metrics (ts DESC);
         """,
     ),
+    (
+        "0021_active_flag",
+        """
+        -- A per-resource on/off. The app's listings show only active charts and
+        -- dashboards; an admin retires the ones nobody uses by flipping this,
+        -- individually, on the admin screen — the one place inactive ones show.
+        -- Default true so nothing disappears until someone deliberately hides it.
+        ALTER TABLE charts     ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+        ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+        """,
+    ),
 ]
 
 
@@ -634,6 +645,9 @@ class Chart:
     folder_id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Retired when false: hidden from every user-facing listing, flipped only on
+    # the admin screen. See 0021 and set_chart_active().
+    active: bool = True
 
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
@@ -667,12 +681,14 @@ def _row_to_chart(row: Any) -> Chart:
         folder_id=m["folder_id"],
         created_at=m["created_at"],
         updated_at=m["updated_at"],
+        active=m["active"] if "active" in m else True,
     )
 
 
 _SELECT = (
     "SELECT id, slug, title, description, source_db, sql, chart_type, "
-    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at FROM charts"
+    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at, "
+    "active FROM charts"
 )
 
 
@@ -685,21 +701,35 @@ _SELECT = (
 # dashboard editor shows names, the permissions screen shows slugs.
 _LIST_SELECT = (
     "SELECT id, slug, title, description, source_db, chart_type, "
-    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at FROM charts"
+    "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at, "
+    "active FROM charts"
 )
 
 
-def list_charts(with_sql: bool = False) -> list[Chart]:
+def list_charts(with_sql: bool = False, include_inactive: bool = True) -> list[Chart]:
     """Every chart. `sql` comes back empty unless you ask for it.
 
     Pulling 580 query bodies to render 580 titles is the difference between a
     page that opens and one that doesn't. Anything needing the query text wants
-    a single chart — use get_chart().
+    a single chart — use get_chart(). `include_inactive` stays True by default so
+    tools and the access layer see everything; the user-facing listings pass
+    False so a retired chart is gone from the catalogue.
     """
     select = _SELECT if with_sql else _LIST_SELECT
+    where = "" if include_inactive else " WHERE active"
     with engine().connect() as conn:
-        rows = conn.execute(text(f"{select} ORDER BY updated_at DESC"))  # noqa: S608 — fixed
+        rows = conn.execute(text(f"{select}{where} ORDER BY updated_at DESC"))  # noqa: S608 — fixed
         return [_row_to_chart(r) for r in rows]
+
+
+def set_chart_active(slug: str, active: bool) -> bool:
+    """Retire or restore one chart. Only the admin screen calls this."""
+    with engine().begin() as conn:
+        r = conn.execute(
+            text("UPDATE charts SET active = :a WHERE slug = :s"),
+            {"a": bool(active), "s": slug},
+        )
+    return r.rowcount > 0
 
 
 def get_chart(slug: str) -> Chart | None:
@@ -820,9 +850,11 @@ def save_chart(chart: Chart) -> Chart:
                 -- folder_id is absent from both the INSERT and the UPDATE on
                 -- purpose: saving a chart must never move it. It is returned so
                 -- the mapper stays whole, and it is set only by set_item_folder.
+                -- `active` is likewise never written here: only the admin toggle
+                -- flips it, so editing a retired chart must not silently revive it.
                 RETURNING id, slug, title, description, source_db, sql, chart_type,
                           x_column, y_columns, series_column, created_by, folder_id,
-                          created_at, updated_at
+                          created_at, updated_at, active
                 """
             ),
             params,
@@ -1006,6 +1038,7 @@ class Dashboard:
     folder_id: int | None = None  # display grouping only
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    active: bool = True  # retired when false — see 0021 / set_dashboard_active()
 
     @property
     def loose_items(self) -> list[DashboardItem]:
@@ -1019,7 +1052,7 @@ class Dashboard:
 
 _DASH_SELECT = (
     "SELECT id, slug, title, description, created_by, folder_id, "
-    "created_at, updated_at FROM dashboards"
+    "created_at, updated_at, active FROM dashboards"
 )
 
 
@@ -1034,17 +1067,30 @@ def _row_to_dashboard(row: Any) -> Dashboard:
         folder_id=m["folder_id"],
         created_at=m["created_at"],
         updated_at=m["updated_at"],
+        active=m["active"] if "active" in m else True,
     )
 
 
-def list_dashboards() -> list[Dashboard]:
+def set_dashboard_active(slug: str, active: bool) -> bool:
+    """Retire or restore one dashboard. Only the admin screen calls this."""
+    with engine().begin() as conn:
+        r = conn.execute(
+            text("UPDATE dashboards SET active = :a WHERE slug = :s"),
+            {"a": bool(active), "s": slug},
+        )
+    return r.rowcount > 0
+
+
+def list_dashboards(include_inactive: bool = True) -> list[Dashboard]:
     """Dashboards with a tile count, most recently updated first.
 
     Tiles are not loaded here — the index only needs the count, and loading
-    every chart for every dashboard would be a query per tile.
+    every chart for every dashboard would be a query per tile. `include_inactive`
+    defaults True (tools, access); the user listing passes False.
     """
+    where = "" if include_inactive else " WHERE active"
     with engine().connect() as conn:
-        rows = conn.execute(text(f"{_DASH_SELECT} ORDER BY updated_at DESC")).fetchall()
+        rows = conn.execute(text(f"{_DASH_SELECT}{where} ORDER BY updated_at DESC")).fetchall()
         dashboards = [_row_to_dashboard(r) for r in rows]
         counts = dict(
             conn.execute(
@@ -1201,9 +1247,9 @@ def save_dashboard(dash: Dashboard) -> Dashboard:
                     title       = EXCLUDED.title,
                     description = EXCLUDED.description,
                     updated_at  = now()
-                -- folder_id deliberately untouched; see save_chart().
+                -- folder_id and active deliberately untouched; see save_chart().
                 RETURNING id, slug, title, description, created_by, folder_id,
-                          created_at, updated_at
+                          created_at, updated_at, active
                 """
             ),
             {

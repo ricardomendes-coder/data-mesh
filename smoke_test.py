@@ -651,8 +651,8 @@ def test_dashboard_pages_render():
     )
     store.available = lambda: True
     store.get_dashboard = lambda slug, with_items=True: dash if slug == "ops" else None
-    store.list_charts = lambda: [chart]
-    store.list_dashboards = lambda: [dash]
+    store.list_charts = lambda **k: [chart]
+    store.list_dashboards = lambda **k: [dash]
     db_mod.execute = lambda sql, database=None, max_rows=None, params=None: db_mod.QueryResult(
         returns_rows=True,
         columns=["dia", "total"],
@@ -771,7 +771,7 @@ def test_tags_and_listing_views():
         {"1": "vendas", "2": "custos"}.get(str(ident)) if str(ident).isdigit() else str(ident)
     )
     store.available = lambda: True
-    store.list_charts = lambda: [chart_a, chart_b]
+    store.list_charts = lambda **k: [chart_a, chart_b]
     # Called two ways: with a type for the filter bar, without for the picker's
     # whole vocabulary. "Reservado" is defined but carried by nothing, so it
     # must reach the picker and stay out of the bar.
@@ -1106,7 +1106,7 @@ def test_listing_paginates_and_searches_server_side():
     saved = (store.available, store.list_charts, store.list_tags, store.tags_for,
              store.slug_for, store.upsert_user)
     store.available = lambda: True
-    store.list_charts = lambda with_sql=False: charts
+    store.list_charts = lambda with_sql=False, **k: charts
     store.list_tags = lambda resource_type=None: []
     store.tags_for = lambda rt, keys: {}
     store.slug_for = lambda table, ident: f"c{ident}"
@@ -1132,6 +1132,49 @@ def test_listing_paginates_and_searches_server_side():
         (store.available, store.list_charts, store.list_tags, store.tags_for,
          store.slug_for, store.upsert_user) = saved
     print("listing pagination: OK")
+
+
+def test_inactive_resources_hide_from_listings_and_toggle_in_admin():
+    """A retired (inactive) chart is gone from the user listing but still shows —
+    and flips — on the admin visibility screen, the only place it appears."""
+    from app import store
+
+    charts = [store.Chart(id=i, slug=f"c{i}", title=f"Chart {i}", source_db="analytics",
+                         sql="SELECT 1", chart_type="bar", x_column="a", y_columns=["b"],
+                         active=(i != 0)) for i in range(3)]
+    toggled = {}
+    saved = (store.available, store.list_charts, store.list_dashboards, store.list_tags,
+             store.tags_for, store.slug_for, store.upsert_user, store.is_admin,
+             store.set_chart_active)
+    store.available = lambda: True
+    store.list_charts = lambda with_sql=False, include_inactive=True, **k: (
+        charts if include_inactive else [c for c in charts if c.active])
+    store.list_dashboards = lambda include_inactive=True, **k: []
+    store.list_tags = lambda resource_type=None: []
+    store.tags_for = lambda rt, keys: {}
+    store.slug_for = lambda table, ident: f"c{ident}"
+    store.upsert_user = _no_op_user
+    store.is_admin = lambda u: True
+    store.set_chart_active = lambda slug, a: toggled.__setitem__(slug, a) or True
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+
+            body = client.get("/charts?view=list").text
+            assert "Chart 1" in body, "an active chart went missing"
+            assert "Chart 0" not in body, "an inactive chart leaked into the user listing"
+
+            adm = client.get("/admin/visibility?kind=charts&st=all").text
+            assert "Chart 0" in adm and "bi-switch" in adm, "admin screen hides inactive or the toggle"
+
+            r = client.post("/admin/visibility/toggle", follow_redirects=False, data={
+                "kind": "charts", "slug": "c0", "active": "1", "q": "", "st": "all", "page": "1"})
+            assert r.status_code == 303 and toggled.get("c0") is True, "the toggle did not restore c0"
+    finally:
+        (store.available, store.list_charts, store.list_dashboards, store.list_tags,
+         store.tags_for, store.slug_for, store.upsert_user, store.is_admin,
+         store.set_chart_active) = saved
+    print("admin visibility: OK")
 
 
 def test_interface_language():
@@ -1237,8 +1280,8 @@ def test_urls_address_charts_and_dashboards_by_id():
     store.available = lambda: True
     store.get_dashboard = lambda s, with_items=True: dash if s == "ops" else None
     store.get_chart = lambda s: chart if s == "capturas-por-dia" else None
-    store.list_charts = lambda: [chart]
-    store.list_dashboards = lambda: [dash]
+    store.list_charts = lambda **k: [chart]
+    store.list_dashboards = lambda **k: [dash]
     store.list_filters = lambda s: []
     store.upsert_user = _no_op_user
     # The resolver: ids map to slugs, unknown ids do not.
@@ -1417,8 +1460,8 @@ def test_list_pages_render_without_folder_ui():
         store.set_user_admin,
     )
     store.available = lambda: True
-    store.list_charts = lambda: [chart, loose]
-    store.list_dashboards = lambda: [dash]
+    store.list_charts = lambda **k: [chart, loose]
+    store.list_dashboards = lambda **k: [dash]
     store.list_folders = lambda: [fin]
     # Every reader the four pages below touch: available() is stubbed True, so
     # an unstubbed one reaches a real engine instead of rendering.
@@ -2314,8 +2357,8 @@ def test_listings_share_search_and_create_layout():
         store.unique_slug, store.slug_for, store.upsert_user,
     )
     store.available = lambda: True
-    store.list_charts = lambda with_sql=False: [chart]
-    store.list_dashboards = lambda: [dash]
+    store.list_charts = lambda with_sql=False, **k: [chart]
+    store.list_dashboards = lambda **k: [dash]
     store.list_tags = lambda resource_type=None: []
     store.tags_for = lambda rt, keys: {}
     store.get_dashboard = lambda s, with_items=True: dash if str(s) in ("operacao", "9") else None
@@ -2528,7 +2571,7 @@ def test_editor_does_not_reflow_placed_tiles():
     )
     store.available = lambda: True
     store.get_dashboard = lambda s, with_items=True: dash if s == "d" else None
-    store.list_charts = lambda with_sql=False: [chart]
+    store.list_charts = lambda with_sql=False, **k: [chart]
     store.slug_for = lambda table, ident: "d" if str(ident) == "5" else str(ident)
     store.upsert_user = _no_op_user
     store.list_filters = lambda s: []
@@ -2685,7 +2728,7 @@ def test_every_resource_type_is_grantable():
     reports.all_reports = lambda: [
         reports.Report(key="faturamento", title="F", database="analytics", sql="SELECT 1")
     ]
-    store.list_charts = lambda: [
+    store.list_charts = lambda **k: [
         store.Chart(
             id=1,
             slug="c1",
@@ -2696,7 +2739,7 @@ def test_every_resource_type_is_grantable():
             x_column="a",
         )
     ]
-    store.list_dashboards = lambda: [store.Dashboard(id=1, slug="d1", title="D")]
+    store.list_dashboards = lambda **k: [store.Dashboard(id=1, slug="d1", title="D")]
     try:
         grantable = main._grantable()
         missing = [t for t in store.RESOURCE_TYPES if t not in grantable]
@@ -2821,8 +2864,8 @@ def test_nav_hides_what_you_cannot_reach():
     # Every reader the pages below touch. available() is stubbed True, so an
     # unstubbed one would fall back to the real DB_HOST and make this test hit
     # the network — passing or timing out depending on where it's run.
-    store.list_charts = lambda: []
-    store.list_dashboards = lambda: []
+    store.list_charts = lambda **k: []
+    store.list_dashboards = lambda **k: []
     store.list_folders = lambda: []
     store.list_reports = lambda: []
 
@@ -3093,9 +3136,9 @@ def test_enforcement_at_every_route():
     main_mod.app.dependency_overrides[main_mod.access_for] = lambda: limited
     store.available = lambda: True
     store.upsert_user = _no_op_user
-    store.list_charts = lambda: [mine, theirs]
+    store.list_charts = lambda **k: [mine, theirs]
     store.get_chart = lambda s: {"mine": mine, "theirs": theirs}.get(s)
-    store.list_dashboards = lambda: [ops, secret]
+    store.list_dashboards = lambda **k: [ops, secret]
     store.get_dashboard = lambda s, with_items=True: {"ops": ops, "secret": secret}.get(s)
     db_mod.list_databases = lambda: ["analytics", "dw_whirlpool", "keycloak"]
     db_mod.execute = lambda sql, database=None, max_rows=None, params=None: db_mod.QueryResult(

@@ -1,0 +1,118 @@
+{% extends "_shell.html" %}
+{% from "_admin_tabs.html" import admin_tabs with context %}
+{% block page_title %}Visibilidade{% endblock %}
+{% block page_sub %}{{ n_active }} ativos · {{ n_inactive }} inativos de {{ n_total }} {{ 'gráficos' if kind == 'charts' else 'dashboards' }}{% endblock %}
+
+{% macro qslink(k, s, p) -%}
+{{ url_for('admin_visibility') }}?kind={{ k }}&amp;st={{ s }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if p %}&amp;page={{ p }}{% endif %}
+{%- endmacro %}
+
+{% block content %}
+{{ admin_tabs('visibility') }}
+
+<style>
+  .vis-intro{color:var(--muted);font-size:.86rem;margin:0 0 16px;max-width:70ch}
+  .vis-tabs{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--r-sm);overflow:hidden;margin-right:12px}
+  .vis-tabs a{padding:6px 16px;font-size:.85rem;font-weight:500;text-decoration:none;color:var(--muted)}
+  .vis-tabs a.on{background:var(--navy);color:#fff}
+  .vis-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .vis-chips{display:flex;gap:6px}
+  .vis-chip{font-size:.8rem;padding:5px 12px;border-radius:100px;border:1px solid var(--border-strong);text-decoration:none;color:var(--muted)}
+  .vis-chip.on{background:var(--orange);border-color:transparent;color:#fff}
+  .vis-search{position:relative;flex:1;min-width:200px;max-width:340px}
+  .vis-search input{width:100%;height:36px;border:1px solid var(--border-strong);border-radius:9px;padding:0 12px;font:inherit;font-size:.86rem;background:var(--surface);color:var(--title)}
+  .vis-search input:focus{outline:none;border-color:var(--orange)}
+  /* the per-resource switch (the "caixa" active/inactive) */
+  .switchcell{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+  .bi-switch{width:38px;height:22px;border-radius:100px;border:none;background:var(--g-300);position:relative;cursor:pointer;padding:0;flex:0 0 auto;transition:background .12s}
+  .bi-switch .knob{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .12s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .bi-switch.on{background:var(--ok)}
+  .bi-switch.on .knob{left:19px}
+  .statelbl{font-family:var(--mono);font-size:.72rem;font-weight:600;min-width:52px;text-align:left}
+  .statelbl.on{color:var(--ok)} .statelbl.off{color:var(--muted)}
+  tr.off td{opacity:.66}
+  .vis-pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:18px 0}
+  .vis-pager a,.vis-pager span{font-size:.83rem;padding:.4rem .8rem;border:1px solid var(--border-strong);border-radius:var(--r);text-decoration:none;color:var(--title)}
+  .vis-pager span.info{border:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .vis-pager span.disabled{color:var(--g-300);border-color:var(--border)}
+</style>
+
+<p class="vis-intro">Recursos <b>inativos</b> somem de toda a navegação — para usuários e admins. Esta é a única tela onde eles aparecem. Ligue/desligue cada um individualmente; nada é excluído.</p>
+
+<div class="vis-row">
+  <div class="vis-tabs">
+    <a class="{{ 'on' if kind == 'dashboards' else '' }}" href="{{ qslink('dashboards', st, '') }}">Dashboards</a>
+    <a class="{{ 'on' if kind == 'charts' else '' }}" href="{{ qslink('charts', st, '') }}">Gráficos</a>
+  </div>
+  <div class="vis-chips">
+    <a class="vis-chip {{ 'on' if st == 'all' else '' }}" href="{{ qslink(kind, 'all', '') }}">Todos</a>
+    <a class="vis-chip {{ 'on' if st == 'active' else '' }}" href="{{ qslink(kind, 'active', '') }}">Ativos</a>
+    <a class="vis-chip {{ 'on' if st == 'inactive' else '' }}" href="{{ qslink(kind, 'inactive', '') }}">Inativos</a>
+  </div>
+  <form class="vis-search" method="get" action="{{ url_for('admin_visibility') }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="st" value="{{ st }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="Buscar {{ 'gráfico' if kind == 'charts' else 'dashboard' }}…" autocomplete="off">
+  </form>
+</div>
+
+{% if items %}
+<div class="bi-restbl-wrap">
+  <table class="bi-restbl bi-admintbl">
+    <thead>
+      <tr>
+        <th>{{ 'Gráfico' if kind == 'charts' else 'Dashboard' }}</th>
+        {% if kind == 'charts' %}<th>Tipo</th><th>Base</th>{% else %}<th>Charts</th>{% endif %}
+        <th style="text-align:right">Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr class="{{ '' if it.active else 'off' }}">
+        <td>
+          {% if kind == 'charts' %}
+          <a href="{{ url_for('chart_detail', slug=it.id) }}">{{ it.title }}</a>
+          {% else %}
+          <a href="{{ url_for('dashboard_show', slug=it.id) }}">{{ it.title }}</a>
+          {% endif %}
+        </td>
+        {% if kind == 'charts' %}
+        <td><span class="bi-kind bi-kind-view">{{ _(it.chart_type) }}</span></td>
+        <td><code>{{ it.source_db }}</code></td>
+        {% else %}
+        <td>{{ it.items|length }}</td>
+        {% endif %}
+        <td>
+          <form class="switchcell" method="post" action="{{ url_for('admin_visibility_toggle') }}">
+            <input type="hidden" name="kind" value="{{ kind }}">
+            <input type="hidden" name="slug" value="{{ it.slug }}">
+            <input type="hidden" name="active" value="{{ '0' if it.active else '1' }}">
+            <input type="hidden" name="q" value="{{ q }}">
+            <input type="hidden" name="st" value="{{ st }}">
+            <input type="hidden" name="page" value="{{ pagination.page }}">
+            <span class="statelbl {{ 'on' if it.active else 'off' }}">{{ 'Ativo' if it.active else 'Inativo' }}</span>
+            <button class="bi-switch {{ 'on' if it.active else '' }}" type="submit"
+                    aria-label="{{ 'Inativar' if it.active else 'Ativar' }}"
+                    title="{{ 'Clique para inativar' if it.active else 'Clique para ativar' }}"><span class="knob"></span></button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="vis-pager">
+  {% if pagination.has_prev %}<a href="{{ qslink(kind, st, pagination.page - 1) }}">‹ Anterior</a>{% else %}<span class="disabled">‹ Anterior</span>{% endif %}
+  <span class="info">Página {{ pagination.page }} de {{ pagination.pages }} · {{ pagination.total }} itens</span>
+  {% if pagination.has_next %}<a href="{{ qslink(kind, st, pagination.page + 1) }}">Próxima ›</a>{% else %}<span class="disabled">Próxima ›</span>{% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<div class="bi-empty-lg">
+  {% if q %}Nada corresponde a “{{ q }}”.{% else %}Nenhum {{ 'gráfico' if kind == 'charts' else 'dashboard' }} {{ 'inativo' if st == 'inactive' else '' }} aqui.{% endif %}
+</div>
+{% endif %}
+{% endblock %}
