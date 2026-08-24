@@ -1235,6 +1235,81 @@ def chart_save(
     return RedirectResponse(request.url_for("chart_detail", slug=saved.id), status_code=303)
 
 
+def _chart_preview(chart, full=False, force=False, cache_only=False):
+    """Build, or fetch from cache, one chart's preview payload.
+
+    Returns (payload, state): 'cached' (served from a fresh snapshot), 'fresh'
+    (just built and cached), 'miss' (cache_only and nothing cached — payload is
+    None), or 'error' (the query failed — payload carries `error`). Snapshots
+    persist for preview_cache_minutes and rebuild only when the chart's query
+    changes, so a listing is a cache read, not a query, on all but the first look.
+    """
+    variant = "full" if full else "preview"
+    ttl = timedelta(minutes=max(0, settings.preview_cache_minutes))
+    if not force and ttl:
+        try:
+            cached = store.get_chart_preview(chart.id, variant)
+        except Exception:
+            logger.exception("Could not read the cached preview for %r", chart.slug)
+            cached = None
+        if cached:
+            payload, built_at = cached
+            fresh = datetime.now(built_at.tzinfo) - built_at < ttl
+            # A chart edited since the snapshot invalidates it: the query moved.
+            unchanged = not chart.updated_at or chart.updated_at <= built_at
+            if fresh and unchanged:
+                payload["age"] = _age_label(built_at)
+                payload["cached"] = True
+                return payload, "cached"
+    if cache_only:
+        return None, "miss"
+
+    try:
+        sql = filters.strip_token(chart.sql)
+        result = db.execute(
+            sql, chart.source_db, max_rows=None if full else charts.MAX_POINTS + 1
+        )
+        spec = charts.build_spec(
+            result.columns, result.rows, chart.chart_type, chart.x_column,
+            chart.y_columns, chart.series_column
+        )
+    except Exception:
+        logger.exception("Chart %r failed to render for the listing", chart.slug)
+        return {"error": i18n.t("This chart's query failed.")}, "error"
+
+    payload = {"renders_as": spec.renders_as, "warnings": spec.warnings, "unfiltered": False}
+    if spec.renders_as == "canvas":
+        payload["spec"] = spec.to_dict()
+    elif spec.renders_as == "table":
+        payload["columns"] = spec.columns
+        rows = spec.rows if full else spec.rows[:12]
+        payload["rows"] = [["" if v is None else str(v) for v in r] for r in rows]
+    else:
+        payload["value"] = spec.value
+        payload["caption"] = spec.caption
+
+    # An empty result is far more often a moment than a fact — an ETL that
+    # truncates and reloads leaves its tables briefly empty, and caching that
+    # snapshot pins "no data" on the card for the whole TTL. Serve it, don't
+    # keep it; the next look asks the warehouse again.
+    empty = (spec.renders_as == "table" and not payload["rows"]) or (
+        spec.renders_as == "canvas" and not (payload["spec"].get("labels") or [])
+    )
+    if empty:
+        try:
+            store.drop_chart_preview(chart.id, variant)
+        except Exception:
+            logger.exception("Could not drop the stale preview for %r", chart.slug)
+    else:
+        try:
+            store.put_chart_preview(chart.id, payload, variant)
+        except Exception:
+            logger.exception("Could not cache the preview for %r", chart.slug)
+    payload["age"] = i18n.t("just now")
+    payload["cached"] = False
+    return payload, "fresh"
+
+
 @app.get("/charts/{slug}/data")
 def chart_data(
     request: Request,
@@ -1264,76 +1339,70 @@ def chart_data(
     if chart is None:
         return JSONResponse({"error": i18n.t("Not found")}, status_code=404)
 
-    # Served from cache when it's fresh. A preview exists to tell one chart from
-    # another; re-running 580 queries so each thumbnail is to-the-second is a
-    # cost nobody asked for. `?refresh=1` forces a rebuild.
-    # Two shapes of the same query: the listing wants a likeness and caps the
-    # table at a dozen rows; the chart's own page wants the whole result. They
-    # cache separately because they are different answers.
+    # A preview exists to tell one chart from another; re-running its query on
+    # every visit is what made thumbnails feel broken. Built once, cached, and
+    # served from cache after — the listing wants a likeness (a dozen rows), the
+    # chart's own page the whole result, so they cache under different variants.
     full = request.query_params.get("full") == "1"
-    variant = "full" if full else "preview"
-    ttl = timedelta(minutes=max(0, settings.preview_cache_minutes))
     force = request.query_params.get("refresh") == "1"
-    if not force and ttl:
-        try:
-            cached = store.get_chart_preview(chart.id, variant)
-        except Exception:
-            logger.exception("Could not read the cached preview for %r", slug)
-            cached = None
-        if cached:
-            payload, built_at = cached
-            fresh = datetime.now(built_at.tzinfo) - built_at < ttl
-            # A chart edited since the snapshot invalidates it: the query moved.
-            unchanged = not chart.updated_at or chart.updated_at <= built_at
-            if fresh and unchanged:
-                payload["age"] = _age_label(built_at)
-                payload["cached"] = True
-                return JSONResponse(payload)
-
-    try:
-        sql = filters.strip_token(chart.sql)
-        result = db.execute(
-            sql, chart.source_db, max_rows=None if full else charts.MAX_POINTS + 1
-        )
-        spec = charts.build_spec(
-            result.columns, result.rows, chart.chart_type, chart.x_column,
-            chart.y_columns, chart.series_column
-        )
-    except Exception:
-        logger.exception("Chart %r failed to render for the listing", slug)
-        return JSONResponse({"error": i18n.t("This chart's query failed.")}, status_code=200)
-
-    payload = {"renders_as": spec.renders_as, "warnings": spec.warnings, "unfiltered": False}
-    if spec.renders_as == "canvas":
-        payload["spec"] = spec.to_dict()
-    elif spec.renders_as == "table":
-        payload["columns"] = spec.columns
-        rows = spec.rows if full else spec.rows[:12]
-        payload["rows"] = [["" if v is None else str(v) for v in r] for r in rows]
-    else:
-        payload["value"] = spec.value
-        payload["caption"] = spec.caption
-
-    # An empty result is far more often a moment than a fact — an ETL that
-    # truncates and reloads leaves its tables briefly empty, and caching that
-    # snapshot pins "no data" on the card for the whole TTL. Serve it, don't
-    # keep it; the next look asks the warehouse again.
-    empty = (spec.renders_as == "table" and not payload["rows"]) or (
-        spec.renders_as == "canvas" and not (payload["spec"].get("labels") or [])
-    )
-    if empty:
-        try:
-            store.drop_chart_preview(chart.id, variant)
-        except Exception:
-            logger.exception("Could not drop the stale preview for %r", slug)
-    else:
-        try:
-            store.put_chart_preview(chart.id, payload, variant)
-        except Exception:
-            logger.exception("Could not cache the preview for %r", slug)
-    payload["age"] = i18n.t("just now")
-    payload["cached"] = False
+    payload, state = _chart_preview(chart, full=full, force=force)
+    # A query failure is reported in-band (200 + `error`) so a slow or broken
+    # chart shows a message on its card rather than a dead fetch.
     return JSONResponse(payload)
+
+
+DASHBOARD_MOSAIC_TILES = 4
+
+
+@app.get("/dashboards/{slug}/preview")
+def dashboard_preview(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """The first few tiles of a dashboard, at their real grid positions, for the
+    listing's mosaic thumbnail — a slice of the panel, not one lone chart.
+
+    Cache-only on purpose: a mosaic is four charts, and running four warehouse
+    queries per card as someone scrolls the listing is exactly the load this
+    avoids. Tiles come from the same preview cache the Charts listing fills; a
+    tile not built yet returns `payload: null` and draws as a placeholder until
+    the warmer (or a look at that chart) fills it in.
+    """
+    if not store.available():
+        return JSONResponse(
+            {"error": i18n.t("The app database is not configured.")}, status_code=503
+        )
+    if not access.allows(store.DASHBOARD, slug):
+        return JSONResponse(
+            {"error": i18n.t("You don't have access to that dashboard.")}, status_code=403
+        )
+    try:
+        dash = store.get_dashboard(slug)
+    except Exception:
+        logger.exception("Could not load dashboard %r for its preview", slug)
+        return JSONResponse({"error": i18n.t("Could not load the dashboard.")}, status_code=502)
+    if dash is None:
+        return JSONResponse({"error": i18n.t("Not found")}, status_code=404)
+
+    tiles = []
+    for it in dash.items:
+        if it.chart is None or not access.allows(store.CHART, it.chart.slug):
+            continue
+        payload, _state = _chart_preview(it.chart, cache_only=True)
+        tiles.append(
+            {
+                "x": it.grid_x or 0,
+                "y": it.grid_y or 0,
+                "w": it.grid_w or (store.GRID_COLUMNS // 2),
+                "h": it.grid_h or 20,
+                "payload": payload,  # None until this tile's preview is cached
+            }
+        )
+        if len(tiles) >= DASHBOARD_MOSAIC_TILES:
+            break
+    return JSONResponse({"tiles": tiles, "columns": store.GRID_COLUMNS})
 
 
 @app.get("/charts/{slug}", response_class=HTMLResponse)
@@ -1677,12 +1746,8 @@ def dashboards_index(
         visible = [d for d in store.list_dashboards() if access.allows(store.DASHBOARD, d.slug)]
         context["dashboards"] = _apply_tag_filter(visible, store.DASHBOARD, context["tag"])
         context["tags_map"] = _tags_of(store.DASHBOARD, [d.slug for d in context["dashboards"]])
-        # Preview shows a dashboard's first chart — one real chart rather than a
-        # sketch, and one query per card instead of one per tile.
-        if context["view"] == "preview":
-            context["first_chart"] = store.first_chart_of(
-                [d.slug for d in context["dashboards"]]
-            )
+        # Preview mode draws a mosaic of each dashboard's first tiles, fetched
+        # per card from /dashboards/<slug>/preview (cache-only) — no query here.
     except Exception:
         logger.exception("Could not list dashboards")
         context["db_ok"] = False

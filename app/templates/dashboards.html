@@ -60,19 +60,13 @@
     </div>
 
     {% if view == 'preview' %}
-    {# The dashboard's first chart, drawn for real. One card is one query, not
-       one per tile, and it comes from the same cache the Charts listing uses —
-       so this stays affordable across sixty-five dashboards. #}
-    {% set cid = first_chart.get(d.slug) %}
-    {% if cid %}
-    <div class="bi-card-prev" data-chart="{{ cid }}" data-canvas="dash-{{ d.id }}"
-         data-refresh-label="{{ _('Refresh') }}"
-         data-empty-label="{{ _('No data.') }}">
+    {# A mosaic of the dashboard's first tiles at their real positions — a slice
+       of the panel, not one lone chart. Served from the shared preview cache,
+       so scrolling the listing runs no queries. #}
+    <div class="bi-card-prev bi-card-mosaic" data-preview-url="{{ url_for('dashboard_preview', slug=d.id) }}"
+         data-canvas="dash-{{ d.id }}" data-empty-label="{{ _('This dashboard is empty.') }}">
       <div class="bi-tile-skel"><span></span><span></span><span></span></div>
     </div>
-    {% else %}
-    <div class="bi-card-prev bi-prev-empty">{{ _('This dashboard is empty.') }}</div>
-    {% endif %}
     {% endif %}
 
     {{ tags_of(tags_map.get(d.slug, []), url_for('dashboard_set_tags', slug=d.id), can_build) }}
@@ -93,7 +87,7 @@
 {% if view == 'preview' %}
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
-<script src="{{ url_for('static', path='chart-preview.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard-mosaic.js') }}"></script>
 {% endif %}
 
 {% else %}

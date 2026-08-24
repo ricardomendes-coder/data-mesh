@@ -58,8 +58,18 @@
     });
   }
 
-  function scales(spec) {
+  function scales(spec, compact) {
     if (spec.type === "pie") return undefined;
+    // A thumbnail is read as a shape, not a table: drop the tick labels so the
+    // plot area gets the whole card instead of sharing it with axis text.
+    if (compact) {
+      return {
+        x: { grid: { display: false, drawBorder: false }, border: { display: false },
+             ticks: { display: false } },
+        y: { beginAtZero: true, grid: { color: GRID, drawBorder: false },
+             border: { display: false }, ticks: { display: false } },
+      };
+    }
     return {
       x: {
         grid: { display: false, drawBorder: false },
@@ -80,28 +90,40 @@
     };
   }
 
-  window.renderChart = function (canvasId, spec) {
+  // opts.compact: a thumbnail — no legend of any kind (a scrolling 100-series
+  // legend is what made preview cards unreadable), no axis text, no tooltip.
+  window.renderChart = function (canvasId, spec, opts) {
+    opts = opts || {};
+    var compact = !!opts.compact;
     var el = document.getElementById(canvasId);
     if (!el || !window.Chart) return null;
     if (el._chart) el._chart.destroy();
+    if (el._legend && el._legend.parentNode) {
+      el._legend.parentNode.removeChild(el._legend);
+      el._legend = null;
+    }
 
     var chartType = spec.type === "area" ? "line" : spec.type;
     // Many series get a scrollable HTML legend instead of the on-canvas one,
-    // which would eat the whole chart and can't scroll. Like Superset.
+    // which would eat the whole chart and can't scroll. Like Superset. Never in
+    // a thumbnail, where it would eat the whole card.
     var HTML_LEGEND_AT = 8;
-    var manySeries = !!spec.showLegend && (spec.datasets || []).length > HTML_LEGEND_AT;
+    var manySeries =
+      !compact && !!spec.showLegend && (spec.datasets || []).length > HTML_LEGEND_AT;
     el._chart = new Chart(el.getContext("2d"), {
       type: chartType,
       data: { labels: spec.labels, datasets: buildDatasets(spec) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: !compact,
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: {
             // One series needs no legend — the chart title names it. Many
-            // series use the HTML legend below instead of this one.
-            display: !!spec.showLegend && !manySeries,
+            // series use the HTML legend below instead of this one. A thumbnail
+            // shows none.
+            display: !compact && !!spec.showLegend && !manySeries,
             position: "bottom",
             labels: {
               color: "#515669",
@@ -113,6 +135,7 @@
             },
           },
           tooltip: {
+            enabled: !compact,
             backgroundColor: "#00002D",
             titleFont: { family: FONT, size: 12 },
             bodyFont: { family: FONT, size: 12 },
@@ -124,7 +147,7 @@
             usePointStyle: true,
           },
         },
-        scales: scales(spec),
+        scales: scales(spec, compact),
       },
     });
     if (manySeries) buildHtmlLegend(el, el._chart);

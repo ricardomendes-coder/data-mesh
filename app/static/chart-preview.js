@@ -53,7 +53,7 @@
     canvas.id = box.getAttribute("data-canvas");
     canvasBox.appendChild(canvas);
     box.appendChild(canvasBox);
-    if (window.renderChart && payload.spec) window.renderChart(canvas.id, payload.spec);
+    if (window.renderChart && payload.spec) window.renderChart(canvas.id, payload.spec, { compact: true });
   }
 
   function load(box, force) {

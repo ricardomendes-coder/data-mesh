@@ -15,9 +15,12 @@ class Settings(BaseSettings):
     # Interface language. Portuguese by default because that's what the people
     # using this speak; English stays available per user. See app/i18n.py.
     default_locale: str = "pt"
-    # How long a cached chart preview stays usable. Previews are for
-    # recognising a chart, not for reading its numbers; the card shows the age.
-    preview_cache_minutes: int = 60
+    # How long a cached chart preview stays usable. A preview is for recognising
+    # a chart, not reading its numbers — and a chart's shape barely moves — so
+    # this is long (a week): building one runs the chart's whole query, and doing
+    # that every visit is what made thumbnails feel broken. An edit to the chart
+    # invalidates its preview regardless, and the card shows the snapshot's age.
+    preview_cache_minutes: int = 10080
     # How long a filter's option list stays usable. Longer than a preview: the
     # distinct values of a column change on the data's schedule, and rebuilding
     # them cost this app 292 seconds on one dashboard.

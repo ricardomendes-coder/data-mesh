@@ -379,8 +379,23 @@
     .bi-prev-refresh{border:none;background:none;color:var(--muted);cursor:pointer;font-size:.78rem;line-height:1;padding:0;}
     .bi-prev-refresh:hover{color:var(--orange);}
     .bi-card-prev{position:relative;}
-    .bi-prev-empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.74rem;}
+    .bi-prev-empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.74rem;height:100%;}
     .bi-prev-nodata{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:.74rem;}
+
+    /* Dashboard mosaic: tiles placed by inline % at their real grid positions. */
+    .bi-card-mosaic{display:block;position:relative;background:var(--page);}
+    .bi-mosaic-grid{position:absolute;inset:0;}
+    .bi-mosaic-cell{position:absolute;padding:2px;overflow:hidden;}
+    .bi-mosaic-cell>*{width:100%;height:100%;overflow:hidden;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);}
+    .bi-mosaic-canvas{position:relative;padding:3px;}
+    .bi-mosaic-ph{background:color-mix(in srgb,var(--border) 34%,transparent);border-style:dashed !important;}
+    .bi-mosaic-ph-err{background:color-mix(in srgb,var(--danger) 16%,transparent);}
+    .bi-mosaic-num{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--title);font-size:.9rem;container-type:size;text-align:center;padding:2px;}
+    @supports (container-type:size){.bi-mosaic-num{font-size:clamp(.6rem,34cqh,1.15rem);}}
+    .bi-mosaic-tbl{overflow:hidden;}
+    .bi-mosaic-tbl table{width:100%;border-collapse:collapse;font-size:.52rem;line-height:1.25;}
+    .bi-mosaic-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:1px 3px;border-bottom:1px solid var(--border);}
+    .bi-mosaic-tbl td{padding:1px 3px;color:var(--body);white-space:nowrap;overflow:hidden;}
 
 
     .bi-listtbl td{vertical-align:middle;}

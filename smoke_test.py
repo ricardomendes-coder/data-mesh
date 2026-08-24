@@ -955,10 +955,10 @@ def test_preview_cache():
             client.get("/charts/7/data?refresh=1")
             assert len(ran) == 2, "refresh did not re-run the query"
 
-            # Older than the TTL: rebuilt.
+            # Older than the TTL (a week): rebuilt.
             key = (7, "preview")
             spec, _ = cache[key]
-            cache[key] = (spec, datetime.now(UTC) - timedelta(hours=48))
+            cache[key] = (spec, datetime.now(UTC) - timedelta(days=8))
             client.get("/charts/7/data")
             assert len(ran) == 3, "a stale preview was served"
 
@@ -997,6 +997,60 @@ def test_preview_cache():
             db_mod.execute,
         ) = saved
     print("preview cache: OK")
+
+
+def test_dashboard_mosaic_is_cache_only():
+    """The dashboard listing's mosaic returns the first tiles at their real grid
+    positions, drawn from the preview cache alone — it never runs a query while
+    someone scrolls, and an unbuilt tile comes back as null (a placeholder)."""
+    from datetime import datetime
+
+    from app import db as db_mod
+    from app import store
+
+    def chart(cid, slug):
+        return store.Chart(id=cid, slug=slug, title=slug, source_db="analytics",
+                           sql="SELECT 1", chart_type="bar", x_column="a", y_columns=["b"])
+
+    # Six tiles with geometry; the mosaic caps at four.
+    items = [
+        store.DashboardItem(id=i, position=i, chart=chart(100 + i, f"c{i}"),
+                            grid_x=(i % 2) * 6, grid_y=(i // 2) * 20, grid_w=6, grid_h=20)
+        for i in range(6)
+    ]
+    dash = store.Dashboard(slug="ops", title="Ops", id=5, items=items)
+
+    # Only chart 100 has a cached preview; the rest are misses.
+    previews = {(100, "preview"): ({"renders_as": "canvas", "spec": {"labels": ["x"]}},
+                                   datetime.now(UTC))}
+    ran = []
+    saved = (store.available, store.get_dashboard, store.slug_for, store.upsert_user,
+             store.get_chart_preview, db_mod.execute)
+    store.available = lambda: True
+    store.get_dashboard = lambda s, with_items=True: dash if s == "ops" else None
+    store.slug_for = lambda table, ident: "ops" if str(ident) == "5" else str(ident)
+    store.upsert_user = _no_op_user
+    store.get_chart_preview = lambda cid, variant="preview": previews.get((cid, variant))
+    db_mod.execute = lambda *a, **k: ran.append(a) or db_mod.QueryResult(
+        returns_rows=True, columns=[], rows=[], rowcount=0)
+    try:
+        with TestClient(app, base_url="https://testserver") as client:
+            client.post("/login/local", data={"username": "admin", "password": "s3cret-pass"})
+            body = client.get("/dashboards/5/preview").json()
+
+            assert body["columns"] == store.GRID_COLUMNS, body
+            assert len(body["tiles"]) == 4, "the mosaic did not cap at four tiles"
+            assert not ran, "a mosaic ran a warehouse query while scrolling"
+
+            first = body["tiles"][0]
+            assert (first["x"], first["w"], first["h"]) == (0, 6, 20), first
+            assert first["payload"]["spec"]["labels"] == ["x"], "cached tile lost its spec"
+            # The uncached tiles carry their geometry but no payload → placeholder.
+            assert body["tiles"][1]["payload"] is None, body["tiles"][1]
+    finally:
+        (store.available, store.get_dashboard, store.slug_for, store.upsert_user,
+         store.get_chart_preview, db_mod.execute) = saved
+    print("dashboard mosaic: OK")
 
 
 def test_interface_language():
