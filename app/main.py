@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -1924,6 +1925,34 @@ def dashboard_filter_options(
     return JSONResponse({"options": fresh})
 
 
+def _spec_row_count(spec) -> int | None:
+    """Roughly how many rows a tile drew, for the load metrics."""
+    try:
+        if spec.renders_as == "table":
+            return len(spec.rows)
+        if spec.renders_as == "number":
+            return 1
+        return len(spec.labels)  # canvas: one label per point
+    except Exception:
+        return None
+
+
+def _record_timing(dash, item, duration_ms, row_count, filtered, cached) -> None:
+    """Log a tile fetch's timing without ever letting the log break the tile."""
+    try:
+        store.record_tile_timing(
+            dashboard_id=getattr(dash, "id", None),
+            item_id=getattr(item, "id", None),
+            chart_slug=getattr(getattr(item, "chart", None), "slug", "") or "",
+            duration_ms=duration_ms,
+            row_count=row_count,
+            filtered=filtered,
+            cached=cached,
+        )
+    except Exception:
+        logger.exception("Could not record tile timing for item %s", getattr(item, "id", None))
+
+
 @app.get("/dashboards/{slug}/tiles/{item_id}")
 def dashboard_tile_data(
     request: Request,
@@ -1974,6 +2003,7 @@ def dashboard_tile_data(
     ttl = timedelta(minutes=max(0, settings.tile_cache_minutes))
     force = request.query_params.get("refresh") == "1"
     if sig and not force and ttl:
+        t_cache = time.perf_counter()
         try:
             hit = store.get_tile_cache(item.id, sig)
         except Exception:
@@ -1985,10 +2015,17 @@ def dashboard_tile_data(
             if datetime.now(built_at.tzinfo) - built_at < ttl and not chart_moved:
                 payload["age"] = _age_label(built_at)
                 payload["cached"] = True
+                _record_timing(
+                    dash, item, int((time.perf_counter() - t_cache) * 1000),
+                    None, bool(chosen), True,
+                )
                 return JSONResponse(payload)
 
+    t_query = time.perf_counter()
     tile = _render_tiles([item], active)[0]
+    query_ms = int((time.perf_counter() - t_query) * 1000)
     if tile["error"]:
+        _record_timing(dash, item, query_ms, None, bool(chosen), False)
         return JSONResponse({"error": tile["error"]}, status_code=200)
     spec = tile["spec"]
     payload = {
@@ -2016,6 +2053,7 @@ def dashboard_tile_data(
             logger.exception("Could not cache tile %s", item_id)
     payload["age"] = i18n.t("just now")
     payload["cached"] = False
+    _record_timing(dash, item, query_ms, _spec_row_count(spec), bool(chosen), False)
     return JSONResponse(payload)
 
 
@@ -2438,6 +2476,32 @@ def admin_users(request: Request, user: str = Depends(require_admin)):
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_users.html", context)
+
+
+@app.get("/admin/performance", response_class=HTMLResponse)
+def admin_performance(request: Request, user: str = Depends(require_admin)):
+    """How long tiles actually take to load, per chart — the scoreboard for the
+    'is it viable?' question. Cold percentiles are what pre-aggregation moves."""
+    try:
+        days = max(1, min(90, int(request.query_params.get("days", "7"))))
+    except (TypeError, ValueError):
+        days = 7
+    try:
+        rows = store.tile_timing_summary(days=days)
+        totals = store.tile_timing_totals(days=days)
+    except Exception:
+        logger.exception("Could not read tile timing metrics")
+        rows, totals = [], {}
+    context = _shell_context(
+        user,
+        "admin",
+        admin_tab="performance",
+        rows=rows,
+        totals=totals,
+        days=days,
+        is_admin=True,
+    )
+    return templates.TemplateResponse(request, "admin_performance.html", context)
 
 
 @app.get("/admin/users/{username}", response_class=HTMLResponse)

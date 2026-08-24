@@ -1978,10 +1978,13 @@ def test_tile_cache():
 
     cache: dict = {}
     ran: list = []
+    timings: list = []
     saved = (
         store.available, store.get_dashboard, store.list_filters, store.slug_for,
         store.upsert_user, store.get_tile_cache, store.put_tile_cache, db_mod.execute,
+        store.record_tile_timing,
     )
+    store.record_tile_timing = lambda **kw: timings.append(kw)
     store.available = lambda: True
     store.get_dashboard = lambda s, with_items=True: dash if s == "automatismo" else None
     store.list_filters = lambda s: [F()]
@@ -2042,10 +2045,18 @@ def test_tile_cache():
             chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
             client.get("/dashboards/9/tiles/7")
             assert len(ran) == 5, "a tile from before the chart was edited was served"
+
+            # Every fetch is timed, and the record knows cache from cold and
+            # filtered from not — the raw material of the performance page.
+            assert timings, "no tile timing was recorded"
+            assert timings[0]["cached"] is False and timings[1]["cached"] is True, timings[:2]
+            assert any(t["filtered"] for t in timings), "the ?cliente= fetch was not flagged filtered"
+            assert all("duration_ms" in t for t in timings), timings
     finally:
         (
             store.available, store.get_dashboard, store.list_filters, store.slug_for,
             store.upsert_user, store.get_tile_cache, store.put_tile_cache, db_mod.execute,
+            store.record_tile_timing,
         ) = saved
     print("tile cache: OK")
 

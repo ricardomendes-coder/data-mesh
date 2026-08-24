@@ -14,6 +14,10 @@
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.2V3a.5.5 0 0 1 .5-.5h4.2a.5.5 0 0 1 .35.15l6 6a.5.5 0 0 1 0 .7l-4.2 4.2a.5.5 0 0 1-.7 0l-6-6a.5.5 0 0 1-.15-.35z"/><circle cx="5.3" cy="5.3" r=".9"/></svg>
     Tags
   </a>
+  <a class="bi-ptab {{ 'active' if current == 'performance' else '' }}" href="{{ url_for('admin_performance') }}">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 9.5l3-3 2.5 2.5 4-4.5"/><path d="M11 4.5h2v2"/><path d="M1.5 13.5h13"/></svg>
+    Performance
+  </a>
   {# The Folders tab is intentionally absent — see app/main.py's folders
      section. The screen still exists at /admin/folders; nothing links to it. #}
 </div>

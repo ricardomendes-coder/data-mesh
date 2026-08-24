@@ -530,6 +530,32 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE charts ADD COLUMN IF NOT EXISTS series_column text NOT NULL DEFAULT '';
         """,
     ),
+    (
+        "0020_chart_load_metrics",
+        """
+        -- One row per tile fetch, so "is it viable?" is a number, not a hunch.
+        -- Records the wall time of the query behind a tile and whether it came
+        -- from cache — the two together separate the experience a warm user
+        -- gets from the cold cost that pre-aggregation has to attack. Kept in
+        -- report_hub (not the warehouse) because it is the app that knows
+        -- whether a fetch was cached, filtered, or forced.
+        CREATE TABLE IF NOT EXISTS chart_load_metrics (
+            id           bigserial   PRIMARY KEY,
+            ts           timestamptz NOT NULL DEFAULT now(),
+            dashboard_id bigint,
+            item_id      bigint,
+            chart_slug   text        NOT NULL DEFAULT '',
+            duration_ms  integer     NOT NULL,
+            row_count    integer,
+            filtered     boolean     NOT NULL DEFAULT false,
+            cached       boolean     NOT NULL DEFAULT false
+        );
+        CREATE INDEX IF NOT EXISTS chart_load_metrics_slug_ts_idx
+            ON chart_load_metrics (chart_slug, ts DESC);
+        CREATE INDEX IF NOT EXISTS chart_load_metrics_ts_idx
+            ON chart_load_metrics (ts DESC);
+        """,
+    ),
 ]
 
 
@@ -2317,6 +2343,83 @@ def drop_tile_cache(item_id: int, sig: str | None = None) -> None:
         params["s"] = sig
     with engine().begin() as conn:
         conn.execute(text(sql), params)
+
+
+def record_tile_timing(
+    dashboard_id: int | None,
+    item_id: int | None,
+    chart_slug: str,
+    duration_ms: int,
+    row_count: int | None,
+    filtered: bool,
+    cached: bool,
+) -> None:
+    """Log how long one tile fetch took. Best-effort: a metrics write must never
+    break the tile it is measuring, so the caller swallows failures."""
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO chart_load_metrics "
+                "(dashboard_id, item_id, chart_slug, duration_ms, row_count, filtered, cached) "
+                "VALUES (:d, :i, :s, :ms, :rc, :f, :c)"
+            ),
+            {
+                "d": dashboard_id, "i": item_id, "s": chart_slug or "",
+                "ms": int(duration_ms), "rc": row_count, "f": bool(filtered), "c": bool(cached),
+            },
+        )
+
+
+def tile_timing_summary(days: int = 7, cold_only: bool = True) -> list[dict]:
+    """Per-chart load profile over the last `days`: how many fetches, the p50/p95
+    of the query, and the cache-hit rate. `cold_only` restricts the percentiles
+    to un-cached runs — the number pre-aggregation actually has to move."""
+    clause = "AND NOT cached" if cold_only else ""
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT chart_slug,
+                       count(*)                                              AS runs,
+                       count(*) FILTER (WHERE cached)                        AS cached_runs,
+                       count(*) FILTER (WHERE filtered)                      AS filtered_runs,
+                       percentile_disc(0.5) WITHIN GROUP (ORDER BY duration_ms)
+                           FILTER (WHERE true {clause})                      AS p50_ms,
+                       percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms)
+                           FILTER (WHERE true {clause})                      AS p95_ms,
+                       max(duration_ms) FILTER (WHERE true {clause})         AS max_ms
+                FROM chart_load_metrics
+                WHERE ts > now() - make_interval(days => :days)
+                GROUP BY chart_slug
+                ORDER BY p95_ms DESC NULLS LAST
+                """
+            ),
+            {"days": days},
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def tile_timing_totals(days: int = 7) -> dict:
+    """Headline numbers for the health page: total fetches, cache-hit rate, and
+    the median cold query time across everything."""
+    with engine().connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT count(*)                                             AS runs,
+                       count(*) FILTER (WHERE cached)                       AS cached_runs,
+                       count(DISTINCT chart_slug)                           AS charts,
+                       percentile_disc(0.5) WITHIN GROUP (ORDER BY duration_ms)
+                           FILTER (WHERE NOT cached)                        AS cold_p50_ms,
+                       percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms)
+                           FILTER (WHERE NOT cached)                        AS cold_p95_ms
+                FROM chart_load_metrics
+                WHERE ts > now() - make_interval(days => :days)
+                """
+            ),
+            {"days": days},
+        ).mappings().first()
+    return dict(row) if row else {}
 
 
 def get_chart_preview(chart_id: int, variant: str = "preview") -> tuple[dict, datetime] | None:

@@ -1,0 +1,104 @@
+{% extends "_shell.html" %}
+{% from "_admin_tabs.html" import admin_tabs with context %}
+{% block page_title %}Performance{% endblock %}
+{% block page_sub %}Quanto cada chart demora pra carregar — o placar de "está viável?"{% endblock %}
+
+{% macro ms(v) -%}
+  {%- if v is none -%}<span class="bi-null">—</span>
+  {%- elif v >= 1000 -%}{{ '%.1f'|format(v / 1000) }}<span class="bi-unit">s</span>
+  {%- else -%}{{ v }}<span class="bi-unit">ms</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro sev(v) -%}
+  {%- if v is none -%}none{% elif v >= 30000 -%}slow{% elif v >= 5000 -%}mid{% else -%}fast{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+{{ admin_tabs('performance') }}
+
+<style>
+  .perf-band{display:flex;flex-wrap:wrap;gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 0 22px}
+  .perf-band .cell{flex:1 1 130px;background:var(--surface);padding:14px 16px}
+  .perf-band .cell b{display:block;font-size:1.55rem;font-weight:700;line-height:1.1;
+    font-variant-numeric:tabular-nums}
+  .perf-band .cell span{font-size:.78rem;color:var(--muted)}
+  .bi-unit{font-size:.62em;font-weight:600;opacity:.6;margin-left:1px}
+  .perf-days{display:flex;gap:6px;margin:0 0 18px;align-items:center}
+  .perf-days .lbl{font-size:.82rem;color:var(--muted);margin-right:2px}
+  .perf-days a{font-size:.82rem;padding:3px 10px;border-radius:100px;text-decoration:none;
+    border:1px solid var(--line);color:var(--muted)}
+  .perf-days a.on{background:var(--orange);color:#fff;border-color:transparent}
+  td.perf-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sevpill{display:inline-block;min-width:64px;text-align:right;font-variant-numeric:tabular-nums;
+    padding:2px 9px;border-radius:100px;font-weight:600;font-size:.85rem}
+  .sevpill.slow{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+  .sevpill.mid{color:var(--warn);background:color-mix(in srgb,var(--warn) 16%,transparent)}
+  .sevpill.fast{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent)}
+  .sevpill.none{color:var(--muted)}
+  .hitbar{display:inline-block;height:6px;border-radius:3px;background:var(--orange);vertical-align:middle}
+  .hitwrap{display:inline-block;width:52px;height:6px;border-radius:3px;background:var(--line);
+    margin-right:7px;vertical-align:middle;overflow:hidden}
+</style>
+
+{% set hitpct = (totals.cached_runs * 100 / totals.runs) if totals.get('runs') else 0 %}
+<div class="perf-band">
+  <div class="cell"><b>{{ totals.get('runs') or 0 }}</b><span>carregamentos ({{ days }}d)</span></div>
+  <div class="cell"><b>{{ totals.get('charts') or 0 }}</b><span>charts distintos</span></div>
+  <div class="cell"><b>{{ '%.0f'|format(hitpct) }}%</b><span>vieram do cache</span></div>
+  <div class="cell"><b>{{ ms(totals.get('cold_p50_ms')) }}</b><span>mediana a frio</span></div>
+  <div class="cell"><b>{{ ms(totals.get('cold_p95_ms')) }}</b><span>p95 a frio</span></div>
+</div>
+
+<div class="perf-days">
+  <span class="lbl">Janela:</span>
+  {% for d in [1, 7, 30] %}
+  <a class="{{ 'on' if days == d else '' }}" href="{{ url_for('admin_performance') }}?days={{ d }}">{{ d }}d</a>
+  {% endfor %}
+</div>
+
+{% if rows %}
+<div class="bi-restbl-wrap">
+  <table class="bi-restbl bi-admintbl">
+    <thead>
+      <tr>
+        <th>Chart</th>
+        <th class="perf-n">Cargas</th>
+        <th class="perf-n">Cache</th>
+        <th class="perf-n">Filtrado</th>
+        <th class="perf-n">p50 frio</th>
+        <th class="perf-n">p95 frio</th>
+        <th class="perf-n">Máx</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      {% set hp = (r.cached_runs * 100 / r.runs) if r.runs else 0 %}
+      {% set fp = (r.filtered_runs * 100 / r.runs) if r.runs else 0 %}
+      <tr>
+        <td><span style="font-family:var(--mono);font-size:.86em">{{ r.chart_slug or '—' }}</span></td>
+        <td class="perf-n">{{ r.runs }}</td>
+        <td class="perf-n">
+          <span class="hitwrap"><span class="hitbar" style="width:{{ hp }}%"></span></span>{{ '%.0f'|format(hp) }}%
+        </td>
+        <td class="perf-n">{{ '%.0f'|format(fp) }}%</td>
+        <td class="perf-n"><span class="sevpill {{ sev(r.p50_ms) }}">{{ ms(r.p50_ms) }}</span></td>
+        <td class="perf-n"><span class="sevpill {{ sev(r.p95_ms) }}">{{ ms(r.p95_ms) }}</span></td>
+        <td class="perf-n">{{ ms(r.max_ms) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="bi-hint" style="margin-top:14px">
+  Percentis contam só execuções <strong>a frio</strong> (sem cache) — é o tempo que a
+  pré-agregação precisa derrubar. <span class="sevpill fast">&lt;5s</span>
+  <span class="sevpill mid">&lt;30s</span> <span class="sevpill slow">≥30s</span>
+</p>
+{% else %}
+<div class="bi-empty-lg">
+  Nenhuma medição ainda nesta janela.
+  <div class="bi-sub">Abra um dashboard: cada tile carregado registra seu tempo aqui.</div>
+</div>
+{% endif %}
+{% endblock %}
