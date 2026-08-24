@@ -200,17 +200,19 @@
     wireRefreshAll();
   }
 
-  /* "Atualizar" in the topbar: rebuild the tiles that have actually loaded — the
-     visible pane, plus any tab already opened. A tab never opened stays lazy
-     instead of being pulled in by a refresh. Can't be fired twice at once. */
+  /* "Atualizar" in the topbar: rebuild only the tiles on screen — the visible
+     pane (plus any loose tiles above the tabs). Tabs you opened earlier but
+     aren't looking at, and tabs never opened, are left as they are: a refresh
+     shouldn't re-run a heavy query for something you can't even see. Can't be
+     fired twice at once. */
   function wireRefreshAll() {
     var button = document.getElementById("refresh-dashboard");
     if (!button) return;
     button.addEventListener("click", function () {
       if (button.getAttribute("aria-busy") === "true") return;
-      var boxes = Array.prototype.slice.call(
-        document.querySelectorAll('[data-tile][data-loaded="1"]')
-      );
+      var boxes = Array.prototype.slice
+        .call(document.querySelectorAll('[data-tile][data-loaded="1"]'))
+        .filter(onVisiblePane);
       if (!boxes.length) return;
       button.setAttribute("aria-busy", "true");
       var pending = boxes.length;
