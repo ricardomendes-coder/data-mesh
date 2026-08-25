@@ -1876,6 +1876,15 @@ def set_user_active(username: str, value: bool) -> bool:
         return result.rowcount > 0
 
 
+def delete_user(username: str) -> bool:
+    """Remove a user for good. Their role assignments go with them (user_roles
+    cascades); charts they authored stay — created_by is a name, not a link. A
+    user who logs in again is simply recreated fresh, with no roles."""
+    with engine().begin() as conn:
+        result = conn.execute(text("DELETE FROM users WHERE username = :u"), {"u": username})
+        return result.rowcount > 0
+
+
 def set_user_roles(username: str, role_names: list[str]) -> bool:
     """Replace a user's roles wholesale — the admin form posts the full set."""
     with engine().begin() as conn:

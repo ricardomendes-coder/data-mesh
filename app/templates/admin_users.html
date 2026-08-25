@@ -38,6 +38,16 @@
         </td>
         <td class="bi-nowrap">
           <a class="bi-btn sm ghost" href="{{ url_for('admin_user_detail', username=u.username) }}">Edit</a>
+          {% if u.username != current_user %}
+          <form method="post" style="display:inline"
+                action="{{ url_for('admin_delete_user', username=u.username) }}"
+                onsubmit="return confirm('Excluir o usuário {{ u.username }}? Ele volta sem papéis se logar de novo.')">
+            <button class="bi-iconbtn bi-iconbtn-danger" type="submit"
+                    title="Excluir usuário" aria-label="Excluir usuário">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4M12.5 4l-.6 8.3a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9L3.5 4M6.5 7v3.5M9.5 7v3.5"/></svg>
+            </button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

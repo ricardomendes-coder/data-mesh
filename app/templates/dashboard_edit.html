@@ -3,8 +3,8 @@
 {% from "_tile.html" import tile with context %}
 {% block page_title %}
   {# Rename in place — a new dashboard arrives named "Untitled" and this is
-     where it gets its real name, the way a chart is named in the builder.
-     Submits on blur or Enter; the slug never changes, so links hold. #}
+     where it gets its real name. Submits on blur or Enter; the slug never
+     changes, so links hold. #}
   <form method="post" action="{{ url_for('dashboard_rename', slug=dashboard.id) }}"
         class="bi-titleedit">
     <input name="title" value="{{ dashboard.title }}" required aria-label="{{ _('Title') }}"
@@ -12,157 +12,186 @@
   </form>
 {% endblock %}
 {% block page_sub %}
-  <a href="{{ url_for('dashboards_index') }}">{{ _('Dashboards') }}</a> / {{ _('editing') }}
+  <a href="{{ url_for('dashboards_index') }}">{{ _('Dashboards') }}</a> / {{ _('editando') }}
 {% endblock %}
 {% block topbar_extra %}
-<a class="bi-btn" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">Done</a>
+<a class="bi-btn" href="{{ url_for('dashboard_show', slug=dashboard.id) }}">{{ _('Concluir') }}</a>
 {% endblock %}
 
 {% block content %}
-<form class="bi-toolbar" method="post"
-      action="{{ url_for('dashboard_add_item', slug=dashboard.id) }}">
-  {% if available_charts %}
-  <div class="bi-fld bi-fld-inline">
-    <label for="chart_slug">Add a chart</label>
-    <select id="chart_slug" name="chart_slug" required>
-      {% for c in available_charts %}
-      <option value="{{ c.slug }}">{{ c.title }} ({{ c.chart_type }})</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="bi-fld bi-fld-inline bi-fld-narrow">
-    <label for="width">Width</label>
-    <select id="width" name="width">
-      {% for w in widths %}
-      <option value="{{ w }}" {% if w == 'half' %}selected{% endif %}>{{ w }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <button class="bi-btn" type="submit">Add</button>
-  {% else %}
-  <p class="bi-hint">
-    No charts to add yet — <a href="{{ url_for('chart_new') }}">build one</a> first.
-  </p>
-  {% endif %}
-</form>
+<style>
+  .ed-bar{display:flex;flex-wrap:wrap;gap:0;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-lg);box-shadow:var(--sh-1);margin-bottom:1.4rem;overflow:hidden}
+  .ed-grp{flex:1 1 240px;min-width:220px;padding:.85rem 1.1rem;border-right:1px solid var(--border);}
+  .ed-grp:last-child{border-right:none}
+  .ed-grp form{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:0}
+  .ed-lbl{display:block;font-size:.66rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:.5rem}
+  .ed-bar select,.ed-bar input{height:34px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+    padding:0 .5rem;font:inherit;font-size:.82rem;background:var(--surface);color:var(--title);outline:none}
+  .ed-bar select:focus,.ed-bar input:focus{border-color:var(--orange)}
+  .ed-bar select.grow,.ed-bar input.grow{flex:1 1 130px;min-width:110px}
+  .ed-bar input.wnarrow{width:88px}
+  .ed-empty{padding:.85rem 1.1rem;color:var(--muted);font-size:.85rem}
 
-<div class="bi-toolbar">
-  <form method="post" action="{{ url_for('dashboard_add_section', slug=dashboard.id) }}">
-    <div class="bi-search bi-search-plain">
-      <input name="title" placeholder="New tab — e.g. Operação" required>
-    </div>
-    <button class="bi-btn sm" type="submit">Add tab</button>
-  </form>
-  <form method="post" action="{{ url_for('dashboard_add_text', slug=dashboard.id) }}">
-    <div class="bi-search bi-search-plain">
-      <input name="content" placeholder="Heading or note between charts" required>
-    </div>
-    {% if dashboard.sections %}
-    <select name="section_id" aria-label="On which tab">
-      <option value="">— no tab —</option>
-      {% for s in dashboard.sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
-    </select>
+  .ed-panel{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);
+    box-shadow:var(--sh-1);margin-bottom:1.4rem;overflow:hidden}
+  .ed-panel>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.6rem;
+    padding:.8rem 1.1rem;font-weight:600;font-size:.9rem;color:var(--title)}
+  .ed-panel>summary::-webkit-details-marker{display:none}
+  .ed-panel>summary::before{content:"▸";color:var(--g-300);font-size:.7rem}
+  .ed-panel[open]>summary::before{content:"▾"}
+  .ed-panel>summary .bi-ds-stat{margin-left:auto}
+  .ed-body{padding:0 1.1rem 1.1rem;border-top:1px solid var(--border)}
+  .ed-body .bi-hint{margin-top:.9rem}
+  .ed-fitem{border:1px solid var(--border);border-radius:var(--r);margin-top:.7rem;overflow:hidden}
+  .ed-fitem>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+    padding:.55rem .7rem;font-size:.8rem;background:var(--page)}
+  .ed-fitem>summary::-webkit-details-marker{display:none}
+  .ed-fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.5rem;padding:.7rem}
+  .ed-fgrid input,.ed-fgrid select{height:32px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+    padding:0 .5rem;font:inherit;font-size:.78rem;background:var(--surface);color:var(--title);width:100%}
+  .ed-fgrid .row-actions{grid-column:1/-1;display:flex;gap:.5rem;justify-content:flex-end}
+
+  .ed-tabs{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:-.4rem 0 1.4rem}
+  .ed-tabs .lead{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:.2rem}
+  .ed-tabchip{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--border-strong);
+    border-radius:var(--r-pill);padding:.25rem .3rem .25rem .7rem;font-size:.8rem;background:var(--surface)}
+  .ed-tabchip button{border:none;background:none;color:var(--g-300);cursor:pointer;font-size:.9rem;line-height:1;
+    padding:0 .2rem;border-radius:var(--r-pill)}
+  .ed-tabchip button:hover{color:var(--danger)}
+
+  .ed-canvas-hd{display:flex;align-items:center;gap:.6rem;font-size:.72rem;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--muted);margin:1.6rem 0 .6rem}
+  .ed-canvas-hd::after{content:"";flex:1;height:1px;background:var(--border)}
+  .bi-editsec{margin-bottom:.4rem}
+</style>
+
+{# ── the toolbox: one bar, three labelled actions ── #}
+<div class="ed-bar">
+  <div class="ed-grp">
+    <span class="ed-lbl">{{ _('Gráfico') }}</span>
+    {% if available_charts %}
+    <form method="post" action="{{ url_for('dashboard_add_item', slug=dashboard.id) }}">
+      <select name="chart_slug" class="grow" required aria-label="{{ _('Gráfico') }}">
+        {% for c in available_charts %}<option value="{{ c.slug }}">{{ c.title }}</option>{% endfor %}
+      </select>
+      <select name="width" aria-label="{{ _('Largura') }}">
+        {% for w in widths %}<option value="{{ w }}" {% if w == 'half' %}selected{% endif %}>{{ w }}</option>{% endfor %}
+      </select>
+      <button class="bi-btn sm" type="submit">＋ {{ _('Add') }}</button>
+    </form>
+    {% else %}
+    <div class="ed-empty">{{ _('Sem gráficos') }} — <a href="{{ url_for('chart_new') }}">{{ _('crie um') }}</a>.</div>
     {% endif %}
-    <button class="bi-btn sm ghost" type="submit">Add text</button>
-  </form>
+  </div>
+
+  <div class="ed-grp">
+    <span class="ed-lbl">{{ _('Aba') }}</span>
+    <form method="post" action="{{ url_for('dashboard_add_section', slug=dashboard.id) }}">
+      <input name="title" class="grow" placeholder="{{ _('Nome da aba') }}" required>
+      <button class="bi-btn sm ghost" type="submit">＋ {{ _('Aba') }}</button>
+    </form>
+  </div>
+
+  <div class="ed-grp">
+    <span class="ed-lbl">{{ _('Texto / título') }}</span>
+    <form method="post" action="{{ url_for('dashboard_add_text', slug=dashboard.id) }}">
+      <input name="content" class="grow" placeholder="{{ _('Título ou nota') }}" required>
+      {% if dashboard.sections %}
+      <select name="section_id" aria-label="{{ _('Em qual aba') }}">
+        <option value="">— {{ _('sem aba') }} —</option>
+        {% for s in dashboard.sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+      </select>
+      {% endif %}
+      <button class="bi-btn sm ghost" type="submit">＋ {{ _('Texto') }}</button>
+    </form>
+  </div>
 </div>
 
-<details class="bi-permsec" {% if dash_filters %}open{% endif %}>
-  <summary>
-    <span class="bi-permsec-tt">Filters</span>
-    <span class="bi-ds-stat">{{ dash_filters|length }}</span>
-  </summary>
-
-  <p class="bi-hint">
-    A filter rewrites the charts on this dashboard. For a chart to receive one,
-    its SQL must contain <code>{{ '{{ filters }}' }}</code> where its
-    <code>WHERE</code> clause accepts more terms — usually right after
-    <code>WHERE 1=1</code>. Charts without it keep running unfiltered and are
-    labelled <em>unfiltered</em> so the difference is visible.
-    Values are always sent as bound parameters; the <b>column</b> you type here
-    goes into the SQL, so only put a column name there.
-  </p>
-
-  {% for f in dash_filters %}
-  <details class="bi-filteredit">
-    <summary>
-      <code>{{ f.key }}</code>
-      <span>{{ f.label }}</span>
-      <span class="bi-kind bi-kind-view">{{ f.filter_type }}</span>
-      <code>{{ f.column_expr }}</code>
-      {% if f.applies_to %}<span class="bi-sub">{{ f.applies_to|length }} chart(s)</span>
-      {% else %}<span class="bi-sub">all charts</span>{% endif %}
-    </summary>
-    <form class="bi-filterform" method="post"
-          action="{{ url_for('dashboard_update_filter', slug=dashboard.id, filter_id=f.id) }}">
-      {# The key is fixed: it's the query-string field, so changing it would
-         break every filtered link already shared. #}
-      <input class="bi-fldinput" name="label" value="{{ f.label }}" required aria-label="Label">
-      <select class="bi-fldinput" name="filter_type" aria-label="Type">
-        {% for key, label, hint in filter_types %}
-        <option value="{{ key }}" {% if key == f.filter_type %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-      <input class="bi-fldinput" name="column_expr" value="{{ f.column_expr }}" required aria-label="Column">
-      <select class="bi-fldinput" name="source_db" aria-label="Options database">
-        <option value="">— database for the options query —</option>
-        {% for d in databases %}
-        <option value="{{ d }}" {% if d == f.source_db %}selected{% endif %}>{{ d }}</option>
-        {% endfor %}
-      </select>
-      <input class="bi-fldinput" name="values_sql" value="{{ f.values_sql }}"
-             placeholder="SELECT DISTINCT col FROM t ORDER BY 1" aria-label="Options query">
-      <input class="bi-fldinput" name="default_value" value="{{ f.default_value }}"
-             placeholder="default (optional)" aria-label="Default value">
-      <button class="bi-btn sm" type="submit">Save</button>
-    </form>
-    <form method="post" action="{{ url_for('dashboard_delete_filter', slug=dashboard.id, filter_id=f.id) }}"
-          onsubmit="return confirm('Delete the {{ f.label }} filter?')">
-      <button class="bi-btn sm ghost" type="submit">Delete this filter</button>
-    </form>
-  </details>
-  {% endfor %}
-
-  <form class="bi-filterform" method="post" action="{{ url_for('dashboard_add_filter', slug=dashboard.id) }}">
-    <input class="bi-fldinput" name="key" placeholder="key (a-z0-9_)" required pattern="[a-z][a-z0-9_]*">
-    <input class="bi-fldinput" name="label" placeholder="Label shown to people" required>
-    <select class="bi-fldinput" name="filter_type">
-      {% for key, label, hint in filter_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
-    </select>
-    <input class="bi-fldinput" name="column_expr" placeholder="column to filter on" required>
-    <select class="bi-fldinput" name="source_db">
-      <option value="">— database for the options query —</option>
-      {% for d in databases %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-    </select>
-    <input class="bi-fldinput" name="values_sql" placeholder="SELECT DISTINCT col FROM t ORDER BY 1">
-    <button class="bi-btn sm" type="submit">Add filter</button>
-  </form>
-</details>
-
+{# ── existing tabs, as removable chips ── #}
 {% if dashboard.sections %}
-<p class="bi-hint">
-  {{ dashboard.sections|length }} tab{{ '' if dashboard.sections|length == 1 else 's' }}.
-  Each tile's <b>tab</b> control below decides where it appears; tiles left on
-  <em>no tab</em> render above the tab strip.
-  Deleting a tab keeps its tiles — they move back out of the tabs.
-</p>
-<div class="bi-toolbar">
+<div class="ed-tabs">
+  <span class="lead">{{ _('Abas') }}</span>
   {% for s in dashboard.sections %}
-  <form method="post" action="{{ url_for('dashboard_delete_section', slug=dashboard.id, section_id=s.id) }}"
-        onsubmit="return confirm('Delete the {{ s.title }} tab? Its tiles are kept.')">
-    <button class="bi-btn sm ghost" type="submit">{{ s.title }} ✕</button>
-  </form>
+  <span class="ed-tabchip">{{ s.title }}
+    <form method="post" style="display:inline" action="{{ url_for('dashboard_delete_section', slug=dashboard.id, section_id=s.id) }}"
+          onsubmit="return confirm('{{ _('Excluir a aba') }} {{ s.title }}? {{ _('Os tiles são mantidos.') }}')">
+      <button type="submit" title="{{ _('Excluir aba') }}" aria-label="{{ _('Excluir aba') }}">✕</button>
+    </form>
+  </span>
   {% endfor %}
 </div>
 {% endif %}
 
+{# ── filters, one tidy panel ── #}
+<details class="ed-panel" {% if dash_filters %}open{% endif %}>
+  <summary>{{ _('Filtros') }}<span class="bi-ds-stat">{{ dash_filters|length }}</span></summary>
+  <div class="ed-body">
+    <p class="bi-hint">
+      Um filtro reescreve os gráficos deste painel. Para receber um, o SQL do gráfico
+      precisa conter <code>{{ '{{ filters }}' }}</code> onde o <code>WHERE</code> aceita
+      mais termos (normalmente após <code>WHERE 1=1</code>). Sem isso, o gráfico roda
+      sem filtro e é marcado como <em>unfiltered</em>. Valores vão como parâmetros;
+      a <b>coluna</b> que você digita entra no SQL — coloque só um nome de coluna.
+    </p>
+
+    {% for f in dash_filters %}
+    <details class="ed-fitem">
+      <summary>
+        <code>{{ f.key }}</code><span>{{ f.label }}</span>
+        <span class="bi-kind bi-kind-view">{{ f.filter_type }}</span>
+        <code>{{ f.column_expr }}</code>
+        {% if f.applies_to %}<span class="bi-sub">{{ f.applies_to|length }} chart(s)</span>
+        {% else %}<span class="bi-sub">{{ _('todos os gráficos') }}</span>{% endif %}
+      </summary>
+      <form class="ed-fgrid" method="post"
+            action="{{ url_for('dashboard_update_filter', slug=dashboard.id, filter_id=f.id) }}">
+        <input name="label" value="{{ f.label }}" required aria-label="Label" placeholder="Label">
+        <select name="filter_type" aria-label="Type">
+          {% for key, label, hint in filter_types %}
+          <option value="{{ key }}" {% if key == f.filter_type %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input name="column_expr" value="{{ f.column_expr }}" required aria-label="Column" placeholder="coluna">
+        <select name="source_db" aria-label="Options database">
+          <option value="">— {{ _('base das opções') }} —</option>
+          {% for d in databases %}<option value="{{ d }}" {% if d == f.source_db %}selected{% endif %}>{{ d }}</option>{% endfor %}
+        </select>
+        <input name="values_sql" value="{{ f.values_sql }}" placeholder="SELECT DISTINCT col FROM t ORDER BY 1" aria-label="Options query">
+        <input name="default_value" value="{{ f.default_value }}" placeholder="{{ _('padrão (opcional)') }}" aria-label="Default value">
+        <div class="row-actions">
+          <button class="bi-btn sm" type="submit" formaction="{{ url_for('dashboard_update_filter', slug=dashboard.id, filter_id=f.id) }}">{{ _('Salvar') }}</button>
+        </div>
+      </form>
+      <form method="post" style="padding:0 .7rem .7rem;text-align:right"
+            action="{{ url_for('dashboard_delete_filter', slug=dashboard.id, filter_id=f.id) }}"
+            onsubmit="return confirm('{{ _('Excluir o filtro') }} {{ f.label }}?')">
+        <button class="bi-btn sm ghost" type="submit">{{ _('Excluir filtro') }}</button>
+      </form>
+    </details>
+    {% endfor %}
+
+    <form class="ed-fgrid" style="border:1px dashed var(--border-strong);border-radius:var(--r);margin-top:.8rem"
+          method="post" action="{{ url_for('dashboard_add_filter', slug=dashboard.id) }}">
+      <input name="key" placeholder="key (a-z0-9_)" required pattern="[a-z][a-z0-9_]*">
+      <input name="label" placeholder="{{ _('Rótulo mostrado') }}" required>
+      <select name="filter_type">{% for key, label, hint in filter_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+      <input name="column_expr" placeholder="{{ _('coluna a filtrar') }}" required>
+      <select name="source_db"><option value="">— {{ _('base das opções') }} —</option>{% for d in databases %}<option value="{{ d }}">{{ d }}</option>{% endfor %}</select>
+      <input name="values_sql" placeholder="SELECT DISTINCT col FROM t ORDER BY 1">
+      <div class="row-actions"><button class="bi-btn sm" type="submit">＋ {{ _('Adicionar filtro') }}</button></div>
+    </form>
+  </div>
+</details>
+
+{# ── the canvas: the tiles you actually arrange ── #}
 {% if tiles %}
-{# One grid per tab, exactly as the view page renders them.
-   Every tab's tiles used to go into a single grid here. Each tab legitimately
-   starts at y=0, so in one shared space they all piled onto the same corner —
-   and since a save posts every tile, one small drag rewrote the whole
-   dashboard into that flattened arrangement. The coordinates are per tab, so
-   the editor has to be per tab too. #}
+<p class="bi-hint">
+  Arraste os tiles para reposicionar. O controle de <b>aba</b> em cada tile decide onde
+  ele aparece; tiles em <em>sem aba</em> ficam acima da barra de abas.
+</p>
+
 {% macro editgrid(group, section_id) -%}
 <div class="bi-tiles bi-tiles-editing"
      data-tiles="{{ url_for('dashboard_show', slug=dashboard.id) }}/tiles"
@@ -176,14 +205,17 @@
 {%- endmacro %}
 
 {% set loose = tiles|selectattr('item.section_id', 'none')|list %}
-{% if loose %}{{ editgrid(loose, None) }}{% endif %}
+{% if loose %}
+<div class="ed-canvas-hd">{{ _('Fora das abas') }}</div>
+{{ editgrid(loose, None) }}
+{% endif %}
 
 {% for s in dashboard.sections %}
 {% set in_tab = tiles|selectattr('item.section_id', 'equalto', s.id)|list %}
+<div class="ed-canvas-hd">{{ s.title }}</div>
 <div class="bi-editsec">
-  <div class="bi-group-hd"><span class="bi-group-nm">{{ s.title }}</span></div>
   {% if in_tab %}{{ editgrid(in_tab, s.id) }}
-  {% else %}<div class="bi-empty-lg">{{ _('Nothing on this tab yet.') }}</div>{% endif %}
+  {% else %}<div class="bi-empty-lg">{{ _('Nada nesta aba ainda.') }}</div>{% endif %}
 </div>
 {% endfor %}
 
@@ -192,6 +224,6 @@
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-layout.js') }}"></script>
 {% else %}
-<div class="bi-empty-lg">Nothing on this dashboard yet. Add a chart above.</div>
+<div class="bi-empty-lg">{{ _('Painel vazio. Adicione um gráfico acima.') }}</div>
 {% endif %}
 {% endblock %}

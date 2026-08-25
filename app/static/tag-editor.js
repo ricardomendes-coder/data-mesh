@@ -14,6 +14,34 @@
 (function () {
   "use strict";
 
+  // A <details> popover only toggles from its summary; on its own it never
+  // closes when you click away or press Escape, and it leaves one open behind
+  // the cards that follow it. Close any open tag editor on an outside click or
+  // Escape. Registered before the vocab check so it works regardless.
+  function closeOpen(except) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("details.bi-tagedit[open]"),
+      function (d) { if (d !== except) d.removeAttribute("open"); }
+    );
+  }
+  document.addEventListener("click", function (e) {
+    var here = e.target.closest ? e.target.closest("details.bi-tagedit") : null;
+    closeOpen(here);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" || e.keyCode === 27) closeOpen(null);
+  });
+
+  // Lift the whole card (or table row) above its neighbours while its editor is
+  // open, so the popover isn't painted behind the cards that come after it. A
+  // class rather than :has() so it works on every engine.
+  Array.prototype.forEach.call(document.querySelectorAll("details.bi-tagedit"), function (d) {
+    d.addEventListener("toggle", function () {
+      var host = d.closest(".bi-card") || d.closest("tr");
+      if (host) host.classList.toggle("bi-tagediting", d.open);
+    });
+  });
+
   var node = document.getElementById("bi-tagvocab");
   if (!node) return;
   var vocab;

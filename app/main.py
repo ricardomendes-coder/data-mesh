@@ -2636,6 +2636,7 @@ def admin_users(request: Request, user: str = Depends(require_admin)):
         admin_tab="users",
         users=store.list_users(),
         roles=store.list_roles(),
+        current_user=user,
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_users.html", context)
@@ -2838,6 +2839,19 @@ def admin_toggle_active(
     return RedirectResponse(
         request.url_for("admin_user_detail", username=username), status_code=303
     )
+
+
+@app.post("/admin/users/{username}/delete")
+def admin_delete_user(request: Request, username: str, user: str = Depends(require_admin)):
+    """Delete a user. Refuses to delete the admin doing it — locking yourself out
+    of the one screen that grants access is never what a click meant."""
+    if username == user:
+        return RedirectResponse(request.url_for("admin_users"), status_code=303)
+    try:
+        store.delete_user(username)
+    except Exception:
+        logger.exception("Could not delete user %r", username)
+    return RedirectResponse(request.url_for("admin_users"), status_code=303)
 
 
 def _grantable() -> dict[str, list[str]]:

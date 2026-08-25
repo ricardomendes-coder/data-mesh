@@ -132,6 +132,10 @@
     .bi-btn.ghost{background:var(--surface);border-color:var(--border-strong);color:var(--body);}
     .bi-btn.ghost:hover{border-color:var(--g-300);background:#FCFCFD;color:var(--title);}
     .bi-btn.sm{height:30px;padding:0 11px;font-size:.78rem;}
+    /* Square icon-only button; the danger variant is the red trash. */
+    .bi-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface);color:var(--muted);cursor:pointer;vertical-align:middle;margin-left:.3rem;transition:background .12s,border-color .12s,color .12s;}
+    .bi-iconbtn:hover{border-color:var(--muted);color:var(--title);}
+    .bi-iconbtn-danger:hover{background:var(--danger);border-color:var(--danger);color:#fff;}
     .bi-btn svg{flex-shrink:0;}
 
     .bi-page{padding:clamp(18px,3vw,30px);}
@@ -363,6 +367,11 @@
     .bi-tags{display:flex;flex-wrap:wrap;align-items:center;gap:.28rem;margin:.15rem 0;}
     .bi-tag{display:inline-block;padding:.14rem .45rem;border-radius:var(--r-pill);background:var(--purple-soft);color:var(--purple);font-size:.68rem;font-weight:600;}
     .bi-tagedit{position:relative;}
+    /* While a tag editor is open, lift its card/row over the ones after it so
+       the popover isn't painted behind them. Set by tag-editor.js on toggle;
+       :has() is the fallback for when the script never ran. */
+    .bi-card.bi-tagediting,.bi-card:has(.bi-tagedit[open]){z-index:20;}
+    .bi-listtbl tr.bi-tagediting td,.bi-listtbl tr:has(.bi-tagedit[open]) td{position:relative;z-index:20;}
     .bi-tagedit>summary{list-style:none;cursor:pointer;width:18px;height:18px;line-height:16px;text-align:center;border:1px dashed var(--border-strong);border-radius:var(--r-pill);color:var(--muted);font-size:.72rem;}
     .bi-tagedit>summary::-webkit-details-marker{display:none;}
     .bi-tagedit>summary:hover{border-color:var(--orange);color:var(--orange);}
