@@ -100,7 +100,11 @@
   window.renderChart = function (canvasId, spec, opts) {
     opts = opts || {};
     var compact = !!opts.compact;
-    var el = document.getElementById(canvasId);
+    // Accept a canvas element or an id. An element lets a caller render a canvas
+    // it just built but hasn't given a unique id — and skips a DOM lookup that
+    // fails for a node not yet attached to the document.
+    var el =
+      typeof canvasId === "string" ? document.getElementById(canvasId) : canvasId;
     if (!el || !window.Chart) return null;
     if (el._chart) el._chart.destroy();
     if (el._legend && el._legend.parentNode) {

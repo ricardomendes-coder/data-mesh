@@ -19,7 +19,7 @@
 
   // One tile's payload into a compact drawing: number, tiny table, canvas, or —
   // when nothing is cached yet — a placeholder that keeps the tile's footprint.
-  function drawTile(cell, payload, canvasId) {
+  function drawTile(cell, payload, canvasId, pending) {
     if (!payload) {
       cell.appendChild(el("div", "bi-mosaic-ph"));
       return;
@@ -60,8 +60,11 @@
     canvas.id = canvasId;
     holder.appendChild(canvas);
     cell.appendChild(holder);
+    // Draw only after the grid is in the document — Chart.js sizes to the
+    // canvas's parent, which reads 0×0 (and getElementById misses) while the
+    // node is still detached. Defer to the caller once the tree is attached.
     if (window.renderChart && payload.spec) {
-      window.renderChart(canvas.id, payload.spec, { compact: true });
+      pending.push({ canvas: canvas, spec: payload.spec });
     }
   }
 
@@ -84,16 +87,21 @@
     var ySpan = Math.max(1, yMax - yMin);
 
     var grid = el("div", "bi-mosaic-grid");
+    var pending = [];
     tiles.forEach(function (t, i) {
       var cell = el("div", "bi-mosaic-cell");
       cell.style.left = (t.x / cols) * 100 + "%";
       cell.style.width = (t.w / cols) * 100 + "%";
       cell.style.top = ((t.y - yMin) / ySpan) * 100 + "%";
       cell.style.height = (t.h / ySpan) * 100 + "%";
-      drawTile(cell, t.payload, (box.getAttribute("data-canvas") || "m") + "-" + i);
+      drawTile(cell, t.payload, (box.getAttribute("data-canvas") || "m") + "-" + i, pending);
       grid.appendChild(cell);
     });
     box.appendChild(grid);
+    // Canvases are attached and sized now — draw them.
+    pending.forEach(function (p) {
+      window.renderChart(p.canvas, p.spec, { compact: true });
+    });
   }
 
   function load(box) {
