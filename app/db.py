@@ -5,6 +5,7 @@ on the same server and share one login — only the *database* varies, so querie
 take an optional `database` argument that overrides just that part of the URL.
 """
 
+import threading
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -15,6 +16,14 @@ from .config import get_settings
 
 # Databases that exist on the server but are never useful to target.
 _SYSTEM_DATABASES = {"rdsadmin"}
+
+# One pooled engine per database, kept for the life of the process. Building a
+# fresh engine per query — as this used to — meant a new connection (TCP + auth,
+# over the tunnel) for every tile, and under load that connection churn is the
+# bottleneck long before the warehouse itself is. A cached engine reuses a pool
+# instead. pool_pre_ping quietly drops a connection the tunnel killed.
+_ENGINES: dict[str, object] = {}
+_ENGINES_LOCK = threading.Lock()
 
 
 def build_url(database: str | None = None) -> URL:
@@ -31,9 +40,31 @@ def build_url(database: str | None = None) -> URL:
 
 
 def _engine(database: str | None = None):
-    engine = create_engine(build_url(database))
-    _tune_work_mem(engine)
-    return engine
+    key = database or get_settings().db_name
+    engine = _ENGINES.get(key)
+    if engine is not None:
+        return engine
+    with _ENGINES_LOCK:
+        engine = _ENGINES.get(key)
+        if engine is None:
+            engine = create_engine(
+                build_url(database), pool_pre_ping=True, pool_size=5, max_overflow=10
+            )
+            _tune_work_mem(engine)
+            _ENGINES[key] = engine
+        return engine
+
+
+def reset_engines() -> None:
+    """Drop the pooled engines — after a settings change, so the next query
+    rebuilds against the new config."""
+    with _ENGINES_LOCK:
+        for engine in _ENGINES.values():
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+        _ENGINES.clear()
 
 
 def _tune_work_mem(engine) -> None:

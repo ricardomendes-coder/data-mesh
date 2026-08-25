@@ -79,9 +79,14 @@
     /* dvh, not vh: with vh the navy rail stops short of the bottom whenever the
        visual viewport differs from the layout viewport (mobile browser chrome). */
     .bi-shell{display:flex;height:100dvh;overflow:hidden;}
-    .bi-side{width:68px;flex-shrink:0;transition:width .2s cubic-bezier(.4,0,.2,1);overflow:hidden;}
-    .bi-side:hover{width:232px;}
-    .bi-side-inner{width:100%;height:100%;background:var(--navy);color:#fff;display:flex;flex-direction:column;overflow:hidden;}
+    /* Fixed 68px footprint that never animates: the expand-on-hover happens on
+       the inner as an OVERLAY, so the main content (and every responsive chart
+       in it) doesn't reflow/resize on each frame of the hover — that reflow was
+       the lag. */
+    .bi-side{width:68px;flex-shrink:0;position:relative;z-index:50;}
+    .bi-side-inner{position:absolute;top:0;left:0;bottom:0;width:68px;background:var(--navy);color:#fff;display:flex;flex-direction:column;overflow:hidden;transition:width .18s cubic-bezier(.4,0,.2,1);}
+    .bi-side:hover .bi-side-inner{width:232px;box-shadow:6px 0 24px -6px rgba(0,0,0,.28);}
+    @media (prefers-reduced-motion:reduce){.bi-side-inner{transition:none;}}
 
     /* brand lockup: mark alone when collapsed, full logo when expanded */
     .bi-brand{display:flex;align-items:center;gap:.7rem;height:66px;padding:0 1.1rem;border-bottom:1px solid rgba(255,255,255,.09);white-space:nowrap;flex-shrink:0;}

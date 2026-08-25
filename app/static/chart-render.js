@@ -25,7 +25,12 @@
     );
   }
 
-  function buildDatasets(spec) {
+  function buildDatasets(spec, compact) {
+    // Points are the expensive part of a line draw: one filled circle per point
+    // per series, so a 100-series week chart draws ~5,000 of them. Drop them for
+    // a thumbnail or a many-series chart — the shape reads fine without, and the
+    // draw gets much cheaper.
+    var light = compact || (spec.datasets || []).length > 8;
     return spec.datasets.map(function (ds) {
       var base = { label: ds.label, data: ds.data };
       if (spec.type === "pie") {
@@ -45,9 +50,9 @@
       }
       // line / area
       base.borderColor = ds.color;
-      base.borderWidth = 2;
-      base.pointRadius = 4;
-      base.pointHoverRadius = 6;
+      base.borderWidth = compact ? 1.5 : 2;
+      base.pointRadius = light ? 0 : 4;
+      base.pointHoverRadius = light ? 0 : 6;
       base.pointBackgroundColor = ds.color;
       base.pointBorderColor = "#ffffff";
       base.pointBorderWidth = 2;
@@ -112,12 +117,20 @@
       !compact && !!spec.showLegend && (spec.datasets || []).length > HTML_LEGEND_AT;
     el._chart = new Chart(el.getContext("2d"), {
       type: chartType,
-      data: { labels: spec.labels, datasets: buildDatasets(spec) },
+      data: { labels: spec.labels, datasets: buildDatasets(spec, compact) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: !compact,
-        interaction: { mode: "index", intersect: false },
+        // No entry animation: a page can hold a dozen charts, and animating
+        // them all in is where the load jank comes from — the number, not the
+        // pixels. Many-series charts also drop to a nearest-point tooltip: an
+        // index tooltip recomputes every one of a hundred series on each
+        // mousemove (measured at ~77ms a move), and listing a hundred rows in a
+        // tooltip is useless anyway.
+        animation: false,
+        interaction: manySeries
+          ? { mode: "nearest", intersect: false }
+          : { mode: "index", intersect: false },
         plugins: {
           legend: {
             // One series needs no legend — the chart title names it. Many
