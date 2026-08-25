@@ -32,16 +32,19 @@ def target_slugs():
             continue
         if not dash:
             continue
-        n = 0
-        for it in dash.items:
-            if it.chart is None:
-                continue
+        # The exact tiles the mosaic shows: one coherent space (loose tiles, or
+        # the first section that has charts), so warming matches what renders.
+        ci = [it for it in dash.items if it.chart is not None]
+        loose = [it for it in ci if it.section_id is None]
+        if loose:
+            group = loose
+        else:
+            first_section = ci[0].section_id if ci else None
+            group = [it for it in ci if it.section_id == first_section]
+        for it in group[:DASHBOARD_MOSAIC_TILES]:
             if it.chart.slug not in seen:
                 seen.add(it.chart.slug)
                 out.append(it.chart.slug)
-            n += 1
-            if n >= DASHBOARD_MOSAIC_TILES:
-                break
     if ALL:
         for c in store.list_charts():
             if c.slug not in seen:

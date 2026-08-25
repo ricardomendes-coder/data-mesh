@@ -1281,8 +1281,12 @@ def _chart_preview(chart, full=False, force=False, cache_only=False):
     changes, so a listing is a cache read, not a query, on all but the first look.
     """
     variant = "full" if full else "preview"
-    ttl = timedelta(minutes=max(0, settings.preview_cache_minutes))
-    if not force and ttl:
+    # A thumbnail is permanent: it is a likeness of the chart, so it stays valid
+    # until the chart's *query* changes — no time TTL. An edit drops it
+    # (chart_save calls drop_chart_preview) and, belt-and-braces, a snapshot from
+    # before an edit is rejected here too. So once built it is served forever,
+    # surviving even a tile-cache wipe.
+    if not force:
         try:
             cached = store.get_chart_preview(chart.id, variant)
         except Exception:
@@ -1290,10 +1294,8 @@ def _chart_preview(chart, full=False, force=False, cache_only=False):
             cached = None
         if cached:
             payload, built_at = cached
-            fresh = datetime.now(built_at.tzinfo) - built_at < ttl
-            # A chart edited since the snapshot invalidates it: the query moved.
             unchanged = not chart.updated_at or chart.updated_at <= built_at
-            if fresh and unchanged:
+            if unchanged:
                 payload["age"] = _age_label(built_at)
                 payload["cached"] = True
                 return payload, "cached"
@@ -1428,10 +1430,27 @@ def dashboard_preview(
     if dash is None:
         return JSONResponse({"error": i18n.t("Not found")}, status_code=404)
 
+    chart_items = [
+        it for it in dash.items
+        if it.chart is not None and access.allows(store.CHART, it.chart.slug)
+    ]
+    # One coherent space, not the first four across every tab: each tab's tiles
+    # start at y=0, so mixing tabs piles them onto the same corner and the
+    # full-width ones bury the rest. Prefer the loose tiles (they sit at the top
+    # of the dashboard); otherwise the first section that actually has charts.
+    loose = [it for it in chart_items if it.section_id is None]
+    if loose:
+        group = loose
+    else:
+        first_section = chart_items[0].section_id if chart_items else None
+        group = [it for it in chart_items if it.section_id == first_section]
+
+    # Read the permanent thumbnail cache (chart_previews) — never a query here,
+    # so scrolling the listing stays free. A thumbnail is filled the first time
+    # its chart is drawn anywhere (the Charts listing, or opening this dashboard,
+    # which warms them too) and then kept until the chart is edited.
     tiles = []
-    for it in dash.items:
-        if it.chart is None or not access.allows(store.CHART, it.chart.slug):
-            continue
+    for it in group[:DASHBOARD_MOSAIC_TILES]:
         payload, _state = _chart_preview(it.chart, cache_only=True)
         tiles.append(
             {
@@ -1439,11 +1458,9 @@ def dashboard_preview(
                 "y": it.grid_y or 0,
                 "w": it.grid_w or (store.GRID_COLUMNS // 2),
                 "h": it.grid_h or 20,
-                "payload": payload,  # None until this tile's preview is cached
+                "payload": payload,  # None until this chart's thumbnail is built
             }
         )
-        if len(tiles) >= DASHBOARD_MOSAIC_TILES:
-            break
     return JSONResponse({"tiles": tiles, "columns": store.GRID_COLUMNS})
 
 
@@ -2212,6 +2229,19 @@ def dashboard_tile_data(
             store.put_tile_cache(item.id, sig, payload)
         except Exception:
             logger.exception("Could not cache tile %s", item_id)
+        # Warm this chart's permanent thumbnail from the render we just did, so
+        # opening a dashboard fills its mosaic on the listing — no extra query.
+        # Only the unfiltered view, and only once (a thumbnail is built once and
+        # kept until the chart is edited).
+        if not chosen:
+            try:
+                if store.get_chart_preview(item.chart.id, "preview") is None:
+                    thumb = dict(payload)
+                    if thumb.get("rows"):
+                        thumb["rows"] = thumb["rows"][:12]
+                    store.put_chart_preview(item.chart.id, thumb, "preview")
+            except Exception:
+                logger.exception("Could not warm the thumbnail for %s", item.chart.slug)
     payload["age"] = i18n.t("just now")
     payload["cached"] = False
     _record_timing(dash, item, query_ms, _spec_row_count(spec), bool(chosen), False)

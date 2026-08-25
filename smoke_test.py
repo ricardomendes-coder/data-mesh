@@ -955,19 +955,20 @@ def test_preview_cache():
             client.get("/charts/7/data?refresh=1")
             assert len(ran) == 2, "refresh did not re-run the query"
 
-            # Older than the TTL (a week): rebuilt.
+            # No time TTL: a thumbnail is permanent. An old snapshot of an
+            # unchanged chart is still served, never rebuilt just because it aged.
             key = (7, "preview")
             spec, _ = cache[key]
-            cache[key] = (spec, datetime.now(UTC) - timedelta(days=8))
+            cache[key] = (spec, datetime.now(UTC) - timedelta(days=30))
             client.get("/charts/7/data")
-            assert len(ran) == 3, "a stale preview was served"
+            assert len(ran) == 2, "a permanent preview was needlessly rebuilt by age"
 
             # Edited since the snapshot: rebuilt, because the query moved.
             spec, _ = cache[key]
             cache[key] = (spec, datetime.now(UTC))
             chart.updated_at = datetime.now(UTC) + timedelta(minutes=1)
             client.get("/charts/7/data")
-            assert len(ran) == 4, "a preview of the pre-edit query was served"
+            assert len(ran) == 3, "a preview of the pre-edit query was served"
 
             # An empty result is served but never kept. An ETL that truncates
             # and reloads leaves its tables empty for a minute; caching that
@@ -984,7 +985,7 @@ def test_preview_cache():
             assert not body.get("spec", {}).get("labels"), body
             assert (7, "preview") not in cache, "an empty preview was cached"
             client.get("/charts/7/data")
-            assert len(ran) == 6, "the empty preview was served from a cache"
+            assert len(ran) == 5, "the empty preview was served from a cache"
     finally:
         (
             store.available,
@@ -1020,7 +1021,8 @@ def test_dashboard_mosaic_is_cache_only():
     ]
     dash = store.Dashboard(slug="ops", title="Ops", id=5, items=items)
 
-    # Only chart 100 has a cached preview; the rest are misses.
+    # The mosaic reads the permanent thumbnail cache (chart_previews): only the
+    # first tile's chart (100) is cached, the rest are misses.
     previews = {(100, "preview"): ({"renders_as": "canvas", "spec": {"labels": ["x"]}},
                                    datetime.now(UTC))}
     ran = []
