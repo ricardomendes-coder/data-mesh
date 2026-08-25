@@ -1271,6 +1271,29 @@ def _db_error_detail(exc) -> str:
     return detail[:400]
 
 
+def _warm_thumbnail(item, payload, chosen) -> None:
+    """Keep a chart's permanent mosaic thumbnail in step with its panel, at no
+    query cost. The tile we just served — cold or straight from cache — already
+    holds the numbers, so when the thumbnail is missing we write it from that
+    same payload. This is the whole contract: static in the database, refreshed
+    one item at a time. Opening a panel once fills its mosaic and it stays
+    filled until the chart is edited (an edit drops the thumbnail; the next view
+    rebuilds it). Only the unfiltered view seeds one — a filtered slice is not
+    the chart's likeness.
+    """
+    if chosen or item.chart is None:
+        return
+    try:
+        if store.get_chart_preview(item.chart.id, "preview") is not None:
+            return
+        thumb = {k: v for k, v in payload.items() if k not in ("age", "cached")}
+        if thumb.get("rows"):
+            thumb["rows"] = thumb["rows"][:12]
+        store.put_chart_preview(item.chart.id, thumb, "preview")
+    except Exception:
+        logger.exception("Could not warm the thumbnail for %s", item.chart.slug)
+
+
 def _chart_preview(chart, full=False, force=False, cache_only=False):
     """Build, or fetch from cache, one chart's preview payload.
 
@@ -2191,6 +2214,10 @@ def dashboard_tile_data(
             if datetime.now(built_at.tzinfo) - built_at < ttl and not chart_moved:
                 payload["age"] = _age_label(built_at)
                 payload["cached"] = True
+                # A warm tile still seeds the mosaic thumbnail — same numbers,
+                # no extra query — so opening a panel fills it whether the tile
+                # was cold or cached.
+                _warm_thumbnail(item, payload, chosen)
                 _record_timing(
                     dash, item, int((time.perf_counter() - t_cache) * 1000),
                     None, bool(chosen), True,
@@ -2231,17 +2258,7 @@ def dashboard_tile_data(
             logger.exception("Could not cache tile %s", item_id)
         # Warm this chart's permanent thumbnail from the render we just did, so
         # opening a dashboard fills its mosaic on the listing — no extra query.
-        # Only the unfiltered view, and only once (a thumbnail is built once and
-        # kept until the chart is edited).
-        if not chosen:
-            try:
-                if store.get_chart_preview(item.chart.id, "preview") is None:
-                    thumb = dict(payload)
-                    if thumb.get("rows"):
-                        thumb["rows"] = thumb["rows"][:12]
-                    store.put_chart_preview(item.chart.id, thumb, "preview")
-            except Exception:
-                logger.exception("Could not warm the thumbnail for %s", item.chart.slug)
+        _warm_thumbnail(item, payload, chosen)
     payload["age"] = i18n.t("just now")
     payload["cached"] = False
     _record_timing(dash, item, query_ms, _spec_row_count(spec), bool(chosen), False)
