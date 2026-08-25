@@ -301,6 +301,14 @@
     .bi-chart-cfg{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.05rem 1.1rem;box-shadow:var(--sh-1);}
     .bi-chart-cfg .bi-fld{max-width:none;}
     .bi-chart-cfg .bi-group-tt{margin-bottom:.9rem;}
+    /* Chart "Personalizar" panel: a compact grid of display controls. */
+    .bi-customize-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem 1.4rem;max-width:720px;align-items:end;}
+    .bi-customize .bi-fld{margin-bottom:0;max-width:none;}
+    .bi-customize .bi-fld>span{display:block;font-size:.73rem;font-weight:600;color:var(--body);margin-bottom:.35rem;letter-spacing:.01em;}
+    .bi-customize-actions{display:flex;align-items:center;gap:.85rem;margin-top:1.5rem;}
+    .bi-customize-status{font-size:.8rem;color:var(--body);}
+    .bi-customize-status.ok{color:#2f9e44;font-weight:600;}
+    .bi-customize-status.err{color:#e03131;font-weight:600;}
     .bi-checks{display:flex;flex-direction:column;gap:.15rem;max-height:210px;overflow-y:auto;}
     .bi-check{display:flex;align-items:center;gap:.5rem;padding:.32rem .4rem;border-radius:var(--r-sm);font-size:.82rem;color:var(--body);cursor:pointer;}
     .bi-check:hover{background:var(--page);color:var(--title);}

@@ -3585,6 +3585,54 @@ def test_query_picker_and_reports():
     print("query picker + reports: OK")
 
 
+def test_chart_display_options():
+    """The display-options layer: the browser's blob is whitelisted before it is
+    stored, and a chart's options ride alongside its data into the render."""
+    from app.main import _clean_options, _spec_with_options
+    from app import charts
+    from types import SimpleNamespace
+
+    # Whitelist: valid values survive (and the subtitle is trimmed), unknown
+    # ones are dropped rather than trusted, grid always resolves to booleans.
+    clean = _clean_options({
+        "legend": {"position": "right"},
+        "subtitle": "  processos  ",
+        "grid": {"x": True, "y": False},
+        "xAxis": {"format": "date-br"},
+        "yAxis": {"format": "percent"},
+    })
+    assert clean == {
+        "legend": {"position": "right"},
+        "subtitle": "processos",
+        "grid": {"x": True, "y": False},
+        "xAxis": {"format": "date-br"},
+        "yAxis": {"format": "percent"},
+    }, clean
+
+    junk = _clean_options({
+        "legend": {"position": "diagonal"},
+        "xAxis": {"format": "zzz"},
+        "subtitle": 123,
+        "grid": "nope",
+    })
+    assert junk == {"grid": {"x": False, "y": True}}, junk
+    assert _clean_options({}) == {"grid": {"x": False, "y": True}}
+
+    # Options travel with the spec so the renderer can apply them.
+    spec = charts.build_spec(
+        ["d", "n"], [("2026-05-01", 0.1), ("2026-05-08", 0.2)],
+        "line", "d", ["n"],
+    )
+    chart = SimpleNamespace(options={"legend": {"position": "top"}})
+    merged = _spec_with_options(spec, chart)
+    assert merged["options"] == {"legend": {"position": "top"}}, merged
+    assert "labels" in merged and "datasets" in merged  # the data is still there
+
+    # A chart nobody customised carries an empty options dict, never None.
+    assert _spec_with_options(spec, SimpleNamespace(options={}))["options"] == {}
+    print("chart display options: OK")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_sso_flow()
@@ -3596,6 +3644,7 @@ if __name__ == "__main__":
     test_inline_code_filter()
     test_dataset_preview_is_not_injectable()
     test_chart_spec()
+    test_chart_display_options()
     test_long_format_pivots_into_series()
     test_dashboard_layout_ordering()
     test_dashboard_widths_are_validated()

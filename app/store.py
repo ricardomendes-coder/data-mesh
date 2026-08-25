@@ -567,6 +567,16 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
         """,
     ),
+    (
+        "0022_chart_options",
+        """
+        -- Display customisation for a chart: legend position, subtitle, grid
+        -- lines, axis label formats — and whatever comes next. One JSON blob, so
+        -- a new option is a code change, not a migration. Display-only: it never
+        -- touches the query, so changing it re-renders without re-running SQL.
+        ALTER TABLE charts ADD COLUMN IF NOT EXISTS options jsonb NOT NULL DEFAULT '{}'::jsonb;
+        """,
+    ),
 ]
 
 
@@ -648,6 +658,10 @@ class Chart:
     # Retired when false: hidden from every user-facing listing, flipped only on
     # the admin screen. See 0021 and set_chart_active().
     active: bool = True
+    # Display customisation: legend position, subtitle, grid, axis formats — see
+    # 0022. Never written by save_chart(); only save_chart_options() sets it, so
+    # editing a chart's query can't wipe how it's drawn.
+    options: dict = field(default_factory=dict)
 
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
@@ -666,6 +680,9 @@ def _row_to_chart(row: Any) -> Chart:
     # psycopg2 hands jsonb back already decoded; be tolerant of a text column.
     if isinstance(y, str):
         y = json.loads(y)
+    opts = m["options"] if "options" in m else {}
+    if isinstance(opts, str):
+        opts = json.loads(opts or "{}")
     return Chart(
         id=m["id"],
         slug=m["slug"],
@@ -682,13 +699,14 @@ def _row_to_chart(row: Any) -> Chart:
         created_at=m["created_at"],
         updated_at=m["updated_at"],
         active=m["active"] if "active" in m else True,
+        options=dict(opts or {}),
     )
 
 
 _SELECT = (
     "SELECT id, slug, title, description, source_db, sql, chart_type, "
     "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at, "
-    "active FROM charts"
+    "active, options FROM charts"
 )
 
 
@@ -702,7 +720,7 @@ _SELECT = (
 _LIST_SELECT = (
     "SELECT id, slug, title, description, source_db, chart_type, "
     "x_column, y_columns, series_column, created_by, folder_id, created_at, updated_at, "
-    "active FROM charts"
+    "active, options FROM charts"
 )
 
 
@@ -854,12 +872,30 @@ def save_chart(chart: Chart) -> Chart:
                 -- flips it, so editing a retired chart must not silently revive it.
                 RETURNING id, slug, title, description, source_db, sql, chart_type,
                           x_column, y_columns, series_column, created_by, folder_id,
-                          created_at, updated_at, active
+                          created_at, updated_at, active, options
                 """
             ),
             params,
         ).first()
     return _row_to_chart(row)
+
+
+def save_chart_options(slug: str, options: dict) -> bool:
+    """Persist a chart's display options — legend, subtitle, grid, axis formats.
+
+    Display-only: it rewrites just the `options` blob and bumps updated_at so a
+    cached preview rebuilds, but never touches the query. Returns False if the
+    slug is unknown.
+    """
+    with engine().begin() as conn:
+        result = conn.execute(
+            text(
+                "UPDATE charts SET options = CAST(:o AS jsonb), updated_at = now() "
+                "WHERE slug = :s"
+            ),
+            {"o": json.dumps(options or {}), "s": slug},
+        )
+        return result.rowcount > 0
 
 
 def set_user_locale(username: str, locale: str | None) -> bool:
@@ -1537,6 +1573,10 @@ def add_item(
     width: str = DEFAULT_WIDTH,
     section_id: int | None = None,
     title_override: str = "",
+    grid_x: int | None = None,
+    grid_y: int | None = None,
+    grid_w: int | None = None,
+    grid_h: int | None = None,
 ) -> int | None:
     """Append a chart to a dashboard. None if either no longer exists.
 
@@ -1544,9 +1584,14 @@ def add_item(
 
     A chart may appear more than once — the same series at two widths, or
     alongside a variant — so there's no uniqueness constraint to trip over.
+
+    Pass grid_x/y/w/h to drop the tile at a spot on the grid — the editor's
+    drag-a-chart-onto-the-canvas. Leave them None and the tile is "not placed
+    yet": it flows in `position` until the first drag gives it coordinates.
     """
     if width not in WIDTHS:
         width = DEFAULT_WIDTH
+    placed = grid_x is not None and grid_y is not None
     with engine().begin() as conn:
         ids = conn.execute(
             text(
@@ -1560,6 +1605,16 @@ def add_item(
         dash_id, chart_id = ids[0], ids[1]
         if dash_id is None or chart_id is None:
             return None
+        # A section that isn't this dashboard's is dropped rather than trusted.
+        if section_id is not None:
+            ok = conn.execute(
+                text(
+                    "SELECT 1 FROM dashboard_sections WHERE id = :s AND dashboard_id = :d"
+                ),
+                {"s": section_id, "d": dash_id},
+            ).scalar()
+            if ok is None:
+                section_id = None
         next_pos = conn.execute(
             text(
                 "SELECT coalesce(max(position), -1) + 1 FROM dashboard_items "
@@ -1570,8 +1625,9 @@ def add_item(
         new_id = conn.execute(
             text(
                 "INSERT INTO dashboard_items "
-                "(dashboard_id, chart_id, position, width, kind, section_id, title_override) "
-                "VALUES (:d, :c, :p, :w, 'chart', :s, :t) RETURNING id"
+                "(dashboard_id, chart_id, position, width, kind, section_id, "
+                " title_override, grid_x, grid_y, grid_w, grid_h) "
+                "VALUES (:d, :c, :p, :w, 'chart', :s, :t, :gx, :gy, :gw, :gh) RETURNING id"
             ),
             {
                 "d": dash_id,
@@ -1580,6 +1636,10 @@ def add_item(
                 "w": width,
                 "s": section_id,
                 "t": title_override,
+                "gx": max(0, min(GRID_COLUMNS - 1, int(grid_x))) if placed else None,
+                "gy": max(0, int(grid_y)) if placed else None,
+                "gw": max(1, min(GRID_COLUMNS, int(grid_w))) if placed and grid_w else (6 if placed else None),
+                "gh": max(1, int(grid_h)) if placed and grid_h else (5 if placed else None),
             },
         ).scalar()
         _touch(conn, dash_id)

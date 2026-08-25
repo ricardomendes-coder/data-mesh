@@ -1294,6 +1294,15 @@ def _warm_thumbnail(item, payload, chosen) -> None:
         logger.exception("Could not warm the thumbnail for %s", item.chart.slug)
 
 
+def _spec_with_options(spec, chart) -> dict:
+    """A canvas spec dict carrying the chart's display options, so the renderer
+    can place the legend, add a subtitle, toggle the grid and format the axes.
+    Options are display-only — they ride alongside the data, never change it."""
+    d = spec.to_dict()
+    d["options"] = chart.options or {}
+    return d
+
+
 def _chart_preview(chart, full=False, force=False, cache_only=False):
     """Build, or fetch from cache, one chart's preview payload.
 
@@ -1343,7 +1352,7 @@ def _chart_preview(chart, full=False, force=False, cache_only=False):
 
     payload = {"renders_as": spec.renders_as, "warnings": spec.warnings, "unfiltered": False}
     if spec.renders_as == "canvas":
-        payload["spec"] = spec.to_dict()
+        payload["spec"] = _spec_with_options(spec, chart)
     elif spec.renders_as == "table":
         payload["columns"] = spec.columns
         rows = spec.rows if full else spec.rows[:12]
@@ -1519,9 +1528,79 @@ def chart_detail(
     # never reached this page. The SQL panel needs nothing from the warehouse
     # and paints at once; the chart and its rows arrive from chart_data.
     context = _shell_context(
-        user, "charts", access, chart=chart, spec=None, columns=[], rows=[], chart_error=None
+        user, "charts", access, chart=chart, spec=None, columns=[], rows=[], chart_error=None,
+        can_customize=access.allows(store.FEATURE, "chart_builder"),
     )
     return templates.TemplateResponse(request, "chart_detail.html", context)
+
+
+_LEGEND_POS = {"top", "bottom", "left", "right", "hidden"}
+_X_FORMATS = {"date-iso", "date-br", "date-slash", "month-year", "month-name-br"}
+_Y_FORMATS = {"integer", "compact", "percent", "percent1", "currency-brl"}
+
+
+def _clean_options(raw: dict) -> dict:
+    """Whitelist the display options coming from the browser. Anything unknown is
+    dropped rather than trusted — the blob is read straight back into the render.
+    """
+    o: dict = {}
+    legend = (raw.get("legend") or {}).get("position") if isinstance(raw.get("legend"), dict) else None
+    if legend in _LEGEND_POS:
+        o["legend"] = {"position": legend}
+    subtitle = raw.get("subtitle")
+    if isinstance(subtitle, str) and subtitle.strip():
+        o["subtitle"] = subtitle.strip()[:200]
+    grid = raw.get("grid") if isinstance(raw.get("grid"), dict) else {}
+    o["grid"] = {"x": bool(grid.get("x")), "y": bool(grid.get("y", True))}
+    xf = (raw.get("xAxis") or {}).get("format") if isinstance(raw.get("xAxis"), dict) else None
+    if xf in _X_FORMATS:
+        o["xAxis"] = {"format": xf}
+    yf = (raw.get("yAxis") or {}).get("format") if isinstance(raw.get("yAxis"), dict) else None
+    if yf in _Y_FORMATS:
+        o["yAxis"] = {"format": yf}
+    return o
+
+
+@app.post("/charts/{slug}/options")
+async def chart_options(
+    request: Request,
+    slug: str = Depends(chart_ref),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Persist a chart's display options (legend, subtitle, grid, axis formats).
+
+    Display-only: it rewrites the options blob and drops the cached preview so the
+    next view re-renders, but never touches the query — no warehouse call here.
+    """
+    if not store.available():
+        return JSONResponse({"error": "The app database is not configured."}, status_code=503)
+    if not access.allows(store.FEATURE, "chart_builder"):
+        return JSONResponse({"error": "You don't have access to edit charts."}, status_code=403)
+    if not access.allows(store.CHART, slug):
+        return JSONResponse({"error": "No access to that chart."}, status_code=403)
+    try:
+        chart = store.get_chart(slug)
+    except Exception:
+        logger.exception("Could not load chart %r for options", slug)
+        return JSONResponse({"error": "Could not load the chart."}, status_code=502)
+    if chart is None:
+        return JSONResponse({"error": "Unknown chart."}, status_code=404)
+
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    options = _clean_options(raw if isinstance(raw, dict) else {})
+    store.save_chart_options(chart.slug, options)
+    # The chart looks different now, so its permanent thumbnail is stale.
+    try:
+        if chart.id:
+            store.drop_chart_preview(chart.id)
+    except Exception:
+        logger.exception("Could not drop the cached preview for %r", chart.slug)
+    logger.info("Chart %r options updated by %s", chart.slug, user)
+    return JSONResponse({"ok": True, "options": options})
 
 
 @app.post("/charts/{slug}/delete")
@@ -2239,7 +2318,7 @@ def dashboard_tile_data(
         "unfiltered": tile["unfiltered"],
     }
     if spec.renders_as == "canvas":
-        payload["spec"] = spec.to_dict()
+        payload["spec"] = _spec_with_options(spec, item.chart)
     elif spec.renders_as == "table":
         payload["columns"] = spec.columns
         payload["rows"] = [["" if v is None else str(v) for v in r] for r in spec.rows]
@@ -2474,6 +2553,59 @@ def _may_edit_dashboard(access: store.Access, slug: str) -> bool:
     return access.allows(store.DASHBOARD, slug) and access.allows(
         store.FEATURE, "dashboard_builder"
     )
+
+
+def _as_int(value, default=None):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@app.post("/dashboards/{slug}/items/place")
+async def dashboard_place_item(
+    request: Request,
+    slug: str = Depends(dashboard_ref),
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Drop a chart onto the grid at a position — the editor's drag-and-drop add.
+
+    JSON in ({chart_slug, section_id, x, y, w, h}), JSON out ({ok, item_id}). The
+    same access rules as the form add: edit rights on the dashboard, and view
+    rights on the chart (so composition can't hand out charts you can't see).
+    """
+    if not _may_edit_dashboard(access, slug):
+        return JSONResponse(
+            {"error": "You don't have access to edit that dashboard."}, status_code=403
+        )
+    if not store.available():
+        return JSONResponse({"error": "The app database is not configured."}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    chart_slug = str(body.get("chart_slug") or "").strip()
+    if not chart_slug:
+        return JSONResponse({"error": "Missing chart."}, status_code=400)
+    if not access.allows(store.CHART, chart_slug):
+        return JSONResponse({"error": "No access to that chart."}, status_code=403)
+
+    item_id = store.add_item(
+        slug,
+        chart_slug,
+        section_id=_as_int(body.get("section_id")),
+        grid_x=_as_int(body.get("x"), 0),
+        grid_y=_as_int(body.get("y"), 0),
+        grid_w=_as_int(body.get("w"), 6),
+        grid_h=_as_int(body.get("h"), 5),
+    )
+    if item_id is None:
+        return JSONResponse({"error": "Could not add the chart."}, status_code=400)
+    logger.info("Chart %r dropped on dashboard %r by %s", chart_slug, slug, user)
+    return JSONResponse({"ok": True, "item_id": item_id})
 
 
 @app.post("/dashboards/{slug}/rename")

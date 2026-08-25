@@ -37,7 +37,17 @@
     shell.appendChild(box);
   }
 
+  // The last payload drawn, so the customise panel can re-render live — new
+  // legend, subtitle, grid or axis format — without re-running the query.
+  var current = null;
+  window.biChartApplyOptions = function (options) {
+    if (!current || current.renders_as !== "canvas" || !current.spec) return;
+    current.spec.options = options;
+    drawChart(current);
+  };
+
   function drawChart(payload) {
+    current = payload;
     shell.innerHTML = "";
     if (payload.renders_as === "number") {
       shell.className = "bi-chartbox bi-chartbox-lg bi-kpi-box";

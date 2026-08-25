@@ -65,6 +65,18 @@
     text-transform:uppercase;color:var(--muted);margin:1.6rem 0 .6rem}
   .ed-canvas-hd::after{content:"";flex:1;height:1px;background:var(--border)}
   .bi-editsec{margin-bottom:.4rem}
+
+  /* chart library / palette */
+  .bi-pal-search{width:100%;max-width:360px;margin:.2rem 0 .8rem;height:34px;border:1px solid var(--border-strong);
+    border-radius:var(--r-sm);padding:0 .6rem;font:inherit;font-size:.82rem;background:var(--surface);color:var(--title);outline:none}
+  .bi-pal-search:focus{border-color:var(--orange)}
+  .bi-pal-list{display:flex;flex-wrap:wrap;gap:.45rem;max-height:230px;overflow-y:auto;padding:.1rem}
+  .bi-palchip{display:inline-flex;align-items:center;gap:.45rem;border:1px solid var(--border-strong);
+    border-radius:var(--r-pill);padding:.3rem .7rem;background:var(--surface);cursor:grab;font-size:.8rem;user-select:none}
+  .bi-palchip:hover{border-color:var(--orange);box-shadow:var(--sh-1)}
+  .bi-palchip:active{cursor:grabbing}
+  .bi-palchip-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  .bi-tiles-editing.bi-drop-active{outline:2px dashed var(--orange);outline-offset:3px;background:rgba(255,90,0,.06)}
 </style>
 
 {# ── the toolbox: one bar, three labelled actions ── #}
@@ -187,6 +199,30 @@
 
 {# ── the canvas: the tiles you actually arrange ── #}
 {% if tiles %}
+{# ── chart library: drag a chart onto a grid below to add it ── #}
+{% if available_charts %}
+<details class="ed-panel" id="bi-palette-panel">
+  <summary>{{ _('Biblioteca de gráficos') }}<span class="bi-ds-stat">{{ available_charts|length }}</span></summary>
+  <div class="ed-body">
+    <p class="bi-hint">{{ _('Arraste um gráfico para o grid abaixo — ele entra onde você soltar.') }}</p>
+    <div id="bi-palette"
+         data-add="{{ url_for('dashboard_place_item', slug=dashboard.id) }}"
+         data-columns="{{ grid_columns }}" data-row-px="{{ row_height }}">
+      <input class="bi-pal-search" data-role="search" type="text"
+             placeholder="{{ _('Buscar gráfico…') }}" aria-label="{{ _('Buscar gráfico') }}">
+      <div class="bi-pal-list">
+        {% for c in available_charts %}
+        <div class="bi-palchip" draggable="true" data-chart-slug="{{ c.slug }}" data-title="{{ c.title }}">
+          <span class="bi-kind bi-kind-view">{{ c.chart_type }}</span>
+          <span class="bi-palchip-t">{{ c.title }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</details>
+{% endif %}
+
 <p class="bi-hint">
   Arraste os tiles para reposicionar. O controle de <b>aba</b> em cada tile decide onde
   ele aparece; tiles em <em>sem aba</em> ficam acima da barra de abas.
@@ -223,6 +259,7 @@
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-render.js') }}"></script>
 <script src="{{ url_for('static', path='dashboard-layout.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard-palette.js') }}"></script>
 {% else %}
 <div class="bi-empty-lg">{{ _('Painel vazio. Adicione um gráfico acima.') }}</div>
 {% endif %}
