@@ -1213,7 +1213,11 @@ def chart_run(
             {"error": f"You don't have access to {source_db!r}."}, status_code=403
         )
     try:
-        result = db.execute(sql, source_db)
+        # A chart from a dashboard carries the {{ filters }} token where its
+        # WHERE clause takes more terms. That isn't valid SQL on its own, so the
+        # studio runs the unfiltered form — the token is stripped here, exactly
+        # as the preview and the SQL tab do. The stored SQL keeps its token.
+        result = db.execute(filters.strip_token(sql), source_db)
     except Exception as exc:
         logger.exception("Chart query failed")
         return JSONResponse(

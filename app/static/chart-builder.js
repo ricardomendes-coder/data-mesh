@@ -484,9 +484,12 @@
     var vals = resolvedValues();
     if (state.type !== "table" && state.type !== "number" && (!state.x || !vals.length)) { setStatus("Defina Eixo X e Valores antes de salvar.", "err"); return; }
     if (state.type === "number" && !vals.length) { setStatus("Escolha a coluna do número.", "err"); return; }
-    if (!state.sql) { setStatus("Rode a consulta antes de salvar.", "err"); return; }
+    // In SQL mode save exactly what's in the editor — keeping the {{ filters }}
+    // token a dashboard chart carries. In dataset mode save the generated SQL.
+    var sqlToSave = state.mode === "dataset" ? state.sql : el("st-sql").value.trim();
+    if (!sqlToSave) { setStatus("Rode a consulta antes de salvar.", "err"); return; }
     var body = new URLSearchParams();
-    body.set("sql", state.sql);
+    body.set("sql", sqlToSave);
     body.set("source_db", el("st-db").value);
     body.set("title", title);
     body.set("chart_type", state.type);
