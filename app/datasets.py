@@ -169,6 +169,25 @@ WHERE n.nspname = :schema AND c.relname = :name
 ORDER BY a.attnum
 """
 
+# What each view/matview is built on — Postgres's own dependency tracking
+# (pg_depend over the view's rewrite rule), not a guess from parsing SQL. Used
+# to follow usage transitively: a panel that reads a view also uses every table
+# and view that view selects from.
+_DEPS_SQL = """
+SELECT DISTINCT dep.relname AS obj, ref.relname AS uses
+FROM pg_depend d
+JOIN pg_rewrite rw ON rw.oid = d.objid
+JOIN pg_class dep ON dep.oid = rw.ev_class
+JOIN pg_class ref ON ref.oid = d.refobjid
+JOIN pg_namespace ndep ON ndep.oid = dep.relnamespace
+JOIN pg_namespace nref ON nref.oid = ref.relnamespace
+WHERE d.deptype = 'n'
+  AND dep.oid <> ref.oid
+  AND dep.relkind IN ('v', 'm')
+  AND ref.relkind IN ('r', 'p', 'v', 'm')
+  AND ndep.nspname = :schema AND nref.nspname = :schema
+"""
+
 
 def _engine():
     return db._engine(get_settings().datasets_database)
@@ -264,6 +283,25 @@ def get_columns(name: str) -> list[Column]:
     return [
         Column(name=c, type=t, nullable=bool(n), default=d) for c, t, n, d in _fetch_columns(name)
     ]
+
+
+def dependency_map() -> dict[str, set[str]]:
+    """For each view/matview in the schema, the set of relations it reads from.
+
+    Straight from pg_depend, so it is Postgres's own bookkeeping, not a parse of
+    the definition. Lets usage be followed transitively — a dataset only ever
+    read *inside* a view that a panel uses is still used.
+    """
+    s = get_settings()
+    engine = _engine()
+    out: dict[str, set[str]] = {}
+    try:
+        with engine.connect() as conn:
+            for obj, uses in conn.execute(text(_DEPS_SQL), {"schema": s.datasets_schema}):
+                out.setdefault(obj, set()).add(uses)
+    finally:
+        engine.dispose()
+    return out
 
 
 def get_preview(name: str, limit: int | None = None) -> tuple[list[str], list[tuple]]:

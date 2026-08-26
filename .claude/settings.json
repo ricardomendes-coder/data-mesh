@@ -16,7 +16,8 @@
       "Bash(cd /home/marcelo/trabalho/data-mesh *)",
       "Read(//usr/bin/**)",
       "Bash(timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/15432')",
-      "Bash(kill 120251)"
+      "Bash(kill 120251)",
+      "Bash(pkill -f \"ssh -Nf.*15432\")"
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [

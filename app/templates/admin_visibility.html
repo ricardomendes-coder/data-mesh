@@ -34,6 +34,7 @@
   tr.off td{opacity:.66}
   .ds-dashes{display:block;color:var(--muted);font-size:.76rem;margin-top:2px;max-width:64ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ds-unused{color:var(--warn);font-weight:600;font-size:.82rem}
+  .ds-via{color:var(--info);font-weight:500;font-size:.82rem}
   .vis-pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:18px 0}
   .vis-pager a,.vis-pager span{font-size:.83rem;padding:.4rem .8rem;border:1px solid var(--border-strong);border-radius:var(--r);text-decoration:none;color:var(--title)}
   .vis-pager span.info{border:none;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -97,6 +98,8 @@
           {% if it.used %}
           <b>{{ it.used }}</b> {{ 'painel' if it.used == 1 else 'painéis' }}
           <span class="ds-dashes">{{ it.dashboards[:6]|join(', ') }}{% if it.dashboards|length > 6 %} +{{ it.dashboards|length - 6 }}{% endif %}</span>
+          {% elif it.via %}
+          <span class="ds-via">via {{ it.via[:4]|join(', ') }}{% if it.via|length > 4 %} +{{ it.via|length - 4 }}{% endif %}</span>
           {% else %}
           <span class="ds-unused">não usado</span>
           {% endif %}

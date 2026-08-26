@@ -3084,6 +3084,42 @@ def admin_visibility(request: Request, user: str = Depends(require_admin)):
     return templates.TemplateResponse(request, "admin_visibility.html", context)
 
 
+def _dataset_usage(names: list[str]):
+    """Which datasets active dashboards use — directly (named in a chart's SQL)
+    and transitively (read inside a view/mview that a chart uses). Returns
+    (direct, used, via): `direct` is {name: {dashboards, charts}}, `used` is
+    every dataset reached either way, and `via` is {name: {view names}} — so a
+    table only reached through a view can be shown as used, not retired by
+    mistake."""
+    try:
+        direct = store.dataset_usage(names)
+    except Exception:
+        logger.exception("Could not compute direct dataset usage")
+        direct = {}
+    try:
+        deps = datasets.dependency_map()
+    except Exception:
+        logger.exception("Could not read the dataset dependency map")
+        deps = {}
+    used = set(direct)
+    via: dict[str, set] = {}
+    # Expand every used view/mview into what it reads, following the chain: a
+    # view that reads another view pulls in that view's tables too.
+    to_expand = [n for n in used if n in deps]
+    expanded: set[str] = set()
+    while to_expand:
+        v = to_expand.pop()
+        if v in expanded:
+            continue
+        expanded.add(v)
+        for dep in deps.get(v, ()):
+            via.setdefault(dep, set()).add(v)
+            used.add(dep)
+            if dep in deps and dep not in expanded:
+                to_expand.append(dep)
+    return direct, used, via
+
+
 def _visibility_items(kind: str) -> list:
     """The rows the visibility screen shows for one kind. Charts and dashboards
     carry their own active flag; datasets and data sources are catalog things,
@@ -3097,18 +3133,20 @@ def _visibility_items(kind: str) -> list:
         if kind == "datasets":
             inactive = store.catalog_inactive("dataset")
             ds = datasets.list_datasets()
-            usage = store.dataset_usage([d.name for d in ds])
+            direct, used, via = _dataset_usage([d.name for d in ds])
             rows = []
             for d in ds:
-                u = usage.get(d.name)
+                du = direct.get(d.name)
                 rows.append(SimpleNamespace(
                     slug=d.name, title=d.name, active=d.name not in inactive,
                     meta=d.kind,
-                    used=len(u["dashboards"]) if u else 0,
-                    dashboards=sorted(u["dashboards"].values()) if u else [],
+                    used=len(du["dashboards"]) if du else 0,
+                    dashboards=sorted(du["dashboards"].values()) if du else [],
+                    via=sorted(via.get(d.name, [])),  # views that pull it in
+                    used_any=d.name in used,          # direct OR through a view
                 ))
-            # Unused-in-active-panels first, so retirement candidates are on top.
-            rows.sort(key=lambda r: (r.used, r.title.lower()))
+            # Truly unused first (retirement candidates), then by direct panel use.
+            rows.sort(key=lambda r: (r.used_any, -r.used, r.title.lower()))
             return rows
         if kind == "sources":
             inactive = store.catalog_inactive("source")
