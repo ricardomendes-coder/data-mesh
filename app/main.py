@@ -1093,29 +1093,51 @@ def _builder_databases(access: store.Access) -> list[str]:
         return []
 
 
-def _studio_init(databases: list[str], chart=None) -> dict:
+def _studio_init(access: store.Access, databases: list[str], chart=None) -> dict:
     """Everything the chart studio needs to boot, as one JSON blob: the chart it
     is editing (or empty defaults for a new one), the databases it may query, the
-    viz types and the palette. The studio runs the SQL and maps columns to wells
-    entirely in the browser from here — only Run and Save go back to the server.
+    viz types and palette, and — for the catalog database — the list of datasets
+    to pick from.
+
+    Two ways in: the visual builder (pick a dataset, drag columns, choose an
+    aggregation — the studio writes the SQL) and the SQL editor (write it
+    yourself). A new chart on the catalog database starts visual; an existing
+    chart, whose SQL we can't reverse into the mapping, opens on the SQL editor.
     """
+    catalog_db = settings.datasets_database
     default_db = (
-        settings.datasets_database
-        if settings.datasets_database in databases
-        else (databases[0] if databases else "")
+        catalog_db if catalog_db in databases else (databases[0] if databases else "")
     )
+    source_db = chart.source_db if chart else default_db
+    has_catalog = bool(catalog_db) and access.allows(store.DATABASE, catalog_db)
+    dataset_list: list[dict] = []
+    if has_catalog:
+        try:
+            dataset_list = [
+                {"name": d.name, "kind": d.kind, "columns": d.column_count}
+                for d in datasets.list_datasets()
+            ]
+        except Exception:
+            logger.exception("Could not list datasets for the chart studio")
+    # Visual by default only when there is a catalog to pick from and we're not
+    # editing an existing (hand-written) query.
+    builder_mode = "dataset" if (not chart and has_catalog and source_db == catalog_db) else "sql"
     return {
         "mode": "edit" if chart else "new",
+        "builderMode": builder_mode,
         "slug": chart.slug if chart else "",
         "title": chart.title if chart else "",
         "sql": chart.sql if chart else "",
-        "source_db": chart.source_db if chart else default_db,
+        "source_db": source_db,
         "chart_type": chart.chart_type if chart else "bar",
         "x_column": chart.x_column if chart else "",
         "y_columns": list(chart.y_columns) if chart else [],
         "series_column": chart.series_column if chart else "",
         "options": (chart.options or {}) if chart else {},
         "databases": list(databases),
+        "catalogDb": catalog_db,
+        "datasets": dataset_list,
+        "aggregations": [{"key": k, "label": lbl} for k, lbl, _ in charts.AGGREGATIONS],
         "chart_types": [
             {"key": k, "label": i18n.t(l), "hint": i18n.t(h)}
             for k, l, h in charts.CHART_TYPES
@@ -1160,7 +1182,7 @@ def chart_new(
             chart = store.get_chart(from_slug)
         except Exception:
             logger.exception("Could not load chart %r to edit", from_slug)
-    init = _studio_init(databases, chart)
+    init = _studio_init(access, databases, chart)
     context = _shell_context(user, "charts", access, init=init, editing=bool(chart))
     return templates.TemplateResponse(request, "chart_builder.html", context)
 
@@ -1210,6 +1232,138 @@ def chart_run(
             "rows": rows,
             "numeric_columns": charts.numeric_columns(result.columns, result.rows),
             "truncated": len(result.rows) > charts.MAX_POINTS,
+        }
+    )
+
+
+def _catalog_gate(access: store.Access):
+    """Both catalog endpoints need the builder feature and access to the catalog
+    database. Returns an error response, or None when the caller may proceed."""
+    if not access.allows(store.FEATURE, "chart_builder"):
+        return JSONResponse(
+            {"error": i18n.t("You don't have access to the chart builder.")}, status_code=403
+        )
+    if not (settings.datasets_database and access.allows(store.DATABASE, settings.datasets_database)):
+        return JSONResponse({"error": "No access to the catalog."}, status_code=403)
+    return None
+
+
+@app.get("/charts/columns")
+def chart_columns(
+    request: Request,
+    table: str = "",
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """A catalog dataset's columns, for the visual builder's field list. Read
+    from the schema, so nothing is queried; only a dataset the catalog lists is
+    reachable (get_dataset is the gate)."""
+    gate = _catalog_gate(access)
+    if gate is not None:
+        return gate
+    try:
+        ds = datasets.get_dataset(table)
+    except Exception as exc:
+        logger.exception("Could not resolve dataset %r", table)
+        return JSONResponse(
+            {"error": "Could not read the dataset.", "detail": _db_error_detail(exc)}, status_code=502
+        )
+    if ds is None:
+        return JSONResponse({"error": "Unknown dataset."}, status_code=404)
+    try:
+        cols = datasets.get_columns(ds.name)
+    except Exception as exc:
+        logger.exception("Could not read columns of %r", ds.name)
+        return JSONResponse(
+            {"error": "Could not read the columns.", "detail": _db_error_detail(exc)}, status_code=502
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "columns": [
+                {"name": c.name, "type": c.type, "kind": charts.column_kind(c.type)} for c in cols
+            ],
+        }
+    )
+
+
+@app.post("/charts/build")
+async def chart_build(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Turn the visual mapping into SQL, run it, and hand back the rows and the
+    generated SQL. The dataset and every column are checked against the catalog
+    first, so the query the studio assembles is never user free-text."""
+    gate = _catalog_gate(access)
+    if gate is not None:
+        return gate
+    catalog_db = settings.datasets_database
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    try:
+        ds = datasets.get_dataset(str(body.get("table") or ""))
+    except Exception as exc:
+        logger.exception("Could not resolve dataset for build")
+        return JSONResponse(
+            {"error": "Could not read the dataset.", "detail": _db_error_detail(exc)}, status_code=502
+        )
+    if ds is None:
+        return JSONResponse({"error": "Unknown dataset."}, status_code=404)
+    try:
+        valid = {c.name for c in datasets.get_columns(ds.name)}
+    except Exception as exc:
+        return JSONResponse(
+            {"error": "Could not read the columns.", "detail": _db_error_detail(exc)}, status_code=502
+        )
+
+    def _col(name):
+        name = str(name or "")
+        return name if name in valid else ""
+
+    x = _col(body.get("x"))
+    series = _col(body.get("series"))
+    measures = []
+    for m in body.get("measures") or []:
+        col = _col((m or {}).get("column"))
+        agg = (m or {}).get("agg")
+        if col and agg in charts._AGG_FN:
+            measures.append({"column": col, "agg": agg})
+    if not x and not measures:
+        return JSONResponse({"error": i18n.t("Escolha ao menos um campo.")}, status_code=400)
+
+    engine = db._engine(catalog_db)
+    quote = engine.dialect.identifier_preparer.quote
+    qualified = quote(ds.name)
+    if settings.datasets_schema:
+        qualified = f"{quote(settings.datasets_schema)}.{qualified}"
+    sql = charts.build_group_sql(qualified, quote, x, series, measures)
+
+    try:
+        result = db.execute(sql, catalog_db, max_rows=charts.MAX_POINTS + 1)
+    except Exception as exc:
+        logger.exception("Built chart query failed")
+        return JSONResponse(
+            {"error": i18n.t("This chart's query failed."), "detail": _db_error_detail(exc), "sql": sql},
+            status_code=400,
+        )
+    rows = [[_json_cell(v) for v in r] for r in result.rows[: charts.MAX_POINTS]]
+    return JSONResponse(
+        {
+            "ok": True,
+            "sql": sql,
+            "columns": list(result.columns),
+            "rows": rows,
+            "numeric_columns": charts.numeric_columns(result.columns, result.rows),
+            "truncated": len(result.rows) > charts.MAX_POINTS,
+            "x": x,
+            "series": series,
+            "measures": [charts.measure_alias(m["agg"], m["column"]) for m in measures],
         }
     )
 

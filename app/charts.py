@@ -51,6 +51,59 @@ CHART_TYPES = [
 ]
 CHART_TYPE_KEYS = {k for k, _, _ in CHART_TYPES}
 
+# The aggregations the visual builder offers, and how each maps to SQL. The
+# builder writes the query so nobody has to; count_distinct is the one that
+# needs a DISTINCT inside the call. Labels are what a measure reads as, both in
+# the well and in the chart legend ("Soma de valor").
+AGGREGATIONS = [
+    ("sum", "Soma", "SUM"),
+    ("avg", "Média", "AVG"),
+    ("count", "Contagem", "COUNT"),
+    ("count_distinct", "Contagem distinta", "COUNT"),
+    ("min", "Mínimo", "MIN"),
+    ("max", "Máximo", "MAX"),
+]
+_AGG_FN = {k: fn for k, _, fn in AGGREGATIONS}
+_AGG_LABEL = {k: lbl for k, lbl, _ in AGGREGATIONS}
+
+
+def column_kind(pg_type: str) -> str:
+    """Bucket a Postgres type into the three the builder cares about: a date
+    (goes on an axis as-is), a number (can be a measure), or text (a dimension).
+    """
+    t = (pg_type or "").lower()
+    if "timestamp" in t or "date" in t or t.startswith("time"):
+        return "date"
+    if any(k in t for k in ("int", "numeric", "decimal", "real", "double", "float", "money", "serial")):
+        return "num"
+    return "text"
+
+
+def measure_alias(agg: str, column: str) -> str:
+    """A measure's column name in the result and its label in the chart."""
+    return f"{_AGG_LABEL.get(agg, agg)} de {column}"
+
+
+def build_group_sql(qualified: str, quote, x: str, series: str, measures: list[dict]) -> str:
+    """Assemble a grouped aggregate query from the visual mapping — the SQL the
+    studio writes for you. `quote` is the dialect identifier quoter, so every
+    column and the table are quoted; the caller has already checked each name
+    against the catalog, so nothing here is user free-text.
+
+    Dimensions (x, series) are grouped; each measure becomes agg(col) with a
+    readable alias. No dimensions means a single-row aggregate — a big number.
+    """
+    dims = [d for d in (x, series) if d]
+    selects = [quote(d) for d in dims]
+    for m in measures:
+        fn = _AGG_FN.get(m["agg"], "SUM")
+        distinct = "DISTINCT " if m["agg"] == "count_distinct" else ""
+        selects.append(f"{fn}({distinct}{quote(m['column'])}) AS {quote(measure_alias(m['agg'], m['column']))}")
+    sql = "SELECT " + ",\n       ".join(selects) + f"\nFROM {qualified}"
+    if dims:
+        sql += "\nGROUP BY " + ", ".join(quote(d) for d in dims) + "\nORDER BY 1"
+    return sql
+
 # Which types draw on a canvas. The other two are HTML, and skip the whole
 # labels/datasets path: a table has no series and a KPI has no axis.
 CANVAS_TYPES = {"bar", "line", "area", "pie"}

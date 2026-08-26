@@ -103,6 +103,17 @@
   .st-status.err{color:var(--danger);font-weight:600}
   .st-fmt-note{font-size:.74rem;color:var(--g-300);margin:.2rem 0 0;line-height:1.4}
   .st-fld[hidden]{display:none}
+  [hidden]{display:none!important}
+  .st-modes{display:flex;gap:.2rem;margin:0 .85rem .6rem;background:var(--page);padding:.2rem;border-radius:var(--r-sm)}
+  .st-mode{flex:1;border:none;background:transparent;color:var(--muted);font:inherit;font-size:.78rem;font-weight:600;padding:.35rem;border-radius:5px;cursor:pointer}
+  .st-mode.on{background:var(--surface);color:var(--title);box-shadow:var(--sh-1)}
+  .st-dbrow input{width:100%;height:34px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font:inherit;font-size:.82rem;background:var(--surface);color:var(--title);outline:none}
+  .st-dbrow input:focus{border-color:var(--orange);box-shadow:var(--ring)}
+  .st-gensql{margin:.4rem .85rem;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+  .st-gensql>summary{cursor:pointer;padding:.45rem .6rem;font-size:.72rem;font-weight:600;color:var(--muted);list-style:none}
+  .st-gensql>summary::-webkit-details-marker{display:none}
+  .st-gensql-text{margin:0;padding:.5rem .65rem;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:.7rem;line-height:1.5;color:var(--body);white-space:pre-wrap;overflow-x:auto;background:#FBFBFD}
+  .st-pill-agg{border:1px solid var(--border);background:var(--page);font:inherit;font-size:.66rem;font-weight:600;color:var(--orange);border-radius:4px;padding:.08rem .1rem;cursor:pointer;max-width:96px}
 
   @media(max-width:980px){
     .st{flex-direction:column;height:auto}
@@ -113,7 +124,8 @@
 
 <script id="studio-init" type="application/json">{{ init|tojson }}</script>
 
-<div class="st" data-run="{{ url_for('chart_run') }}" data-save="{{ url_for('chart_save') }}">
+<div class="st" data-run="{{ url_for('chart_run') }}" data-save="{{ url_for('chart_save') }}"
+     data-columns="{{ url_for('chart_columns') }}" data-build="{{ url_for('chart_build') }}">
   <!-- DADOS -->
   <aside class="st-col st-data">
     <div class="st-hd">Dados</div>
@@ -123,17 +135,39 @@
         {% for d in init.databases %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
       </select>
     </div>
-    <div class="st-sql">
+
+    <div class="st-modes" id="st-modes">
+      <button class="st-mode" data-mode="dataset" type="button">{{ _('Dataset') }}</button>
+      <button class="st-mode" data-mode="sql" type="button">{{ _('SQL') }}</button>
+    </div>
+
+    <div id="st-dsmode">
+      <div class="st-dbrow">
+        <label for="st-dataset">{{ _('Dataset (tabela)') }}</label>
+        <input id="st-dataset" list="dl-datasets" autocomplete="off" placeholder="{{ _('buscar tabela…') }}">
+        <datalist id="dl-datasets">
+          {% for d in init.datasets %}<option value="{{ d.name }}">{{ d.kind }} · {{ d.columns }} col</option>{% endfor %}
+        </datalist>
+      </div>
+    </div>
+
+    <div class="st-sql" id="st-sqlmode">
       <div class="st-sql-bar"><span class="dot"></span> {{ _('consulta SQL') }}
         <button class="bi-btn sm st-run" id="st-run" type="button">▶ {{ _('Rodar') }}</button>
       </div>
       <textarea class="st-ta" id="st-sql" spellcheck="false"
         placeholder="SELECT date_trunc('day', criado_em) AS dia, count(*) AS total&#10;FROM ... GROUP BY 1 ORDER BY 1"></textarea>
     </div>
+
     <div class="st-fields">
-      <div class="st-fields-hd"><b>{{ _('Campos') }}</b><span class="hint" id="st-fields-hint">{{ _('rode a consulta →') }}</span></div>
+      <div class="st-fields-hd"><b>{{ _('Campos') }}</b><span class="hint" id="st-fields-hint"></span></div>
       <div id="st-chips"></div>
     </div>
+
+    <details class="st-gensql" id="st-gensql" hidden>
+      <summary>{{ _('SQL gerado') }}</summary>
+      <pre class="st-gensql-text" id="st-gensql-text"></pre>
+    </details>
   </aside>
 
   <!-- CANVAS -->
