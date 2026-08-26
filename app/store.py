@@ -577,6 +577,22 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE charts ADD COLUMN IF NOT EXISTS options jsonb NOT NULL DEFAULT '{}'::jsonb;
         """,
     ),
+    (
+        "0023_catalog_visibility",
+        """
+        -- Visibility for things the app doesn't own a row for: data sources
+        -- (databases) and datasets (catalog tables) live in the warehouse, not
+        -- here, so their active/inactive flag is kept in this side table. A row
+        -- exists only for something turned off; anything absent is active. Same
+        -- rule as charts/dashboards: inactive hides everywhere but the admin.
+        CREATE TABLE IF NOT EXISTS catalog_visibility (
+            kind   text    NOT NULL,   -- 'source' | 'dataset'
+            name   text    NOT NULL,
+            active boolean NOT NULL DEFAULT true,
+            PRIMARY KEY (kind, name)
+        );
+        """,
+    ),
 ]
 
 
@@ -1115,6 +1131,69 @@ def set_dashboard_active(slug: str, active: bool) -> bool:
             {"a": bool(active), "s": slug},
         )
     return r.rowcount > 0
+
+
+def catalog_inactive(kind: str) -> set[str]:
+    """Names turned off for `kind` ('source' or 'dataset'). Anything not listed
+    is active — the app stores a row only for something retired."""
+    if not available():
+        return set()
+    try:
+        with engine().connect() as conn:
+            return {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT name FROM catalog_visibility WHERE kind = :k AND NOT active"),
+                    {"k": kind},
+                )
+            }
+    except Exception:
+        return set()
+
+
+def set_catalog_active(kind: str, name: str, active: bool) -> None:
+    """Flip a data source or dataset active/inactive. Only the admin screen."""
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO catalog_visibility (kind, name, active) VALUES (:k, :n, :a) "
+                "ON CONFLICT (kind, name) DO UPDATE SET active = EXCLUDED.active"
+            ),
+            {"k": kind, "n": name, "a": bool(active)},
+        )
+
+
+def dataset_usage(dataset_names: list[str]) -> dict[str, dict]:
+    """Which of `dataset_names` are referenced by charts on ACTIVE dashboards.
+
+    Returns {name: {"dashboards": {slug: title}, "charts": count}}. A dataset is
+    counted as used when its name appears as an identifier token in a chart's
+    SQL — good enough to tell a used table from an unused one; the point is to
+    find datasets no live panel touches, so they can be retired with confidence.
+    """
+    by_lower = {n.lower(): n for n in dataset_names}
+    usage: dict[str, dict] = {}
+    if not available() or not by_lower:
+        return usage
+    with engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT d.slug, d.title, c.sql
+                FROM dashboards d
+                JOIN dashboard_items di ON di.dashboard_id = d.id
+                JOIN charts c ON c.id = di.chart_id
+                WHERE d.active AND c.sql IS NOT NULL
+                """
+            )
+        )
+        for dslug, dtitle, sql in rows:
+            tokens = set(re.findall(r"[a-z_][a-z0-9_]*", (sql or "").lower()))
+            for lower in tokens & by_lower.keys():
+                u = usage.setdefault(by_lower[lower], {"dashboards": {}, "charts": 0})
+                u["dashboards"][dslug] = dtitle
+                u["charts"] += 1
+    return usage
 
 
 def list_dashboards(include_inactive: bool = True) -> list[Dashboard]:

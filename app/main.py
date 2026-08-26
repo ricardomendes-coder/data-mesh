@@ -6,9 +6,10 @@ import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from authlib.integrations.starlette_client import OAuthError
@@ -716,7 +717,11 @@ def _console_context(user: str, access: store.Access | None = None, **extra) -> 
     try:
         # Filtered, not merely un-selectable: the full list of ~50 databases is
         # itself information (client names), so an ungranted one is not shown.
-        databases = access.filter(store.DATABASE, db.list_databases())
+        # Retired sources drop out here as well — only the admin screen shows them.
+        inactive_src = store.catalog_inactive("source")
+        databases = [
+            d for d in access.filter(store.DATABASE, db.list_databases()) if d not in inactive_src
+        ]
         db_ok = True
     except Exception:
         logger.exception("Could not list databases")
@@ -802,6 +807,9 @@ def datasets_index(
     # Per-dataset grants. Filtered rather than merely un-clickable: a table
     # name is itself information, so an ungranted dataset is never listed.
     all_datasets = [d for d in all_datasets if access.allows(store.DATASET, d.name)]
+    # Retired datasets hide here too — only the admin visibility screen shows them.
+    inactive_ds = store.catalog_inactive("dataset")
+    all_datasets = [d for d in all_datasets if d.name not in inactive_ds]
 
     needle = q.strip().lower()
     matched = [
@@ -1087,7 +1095,8 @@ def charts_index(
 
 def _builder_databases(access: store.Access) -> list[str]:
     try:
-        return access.filter(store.DATABASE, db.list_databases())
+        inactive = store.catalog_inactive("source")
+        return [d for d in access.filter(store.DATABASE, db.list_databases()) if d not in inactive]
     except Exception:
         logger.exception("Could not list databases for the chart builder")
         return []
@@ -1113,9 +1122,11 @@ def _studio_init(access: store.Access, databases: list[str], chart=None) -> dict
     dataset_list: list[dict] = []
     if has_catalog:
         try:
+            inactive_ds = store.catalog_inactive("dataset")
             dataset_list = [
                 {"name": d.name, "kind": d.kind, "columns": d.column_count}
                 for d in datasets.list_datasets()
+                if d.name not in inactive_ds
             ]
         except Exception:
             logger.exception("Could not list datasets for the chart studio")
@@ -3050,19 +3061,12 @@ def admin_visibility(request: Request, user: str = Depends(require_admin)):
     """Retire or restore charts and dashboards, one at a time. This is the only
     place an inactive resource shows — everywhere else the app hides it."""
     kind = request.query_params.get("kind")
-    if kind not in ("charts", "dashboards"):
+    if kind not in ("charts", "dashboards", "datasets", "sources"):
         kind = "dashboards"
     st = request.query_params.get("st")
     if st not in ("active", "inactive"):
         st = "all"
-    try:
-        items = (
-            store.list_charts(include_inactive=True) if kind == "charts"
-            else store.list_dashboards(include_inactive=True)
-        )
-    except Exception:
-        logger.exception("Could not list %s for the visibility screen", kind)
-        items = []
+    items = _visibility_items(kind)
     n_total = len(items)
     n_active = sum(1 for i in items if i.active)
     if st == "active":
@@ -3078,6 +3082,43 @@ def admin_visibility(request: Request, user: str = Depends(require_admin)):
         is_admin=True,
     )
     return templates.TemplateResponse(request, "admin_visibility.html", context)
+
+
+def _visibility_items(kind: str) -> list:
+    """The rows the visibility screen shows for one kind. Charts and dashboards
+    carry their own active flag; datasets and data sources are catalog things,
+    so their flag comes from catalog_visibility, and datasets also carry how many
+    active dashboards use them — the whole point of the screen for the catalog."""
+    try:
+        if kind == "charts":
+            return store.list_charts(include_inactive=True)
+        if kind == "dashboards":
+            return store.list_dashboards(include_inactive=True)
+        if kind == "datasets":
+            inactive = store.catalog_inactive("dataset")
+            ds = datasets.list_datasets()
+            usage = store.dataset_usage([d.name for d in ds])
+            rows = []
+            for d in ds:
+                u = usage.get(d.name)
+                rows.append(SimpleNamespace(
+                    slug=d.name, title=d.name, active=d.name not in inactive,
+                    meta=d.kind,
+                    used=len(u["dashboards"]) if u else 0,
+                    dashboards=sorted(u["dashboards"].values()) if u else [],
+                ))
+            # Unused-in-active-panels first, so retirement candidates are on top.
+            rows.sort(key=lambda r: (r.used, r.title.lower()))
+            return rows
+        if kind == "sources":
+            inactive = store.catalog_inactive("source")
+            return [
+                SimpleNamespace(slug=n, title=n, active=n not in inactive)
+                for n in db.list_databases()
+            ]
+    except Exception:
+        logger.exception("Could not list %s for the visibility screen", kind)
+    return []
 
 
 @app.post("/admin/visibility/toggle")
@@ -3096,8 +3137,12 @@ def admin_visibility_toggle(
     try:
         if kind == "charts":
             store.set_chart_active(slug, make_active)
-        else:
+        elif kind == "dashboards":
             store.set_dashboard_active(slug, make_active)
+        elif kind == "datasets":
+            store.set_catalog_active("dataset", slug, make_active)
+        elif kind == "sources":
+            store.set_catalog_active("source", slug, make_active)
     except Exception:
         logger.exception("Could not set %s %r active=%s", kind, slug, make_active)
     qs = urlencode({"kind": kind, "st": st, "q": q, "page": page})

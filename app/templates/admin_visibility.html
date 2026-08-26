@@ -1,7 +1,8 @@
 {% extends "_shell.html" %}
 {% from "_admin_tabs.html" import admin_tabs with context %}
 {% block page_title %}Visibilidade{% endblock %}
-{% block page_sub %}{{ n_active }} ativos · {{ n_inactive }} inativos de {{ n_total }} {{ 'gráficos' if kind == 'charts' else 'dashboards' }}{% endblock %}
+{% set nouns = {'charts':'gráficos','dashboards':'dashboards','datasets':'datasets','sources':'fontes de dados'} %}
+{% block page_sub %}{{ n_active }} ativos · {{ n_inactive }} inativos de {{ n_total }} {{ nouns[kind] }}{% endblock %}
 
 {% macro qslink(k, s, p) -%}
 {{ url_for('admin_visibility') }}?kind={{ k }}&amp;st={{ s }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if p %}&amp;page={{ p }}{% endif %}
@@ -31,6 +32,8 @@
   .statelbl{font-family:var(--mono);font-size:.72rem;font-weight:600;min-width:52px;text-align:left}
   .statelbl.on{color:var(--ok)} .statelbl.off{color:var(--muted)}
   tr.off td{opacity:.66}
+  .ds-dashes{display:block;color:var(--muted);font-size:.76rem;margin-top:2px;max-width:64ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ds-unused{color:var(--warn);font-weight:600;font-size:.82rem}
   .vis-pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:18px 0}
   .vis-pager a,.vis-pager span{font-size:.83rem;padding:.4rem .8rem;border:1px solid var(--border-strong);border-radius:var(--r);text-decoration:none;color:var(--title)}
   .vis-pager span.info{border:none;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -43,6 +46,8 @@
   <div class="vis-tabs">
     <a class="{{ 'on' if kind == 'dashboards' else '' }}" href="{{ qslink('dashboards', st, '') }}">Dashboards</a>
     <a class="{{ 'on' if kind == 'charts' else '' }}" href="{{ qslink('charts', st, '') }}">Gráficos</a>
+    <a class="{{ 'on' if kind == 'datasets' else '' }}" href="{{ qslink('datasets', st, '') }}">Datasets</a>
+    <a class="{{ 'on' if kind == 'sources' else '' }}" href="{{ qslink('sources', st, '') }}">Fontes</a>
   </div>
   <div class="vis-chips">
     <a class="vis-chip {{ 'on' if st == 'all' else '' }}" href="{{ qslink(kind, 'all', '') }}">Todos</a>
@@ -52,7 +57,7 @@
   <form class="vis-search" method="get" action="{{ url_for('admin_visibility') }}">
     <input type="hidden" name="kind" value="{{ kind }}">
     <input type="hidden" name="st" value="{{ st }}">
-    <input type="search" name="q" value="{{ q }}" placeholder="Buscar {{ 'gráfico' if kind == 'charts' else 'dashboard' }}…" autocomplete="off">
+    <input type="search" name="q" value="{{ q }}" placeholder="Buscar {{ nouns[kind] }}…" autocomplete="off">
   </form>
 </div>
 
@@ -61,8 +66,10 @@
   <table class="bi-restbl bi-admintbl">
     <thead>
       <tr>
-        <th>{{ 'Gráfico' if kind == 'charts' else 'Dashboard' }}</th>
-        {% if kind == 'charts' %}<th>Tipo</th><th>Base</th>{% else %}<th>Charts</th>{% endif %}
+        <th>{{ {'charts':'Gráfico','dashboards':'Dashboard','datasets':'Dataset','sources':'Fonte'}[kind] }}</th>
+        {% if kind == 'charts' %}<th>Tipo</th><th>Base</th>
+        {% elif kind == 'dashboards' %}<th>Charts</th>
+        {% elif kind == 'datasets' %}<th>Uso em painéis ativos</th>{% endif %}
         <th style="text-align:right">Estado</th>
       </tr>
     </thead>
@@ -72,15 +79,28 @@
         <td>
           {% if kind == 'charts' %}
           <a href="{{ url_for('chart_detail', slug=it.id) }}">{{ it.title }}</a>
-          {% else %}
+          {% elif kind == 'dashboards' %}
           <a href="{{ url_for('dashboard_show', slug=it.id) }}">{{ it.title }}</a>
+          {% elif kind == 'datasets' %}
+          <code>{{ it.title }}</code> <span class="bi-kind bi-kind-view">{{ it.meta }}</span>
+          {% else %}
+          <code>{{ it.title }}</code>
           {% endif %}
         </td>
         {% if kind == 'charts' %}
         <td><span class="bi-kind bi-kind-view">{{ _(it.chart_type) }}</span></td>
         <td><code>{{ it.source_db }}</code></td>
-        {% else %}
+        {% elif kind == 'dashboards' %}
         <td>{{ it.items|length }}</td>
+        {% elif kind == 'datasets' %}
+        <td>
+          {% if it.used %}
+          <b>{{ it.used }}</b> {{ 'painel' if it.used == 1 else 'painéis' }}
+          <span class="ds-dashes">{{ it.dashboards[:6]|join(', ') }}{% if it.dashboards|length > 6 %} +{{ it.dashboards|length - 6 }}{% endif %}</span>
+          {% else %}
+          <span class="ds-unused">não usado</span>
+          {% endif %}
+        </td>
         {% endif %}
         <td>
           <form class="switchcell" method="post" action="{{ url_for('admin_visibility_toggle') }}">
@@ -112,7 +132,7 @@
 
 {% else %}
 <div class="bi-empty-lg">
-  {% if q %}Nada corresponde a “{{ q }}”.{% else %}Nenhum {{ 'gráfico' if kind == 'charts' else 'dashboard' }} {{ 'inativo' if st == 'inactive' else '' }} aqui.{% endif %}
+  {% if q %}Nada corresponde a “{{ q }}”.{% else %}Nenhum item {{ 'inativo' if st == 'inactive' else '' }} em {{ nouns[kind] }}.{% endif %}
 </div>
 {% endif %}
 {% endblock %}
