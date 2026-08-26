@@ -1,11 +1,13 @@
 import hashlib
+import json
 import logging
 import re
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -1083,45 +1085,56 @@ def charts_index(
     return templates.TemplateResponse(request, "charts.html", context)
 
 
-def _builder_context(user: str, access: store.Access | None = None, **extra) -> dict:
-    """Context for the chart builder, including everything needed to re-render
-    the form after a run so nothing the user typed is lost."""
-    access = access or store.NO_ACCESS
-    databases: list[str] = []
+def _builder_databases(access: store.Access) -> list[str]:
     try:
-        databases = access.filter(store.DATABASE, db.list_databases())
+        return access.filter(store.DATABASE, db.list_databases())
     except Exception:
         logger.exception("Could not list databases for the chart builder")
-    context = _shell_context(
-        user,
-        "charts",
-        access,
-        databases=databases,
-        chart_types=charts.CHART_TYPES,
-        chart=None,
-        sql="",
-        source_db=(
-            settings.datasets_database
-            if settings.datasets_database in databases
-            else (databases[0] if databases else "")
-        ),
-        title="",
-        chart_type="bar",
-        x_column="",
-        y_columns=[],
-        columns=[],
-        rows=[],
-        numeric_columns=[],
-        spec=None,
-        ran=False,
-        # Handed to the browser so the live preview re-colours from the same
-        # validated palette instead of keeping a second copy of the hexes.
-        series_colors=charts.SERIES_COLORS,
-        max_series=charts.MAX_SERIES,
-        max_points=charts.MAX_POINTS,
+        return []
+
+
+def _studio_init(databases: list[str], chart=None) -> dict:
+    """Everything the chart studio needs to boot, as one JSON blob: the chart it
+    is editing (or empty defaults for a new one), the databases it may query, the
+    viz types and the palette. The studio runs the SQL and maps columns to wells
+    entirely in the browser from here — only Run and Save go back to the server.
+    """
+    default_db = (
+        settings.datasets_database
+        if settings.datasets_database in databases
+        else (databases[0] if databases else "")
     )
-    context.update(extra)
-    return context
+    return {
+        "mode": "edit" if chart else "new",
+        "slug": chart.slug if chart else "",
+        "title": chart.title if chart else "",
+        "sql": chart.sql if chart else "",
+        "source_db": chart.source_db if chart else default_db,
+        "chart_type": chart.chart_type if chart else "bar",
+        "x_column": chart.x_column if chart else "",
+        "y_columns": list(chart.y_columns) if chart else [],
+        "series_column": chart.series_column if chart else "",
+        "options": (chart.options or {}) if chart else {},
+        "databases": list(databases),
+        "chart_types": [
+            {"key": k, "label": i18n.t(l), "hint": i18n.t(h)}
+            for k, l, h in charts.CHART_TYPES
+        ],
+        "colors": charts.SERIES_COLORS,
+        "maxSeries": charts.MAX_SERIES,
+        "maxPoints": charts.MAX_POINTS,
+    }
+
+
+def _json_cell(v):
+    """Coerce a warehouse value to something JSON can carry: numbers stay
+    numeric (so a measure is still a number in the browser), dates and anything
+    else become text (which is all a label ever is)."""
+    if v is None or isinstance(v, (int, float, str, bool)):
+        return v
+    if isinstance(v, Decimal):
+        return float(v)
+    return str(v)
 
 
 @app.get("/charts/new", response_class=HTMLResponse)
@@ -1130,87 +1143,75 @@ def chart_new(
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
+    """The chart studio. Blank for a new chart, or pre-filled to edit an existing
+    one via ?from=<slug> (the tile's "Edit chart" link) — the studio then saves
+    back to that same slug."""
     if not store.available():
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
         return _forbidden(
             request, user, i18n.t("You don't have access to the chart builder."), access=access
         )
-    return templates.TemplateResponse(request, "chart_builder.html", _builder_context(user, access))
+    databases = _builder_databases(access)
+    chart = None
+    from_slug = request.query_params.get("from")
+    if from_slug and access.allows(store.CHART, from_slug):
+        try:
+            chart = store.get_chart(from_slug)
+        except Exception:
+            logger.exception("Could not load chart %r to edit", from_slug)
+    init = _studio_init(databases, chart)
+    context = _shell_context(user, "charts", access, init=init, editing=bool(chart))
+    return templates.TemplateResponse(request, "chart_builder.html", context)
 
 
-@app.post("/charts/new", response_class=HTMLResponse)
+@app.post("/charts/new")
 def chart_run(
     request: Request,
     sql: str = Form(...),
     source_db: str = Form(...),
-    title: str = Form(""),
-    chart_type: str = Form("bar"),
-    x_column: str = Form(""),
-    y_columns: list[str] = Form(default=[]),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
-    """Run the builder's SQL and re-render with the column pickers + preview."""
+    """Run the studio's SQL and hand back its columns and rows as JSON. The
+    studio maps them to the wells and draws the preview in the browser, so the
+    SQL is re-run only on an explicit Run — never on a mapping or format change.
+    """
     if not store.available():
-        return _charts_unavailable(request, user)
+        return JSONResponse({"error": "The app database is not configured."}, status_code=503)
     if not access.allows(store.FEATURE, "chart_builder"):
-        return _forbidden(
-            request, user, i18n.t("You don't have access to the chart builder."), access=access
+        return JSONResponse(
+            {"error": i18n.t("You don't have access to the chart builder.")}, status_code=403
         )
-    # The builder runs arbitrary SQL, so it needs the same database gate as the
-    # console — otherwise it is a way around it.
+    # Arbitrary SQL, so the same database gate as the console — otherwise it is a
+    # way around it.
     if not access.allows(store.DATABASE, source_db):
         logger.warning("%s attempted a chart query against ungranted %r", user, source_db)
-        return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
-
-    context = _builder_context(
-        user,
-        access,
-        sql=sql,
-        source_db=source_db,
-        title=title,
-        chart_type=chart_type,
-        x_column=x_column,
-        y_columns=y_columns,
-        ran=True,
-    )
-
+        return JSONResponse(
+            {"error": f"You don't have access to {source_db!r}."}, status_code=403
+        )
     try:
         result = db.execute(sql, source_db)
     except Exception as exc:
-        # Same reasoning as the query console: this is a login-gated internal
-        # tool, so the real database error is the useful thing to show.
         logger.exception("Chart query failed")
-        context["error"] = f"Query failed: {exc}"
-        return templates.TemplateResponse(request, "chart_builder.html", context, status_code=400)
-
+        return JSONResponse(
+            {"error": i18n.t("This chart's query failed."), "detail": _db_error_detail(exc)},
+            status_code=400,
+        )
     if not result.returns_rows:
-        context["error"] = "That statement returned no rows to chart."
-        return templates.TemplateResponse(request, "chart_builder.html", context, status_code=400)
-
-    context["columns"] = result.columns
-    context["rows"] = result.rows[: charts.MAX_POINTS]
-    context["numeric_columns"] = charts.numeric_columns(result.columns, result.rows)
-
-    # Sensible first guess: first column on x, first numeric column as the measure.
-    if not x_column and result.columns:
-        context["x_column"] = result.columns[0]
-    if not y_columns and context["numeric_columns"]:
-        first = context["numeric_columns"][0]
-        # Don't measure the same column we're labelling by.
-        if first == context["x_column"] and len(context["numeric_columns"]) > 1:
-            first = context["numeric_columns"][1]
-        context["y_columns"] = [first]
-
-    context["spec"] = charts.build_spec(
-        result.columns,
-        result.rows,
-        context["chart_type"],
-        context["x_column"],
-        context["y_columns"],
+        return JSONResponse(
+            {"error": i18n.t("That statement returned no rows to chart.")}, status_code=400
+        )
+    rows = [[_json_cell(v) for v in r] for r in result.rows[: charts.MAX_POINTS]]
+    return JSONResponse(
+        {
+            "ok": True,
+            "columns": list(result.columns),
+            "rows": rows,
+            "numeric_columns": charts.numeric_columns(result.columns, result.rows),
+            "truncated": len(result.rows) > charts.MAX_POINTS,
+        }
     )
-    return templates.TemplateResponse(request, "chart_builder.html", context)
 
 
 @app.post("/charts/save")
@@ -1222,10 +1223,16 @@ def chart_save(
     chart_type: str = Form(...),
     x_column: str = Form(...),
     y_columns: list[str] = Form(default=[]),
+    series_column: str = Form(""),
+    options: str = Form(""),
     slug: str = Form(""),
     user: str = Depends(signed_in_user),
     access: store.Access = Depends(access_for),
 ):
+    """Create a chart, or update the one named by `slug` in place. Saves the
+    query and the column mapping, plus the display options blob, in one go —
+    the studio posts everything it knows. Answers JSON to an AJAX save (the
+    studio) and a redirect to a plain form post."""
     if not store.available():
         return _charts_unavailable(request, user)
     if not access.allows(store.FEATURE, "chart_builder"):
@@ -1234,6 +1241,11 @@ def chart_save(
         )
     if not access.allows(store.DATABASE, source_db):
         return _forbidden(request, user, f"You don't have access to {source_db!r}.", access=access)
+    # Editing keeps its slug; you can only overwrite a chart you can already see.
+    if slug and not access.allows(store.CHART, slug):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to that chart."), access=access
+        )
 
     title = title.strip() or "Untitled chart"
     chart = store.Chart(
@@ -1244,17 +1256,29 @@ def chart_save(
         chart_type=chart_type if chart_type in charts.CHART_TYPE_KEYS else "bar",
         x_column=x_column,
         y_columns=list(y_columns),
+        series_column=series_column,
         created_by=user,
     )
     saved = store.save_chart(chart)
-    # The query changed, so the cached preview is of the old one.
+    # The display options ride separately (save_chart never writes them, so
+    # editing the query can't wipe them). Whitelist what the browser sent.
+    try:
+        raw = json.loads(options) if options else {}
+    except Exception:
+        raw = {}
+    store.save_chart_options(saved.slug, _clean_options(raw if isinstance(raw, dict) else {}))
+    # The query or the look changed, so the cached preview is of the old one.
     try:
         if saved.id:
             store.drop_chart_preview(saved.id)
     except Exception:
         logger.exception("Could not drop the cached preview for %r", saved.slug)
     logger.info("Chart %r saved by %s", saved.slug, user)
-    return RedirectResponse(request.url_for("chart_detail", slug=saved.id), status_code=303)
+
+    url = str(request.url_for("chart_detail", slug=saved.id))
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "url": url})
+    return RedirectResponse(url, status_code=303)
 
 
 def _db_error_detail(exc) -> str:

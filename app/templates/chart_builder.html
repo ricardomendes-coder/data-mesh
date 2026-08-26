@@ -1,122 +1,236 @@
 {% extends "_shell.html" %}
-{% block page_title %}New chart{% endblock %}
-{% block page_sub %}Write the SQL, run it, then map the columns{% endblock %}
+{% block page_title %}{% if editing %}{{ _('Editar gráfico') }}{% else %}{{ _('Novo gráfico') }}{% endif %}{% endblock %}
+{% block page_sub %}
+  <a href="{{ url_for('charts_index') }}">{{ _('Gráficos') }}</a> / {{ _('estúdio') }}
+{% endblock %}
 
 {% block content %}
-<form method="post" action="{{ url_for('chart_run') }}" id="builder">
-  <div class="bi-fld">
-    <label for="source_db">Database</label>
-    <select id="source_db" name="source_db" required>
-      {% for name in databases %}
-      <option value="{{ name }}" {% if name == source_db %}selected{% endif %}>{{ name }}</option>
-      {% endfor %}
-      {% if not databases %}<option value="{{ source_db }}">{{ source_db }}</option>{% endif %}
-    </select>
-  </div>
+<style>
+  .st{--k-date:#3B82F6;--k-num:#2F9E44;--k-text:#8B5CF6;
+    display:flex;height:calc(100dvh - 140px);min-height:540px;
+    border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);box-shadow:var(--sh-1);}
+  .st-col{display:flex;flex-direction:column;min-height:0}
+  .st-data{width:288px;border-right:1px solid var(--border)}
+  .st-canvas{flex:1;min-width:0;background:var(--page);display:flex;flex-direction:column}
+  .st-insp{width:308px;border-left:1px solid var(--border);display:flex;flex-direction:column}
+  .st-hd{font-size:.68rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);padding:.85rem 1rem .5rem}
 
-  <div class="bi-editor">
-    <div class="bi-editor-bar">
-      <span class="bi-editor-dot"></span>
-      <span class="bi-editor-tag">chart.sql</span>
-      <span class="bi-editor-hint">one row per point — aggregate here, not in the chart</span>
-      <button class="bi-btn sm" type="submit">
-        <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor"><path d="M4 3l7 4-7 4z"/></svg>
-        Run
-      </button>
-    </div>
-    <textarea class="bi-ta" id="sql" name="sql" spellcheck="false" required
-      placeholder="SELECT date_trunc('day', created_at) AS dia, count(*) AS total&#10;FROM companies&#10;GROUP BY 1 ORDER BY 1">{{ sql }}</textarea>
-  </div>
-</form>
+  /* data column */
+  .st-dbrow{padding:0 .85rem .6rem}
+  .st-dbrow label{display:block;font-size:.7rem;font-weight:600;color:var(--muted);margin-bottom:.28rem}
+  .st-dbrow select{width:100%;height:34px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font:inherit;font-size:.82rem;background:var(--surface);color:var(--title);outline:none}
+  .st-dbrow select:focus{border-color:var(--orange);box-shadow:var(--ring)}
+  .st-sql{margin:0 .85rem .5rem;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;background:#FBFBFD}
+  .st-sql-bar{display:flex;align-items:center;gap:.45rem;padding:.4rem .55rem;font-size:.72rem;font-weight:600;color:var(--muted)}
+  .st-sql-bar .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .st-run{margin-left:auto}
+  .st-ta{width:100%;min-height:150px;resize:vertical;border:none;border-top:1px solid var(--border);background:transparent;
+    padding:.55rem .65rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;line-height:1.6;color:var(--title);outline:none}
+  .st-ta::placeholder{color:var(--g-300)}
+  .st-fields{flex:1;min-height:0;overflow-y:auto;padding:.2rem .85rem 1rem}
+  .st-fields-hd{display:flex;align-items:baseline;gap:.4rem;padding:.5rem .1rem .55rem}
+  .st-fields-hd b{font-size:.74rem;color:var(--title)}
+  .st-fields-hd .hint{font-size:.68rem;color:var(--g-300)}
+  .st-chip{display:flex;align-items:center;gap:.5rem;padding:.44rem .6rem;margin-bottom:.4rem;border:1px solid var(--border);
+    border-radius:var(--r-sm);background:var(--surface);font-size:.8rem;cursor:grab;user-select:none;transition:border-color .12s,box-shadow .12s}
+  .st-chip:hover{border-color:var(--border-strong);box-shadow:var(--sh-1)}
+  .st-chip.dragging{opacity:.45;border-style:dashed}
+  .st-chip .dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+  .st-chip .nm{font-weight:600;color:var(--title)}
+  .st-chip .kd{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:.63rem;color:var(--g-300)}
+  .dot.date{background:var(--k-date)} .dot.num{background:var(--k-num)} .dot.text{background:var(--k-text)}
 
-{% if ran and columns %}
-<div class="bi-chart-grid">
-  <div class="bi-chart-cfg">
-    <h2 class="bi-group-tt">{{ _('Configure') }}</h2>
+  /* canvas */
+  .st-title{margin:.9rem 1.1rem .3rem;border:1px solid transparent;background:transparent;font:inherit;font-size:1.28rem;
+    font-weight:700;color:var(--title);letter-spacing:-.02em;padding:.28rem .45rem;border-radius:var(--r-sm);outline:none}
+  .st-title:hover{background:#EEF0F2}
+  .st-title:focus{background:var(--surface);border-color:var(--orange);box-shadow:var(--ring)}
+  .st-cwrap{flex:1;min-height:0;display:flex;flex-direction:column;padding:.2rem 1.1rem 1.1rem}
+  .st-card{flex:1;min-height:280px;position:relative;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-lg);box-shadow:var(--sh-1);padding:1rem 1.1rem;display:flex;flex-direction:column;overflow:hidden}
+  .st-card canvas{flex:1;min-height:0}
+  .st-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+    color:var(--g-300);font-size:.9rem;padding:2rem}
+  .st-drop{position:absolute;inset:0;border:2px dashed var(--orange);border-radius:var(--r-lg);background:rgba(255,90,0,.06);
+    opacity:0;pointer-events:none;transition:opacity .12s;display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--orange)}
+  .st-card.over .st-drop{opacity:1}
+  .st-kpi{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:.3rem}
+  .st-kpi .big{font-size:3.6rem;font-weight:700;letter-spacing:-.03em;color:var(--title);font-variant-numeric:tabular-nums}
+  .st-kpi .cap{font-size:.9rem;color:var(--muted)}
+  .st-mtable{width:100%;border-collapse:collapse;font-size:.82rem}
+  .st-mtable th{text-align:left;font-weight:600;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:.45rem .6rem;border-bottom:1px solid var(--border)}
+  .st-mtable td{padding:.45rem .6rem;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;color:var(--title)}
+  .st-tablewrap{flex:1;overflow:auto}
+  .st-warnings{padding:.55rem .2rem 0;display:flex;flex-direction:column;gap:.35rem}
+  .st-warn{display:inline-flex;align-items:center;gap:.4rem;font-size:.76rem;color:#8a6d00;background:rgba(255,193,7,.14);padding:.3rem .6rem;border-radius:var(--r-sm)}
+  .st-err{display:inline-flex;align-items:flex-start;gap:.4rem;font-size:.78rem;color:var(--danger);background:rgba(220,53,69,.09);padding:.35rem .6rem;border-radius:var(--r-sm)}
+  .st-err code{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;opacity:.85}
 
-    <div class="bi-fld">
-      <label for="chart_type">{{ _('Chart type') }}</label>
-      {# Name only in the option: the hint doesn't fit the sidebar width and
-         gets clipped mid-word. It renders below the select instead. #}
-      <select id="chart_type" name="chart_type" form="builder">
-        {% for key, label, hint in chart_types %}
-        <option value="{{ key }}" data-hint="{{ _(hint) }}" {% if key == chart_type %}selected{% endif %}>{{ _(label) }}</option>
-        {% endfor %}
+  /* inspector */
+  .st-iscroll{flex:1;overflow-y:auto}
+  .st-sec{border-bottom:1px solid var(--border);padding:.35rem 1rem 1.05rem}
+  .st-viz{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+  .st-vbtn{aspect-ratio:1;border:1px solid var(--border);border-radius:var(--r-sm);background:#FBFBFD;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:.3rem;cursor:pointer;color:var(--muted);transition:all .12s}
+  .st-vbtn svg{width:24px;height:24px}
+  .st-vbtn span{font-size:.64rem;font-weight:600}
+  .st-vbtn:hover{border-color:var(--border-strong);color:var(--title)}
+  .st-vbtn.on{border-color:var(--orange);background:rgba(255,90,0,.08);color:var(--orange)}
+  .st-well{margin-bottom:.7rem}
+  .st-well-lbl{display:flex;align-items:center;gap:.35rem;font-size:.72rem;font-weight:600;color:var(--muted);margin-bottom:.32rem}
+  .st-well-lbl .req{color:var(--orange)}.st-well-lbl .opt{color:var(--g-300);font-weight:400}
+  .st-drop-well{min-height:42px;border:1.5px dashed var(--border-strong);border-radius:var(--r-sm);padding:.32rem;display:flex;flex-wrap:wrap;
+    gap:.32rem;align-items:center;background:#FBFBFD;transition:border-color .12s,background .12s}
+  .st-drop-well.over{border-color:var(--orange);background:rgba(255,90,0,.07)}
+  .st-drop-well .ph{font-size:.73rem;color:var(--g-300);padding:.1rem .4rem}
+  .st-pill{display:inline-flex;align-items:center;gap:.4rem;font-size:.76rem;font-weight:600;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--r-sm);padding:.26rem .3rem .26rem .5rem;color:var(--title)}
+  .st-pill .dot{width:8px;height:8px;border-radius:2px}
+  .st-pill .x{border:none;background:transparent;color:var(--g-300);cursor:pointer;font-size:.9rem;line-height:1;padding:0 .15rem;border-radius:3px}
+  .st-pill .x:hover{color:var(--orange);background:#F1F2F4}
+  .st-fld{margin-bottom:.7rem}
+  .st-fld>span{display:block;font-size:.72rem;font-weight:600;color:var(--muted);margin-bottom:.3rem}
+  .st-fld select,.st-fld input[type=text]{width:100%;height:33px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+    padding:0 .5rem;font:inherit;font-size:.8rem;color:var(--title);background:var(--surface);outline:none}
+  .st-fld select:focus,.st-fld input:focus{border-color:var(--orange);box-shadow:var(--ring)}
+  .st-checks{display:flex;gap:1.1rem}
+  .st-chk{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:var(--title);cursor:pointer}
+  .st-chk input{width:15px;height:15px;accent-color:var(--orange);cursor:pointer}
+  .st-actions{border-top:1px solid var(--border);padding:.8rem 1rem;display:flex;align-items:center;gap:.75rem;background:var(--surface)}
+  .st-actions .bi-btn{flex-shrink:0}
+  .st-status{font-size:.79rem;color:var(--muted)}
+  .st-status.ok{color:var(--ok);font-weight:600}
+  .st-status.err{color:var(--danger);font-weight:600}
+
+  @media(max-width:980px){
+    .st{flex-direction:column;height:auto}
+    .st-data,.st-insp{width:100%;border:none;border-bottom:1px solid var(--border)}
+    .st-canvas{min-height:360px}
+  }
+</style>
+
+<script id="studio-init" type="application/json">{{ init|tojson }}</script>
+
+<div class="st" data-run="{{ url_for('chart_run') }}" data-save="{{ url_for('chart_save') }}">
+  <!-- DADOS -->
+  <aside class="st-col st-data">
+    <div class="st-hd">Dados</div>
+    <div class="st-dbrow">
+      <label for="st-db">{{ _('Base de dados') }}</label>
+      <select id="st-db">
+        {% for d in init.databases %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
       </select>
-      <p class="bi-hint" id="type-hint"></p>
     </div>
-
-    {# Hidden for a table, which shows the result as it comes back. The JS
-       toggles these, keyed off the selected type. #}
-    <div class="bi-fld" data-cfg="x">
-      <label for="x_column">{{ _('X axis (labels)') }}</label>
-      <select id="x_column" name="x_column" form="builder">
-        {% for c in columns %}
-        <option value="{{ c }}" {% if c == x_column %}selected{% endif %}>{{ c }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="bi-fld" data-cfg="y">
-      <label id="measure-label">{{ _('Measures (numeric columns)') }}</label>
-      {% if numeric_columns %}
-      <div class="bi-checks">
-        {% for c in numeric_columns %}
-        <label class="bi-check">
-          <input type="checkbox" name="y_columns" value="{{ c }}" form="builder"
-                 {% if c in y_columns %}checked{% endif %}>
-          <span>{{ c }}</span>
-        </label>
-        {% endfor %}
+    <div class="st-sql">
+      <div class="st-sql-bar"><span class="dot"></span> {{ _('consulta SQL') }}
+        <button class="bi-btn sm st-run" id="st-run" type="button">▶ {{ _('Rodar') }}</button>
       </div>
-      {% else %}
-      <p class="bi-hint">{{ _('No numeric columns in this result — a chart needs at least one.') }}</p>
-      {% endif %}
+      <textarea class="st-ta" id="st-sql" spellcheck="false"
+        placeholder="SELECT date_trunc('day', criado_em) AS dia, count(*) AS total&#10;FROM ... GROUP BY 1 ORDER BY 1"></textarea>
     </div>
-
-    <p class="bi-hint">{{ _('Changes preview instantly. Run again after editing the SQL.') }}</p>
-  </div>
-
-  <div class="bi-chart-main">
-    <div class="bi-fld">
-      <label for="title">{{ _('Title') }}</label>
-      <input id="title" name="title" form="builder" value="{{ title }}"
-             placeholder="e.g. Capturas por dia" required>
+    <div class="st-fields">
+      <div class="st-fields-hd"><b>{{ _('Campos') }}</b><span class="hint" id="st-fields-hint">{{ _('rode a consulta →') }}</span></div>
+      <div id="st-chips"></div>
     </div>
+  </aside>
 
-    <div class="bi-chartbox">
-      <canvas id="preview" height="300"></canvas>
-      {# A table or a KPI isn't drawn on the canvas; the JS shows one or the
-         other, never both. #}
-      <div id="preview-html" hidden></div>
+  <!-- CANVAS -->
+  <main class="st-col st-canvas">
+    <input class="st-title" id="st-title" placeholder="{{ _('Título do gráfico') }}" aria-label="{{ _('Título do gráfico') }}">
+    <div class="st-cwrap">
+      <div class="st-card" id="st-card">
+        <div class="st-empty" id="st-empty">{{ _('Rode uma consulta e arraste os campos para os poços.') }}</div>
+        <canvas id="st-preview" hidden></canvas>
+        <div id="st-preview-html" hidden></div>
+        <div class="st-drop" id="st-drop">{{ _('solte para plotar') }}</div>
+      </div>
+      <div class="st-warnings" id="st-warnings"></div>
     </div>
+  </main>
 
-    <div id="chart-warnings"></div>
+  <!-- INSPETOR -->
+  <aside class="st-col st-insp">
+    <div class="st-iscroll">
+      <div class="st-sec">
+        <div class="st-hd">{{ _('Visualização') }}</div>
+        <div class="st-viz" id="st-viz">
+          <button class="st-vbtn" data-type="bar" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20V13M22 20V8"/></svg><span>{{ _('Barras') }}</span></button>
+          <button class="st-vbtn" data-type="line" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 8-9"/></svg><span>{{ _('Linhas') }}</span></button>
+          <button class="st-vbtn" data-type="area" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 8-9V20H3z" fill="currentColor" fill-opacity=".18"/></svg><span>{{ _('Área') }}</span></button>
+          <button class="st-vbtn" data-type="pie" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v9l7 5A9 9 0 1012 3z"/></svg><span>{{ _('Pizza') }}</span></button>
+          <button class="st-vbtn" data-type="table" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18M9 4v16"/></svg><span>{{ _('Tabela') }}</span></button>
+          <button class="st-vbtn" data-type="number" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8h4v10M6 18h8M14 6l5 12"/></svg><span>{{ _('Número') }}</span></button>
+        </div>
+      </div>
 
-    <form method="post" action="{{ url_for('chart_save') }}" id="saveform">
-      <input type="hidden" name="sql" value="{{ sql }}">
-      <input type="hidden" name="source_db" value="{{ source_db }}">
-      <input type="hidden" name="title" id="save-title">
-      <input type="hidden" name="chart_type" id="save-type">
-      <input type="hidden" name="x_column" id="save-x">
-      <div id="save-y"></div>
-      <button class="bi-btn" type="submit">{{ _('Save chart') }}</button>
-    </form>
-  </div>
+      <div class="st-sec" id="st-wells">
+        <div class="st-hd">{{ _('Campos') }}</div>
+        <div class="st-well" data-well="x" data-accept="any">
+          <div class="st-well-lbl" id="lbl-x">{{ _('Eixo X') }} <span class="req">•</span></div>
+          <div class="st-drop-well"><span class="ph">{{ _('arraste um campo') }}</span></div>
+        </div>
+        <div class="st-well" data-well="series" data-accept="cat">
+          <div class="st-well-lbl">{{ _('Séries') }} <span class="opt">({{ _('opcional') }})</span></div>
+          <div class="st-drop-well"><span class="ph">{{ _('um campo de texto') }}</span></div>
+        </div>
+        <div class="st-well" data-well="values" data-accept="num" data-multi="1">
+          <div class="st-well-lbl" id="lbl-values">{{ _('Valores') }} <span class="req">•</span></div>
+          <div class="st-drop-well"><span class="ph">{{ _('arraste um número') }}</span></div>
+        </div>
+      </div>
+
+      <div class="st-sec">
+        <div class="st-hd">{{ _('Formato') }}</div>
+        <div class="st-fld"><span>{{ _('Legenda') }}</span>
+          <select id="f-legend">
+            <option value="">{{ _('Automática') }}</option>
+            <option value="bottom">{{ _('Abaixo') }}</option>
+            <option value="top">{{ _('Acima') }}</option>
+            <option value="right">{{ _('Direita') }}</option>
+            <option value="left">{{ _('Esquerda') }}</option>
+            <option value="hidden">{{ _('Oculta') }}</option>
+          </select>
+        </div>
+        <div class="st-fld"><span>{{ _('Subtítulo') }}</span>
+          <input type="text" id="f-subtitle" maxlength="200" placeholder="{{ _('opcional') }}">
+        </div>
+        <div class="st-fld"><span>{{ _('Formato do eixo X') }}</span>
+          <select id="f-xfmt">
+            <option value="">{{ _('Automático') }}</option>
+            <option value="date-iso">2026-05-01</option>
+            <option value="date-br">01/05/2026</option>
+            <option value="date-slash">2026/05/01</option>
+            <option value="month-year">05/2026</option>
+            <option value="month-name-br">mai/2026</option>
+          </select>
+        </div>
+        <div class="st-fld"><span>{{ _('Formato do eixo Y') }}</span>
+          <select id="f-yfmt">
+            <option value="">{{ _('Automático') }}</option>
+            <option value="integer">1.234</option>
+            <option value="compact">1,2 mi</option>
+            <option value="percent">10%</option>
+            <option value="percent1">10,0%</option>
+            <option value="currency-brl">R$ 1.234,56</option>
+          </select>
+        </div>
+        <div class="st-fld"><span>{{ _('Grade') }}</span>
+          <div class="st-checks">
+            <label class="st-chk"><input type="checkbox" id="f-gridx"> {{ _('Vertical') }}</label>
+            <label class="st-chk"><input type="checkbox" id="f-gridy" checked> {{ _('Horizontal') }}</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="st-actions">
+      <button class="bi-btn" id="st-save" type="button">{{ _('Salvar') }}</button>
+      <a class="bi-btn ghost sm" href="{{ url_for('charts_index') }}">{{ _('Cancelar') }}</a>
+      <span class="st-status" id="st-status"></span>
+    </div>
+  </aside>
 </div>
 
-{# The result travels to the browser once; re-mapping columns is instant and
-   never re-runs the query. #}
-<script id="chart-data" type="application/json">
-  {{ {"columns": columns, "rows": rows|map('list')|list,
-      "spec": spec.to_dict() if spec else None,
-      "warnings": spec.warnings if spec else [],
-      "colors": series_colors, "maxSeries": max_series, "maxPoints": max_points}|tojson }}
-</script>
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='chart-builder.js') }}"></script>
-{% elif ran %}
-<div class="bi-empty-lg">That query returned no columns to chart.</div>
-{% endif %}
 {% endblock %}

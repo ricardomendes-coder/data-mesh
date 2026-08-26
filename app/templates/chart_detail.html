@@ -5,6 +5,14 @@
   <span class="bi-kind bi-kind-view">{{ chart.chart_type }}</span>
   <code>{{ chart.source_db }}</code>
 {% endblock %}
+{% block topbar_extra %}
+  {% if can_customize %}
+  <a class="bi-btn" href="{{ url_for('chart_new') }}?from={{ chart.slug }}">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L5 13l-2.5.5.5-2.5z"/></svg>
+    {{ _('Editar no estúdio') }}
+  </a>
+  {% endif %}
+{% endblock %}
 
 {% block content %}
 {# Nothing on this page waits on the warehouse. The SQL is already here, so it
