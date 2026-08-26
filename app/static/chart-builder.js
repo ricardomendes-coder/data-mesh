@@ -46,16 +46,34 @@
     }
     return v === Math.round(v) ? grp(v) : v.toFixed(2).replace(".", ",");
   }
-  function fmtY(v, p) {
-    var n = Number(v); if (!isFinite(n)) return v;
-    switch (p) {
-      case "integer": return (n < 0 ? "-" : "") + grp(Math.abs(Math.round(n)));
-      case "compact": return compactNum(n);
-      case "percent": return Math.round(n * 100) + "%";
-      case "percent1": return (n * 100).toFixed(1).replace(".", ",") + "%";
-      case "currency-brl": return "R$ " + Math.abs(n).toFixed(2).split(".").map(function (x, i) { return i ? x : grp(x); }).join(",");
-      default: return compactNum(n);
+  // Generic number pattern — mirrors fmtNumber() in chart-render.js so the
+  // studio's big number reads exactly like the saved one.
+  function compactUnit(val, decimals) {
+    var u = [[1e12, "tri"], [1e9, "bi"], [1e6, "mi"], [1e3, "mil"]], a = Math.abs(val);
+    for (var i = 0; i < u.length; i++) {
+      if (a >= u[i][0]) return (val / u[i][0]).toFixed(decimals).replace(".", ",") + " " + u[i][1];
     }
+    return null;
+  }
+  function fmtNumberPattern(v, pattern) {
+    var n = Number(v); if (!isFinite(n) || !pattern) return v;
+    var m = /[#0][#0.,]*/.exec(pattern);
+    var prefix = m ? pattern.slice(0, m.index) : "";
+    var numTok = m ? m[0] : "0";
+    var rest = m ? pattern.slice(m.index + numTok.length) : pattern;
+    var percent = /%/.test(pattern);
+    var compact = /a/i.test(rest);
+    var suffix = rest.replace(/[%a]/gi, "");
+    var dot = numTok.indexOf("."); var decimals = dot >= 0 ? numTok.length - dot - 1 : 0;
+    var grouping = numTok.indexOf(",") >= 0;
+    var val = percent ? n * 100 : n; var neg = val < 0 ? "-" : ""; val = Math.abs(val);
+    var body = compact ? compactUnit(val, decimals) : null;
+    if (body === null) {
+      var parts = val.toFixed(decimals).split(".");
+      if (grouping) parts[0] = grp(parts[0]);
+      body = parts.length > 1 ? parts[0] + "," + parts[1] : parts[0];
+    }
+    return neg + prefix + body + (percent ? "%" : "") + suffix;
   }
   function toNumber(v) {
     if (v === null || v === undefined || v === "") return null;
@@ -83,10 +101,12 @@
   function setStatus(msg, cls) {
     var s = el("st-status"); s.textContent = msg || ""; s.className = "st-status" + (cls ? " " + cls : "");
   }
+  var lastRunSql = null;
   function run() {
     var sql = el("st-sql").value.trim();
     var dbv = el("st-db").value;
     if (!sql) { setStatus("Escreva uma consulta SQL.", "err"); return; }
+    lastRunSql = sql;
     runBtn.disabled = true; runBtn.textContent = "…";
     var body = new URLSearchParams(); body.set("sql", sql); body.set("source_db", dbv);
     fetch(RUN_URL, { method: "POST", headers: { Accept: "application/json" }, body: body })
@@ -232,11 +252,11 @@
     var b = e.target.closest(".st-vbtn"); if (!b) return;
     document.querySelectorAll(".st-vbtn").forEach(function (v) { v.classList.toggle("on", v === b); });
     state.type = b.getAttribute("data-type");
-    syncWellLabels(); draw();
+    syncWellLabels(); applyFormatVisibility(); draw();
   });
   function setViz(type) {
     document.querySelectorAll(".st-vbtn").forEach(function (v) { v.classList.toggle("on", v.getAttribute("data-type") === type); });
-    syncWellLabels();
+    syncWellLabels(); applyFormatVisibility();
   }
   function syncWellLabels() {
     // For a number/table the X well means something softer; keep it simple and
@@ -254,12 +274,28 @@
     var lg = el("f-legend").value; if (lg) o.legend = { position: lg };
     var sub = el("f-subtitle").value.trim(); if (sub) o.subtitle = sub;
     o.grid = { x: el("f-gridx").checked, y: el("f-gridy").checked };
-    var xf = el("f-xfmt").value; if (xf) o.xAxis = { format: xf };
-    var yf = el("f-yfmt").value; if (yf) o.yAxis = { format: yf };
+    var xf = el("f-xfmt").value.trim(); if (xf) o.xFormat = xf;
+    var vf = el("f-vfmt").value.trim(); if (vf) o.valueFormat = vf;
     return o;
   }
-  ["f-legend", "f-subtitle", "f-xfmt", "f-yfmt", "f-gridx", "f-gridy"].forEach(function (id) {
-    var node = el(id); node.addEventListener(id === "f-subtitle" ? "input" : "change", draw);
+  // Only the controls that make sense for the chosen visualization are shown —
+  // a big number has no axis, a table has no legend or grid.
+  function applyFormatVisibility() {
+    var t = state.type, cartesian = t === "bar" || t === "line" || t === "area";
+    var show = {
+      legend: cartesian || t === "pie", subtitle: cartesian || t === "pie",
+      xformat: cartesian, valueformat: cartesian || t === "pie" || t === "number", grid: cartesian,
+    };
+    document.querySelectorAll("#st-format .st-fld[data-fmt]").forEach(function (f) {
+      f.hidden = !show[f.getAttribute("data-fmt")];
+    });
+    var lbl = el("lbl-valuefmt");
+    if (lbl) lbl.textContent = t === "number" ? "Formato do número" : cartesian ? "Formato do eixo Y" : "Formato dos valores";
+    el("st-fmt-note").hidden = t !== "table";
+  }
+  var TEXT_FMT = { "f-subtitle": 1, "f-xfmt": 1, "f-vfmt": 1 };
+  ["f-legend", "f-subtitle", "f-xfmt", "f-vfmt", "f-gridx", "f-gridy"].forEach(function (id) {
+    el(id).addEventListener(TEXT_FMT[id] ? "input" : "change", draw);
   });
 
   /* ---------- spec building (mirrors app/charts.py build_spec) ---------- */
@@ -352,8 +388,9 @@
     var n = first ? toNumber(first[ci]) : null;
     var xi = state.x ? state.data.columns.indexOf(state.x) : -1;
     var cap = first && xi >= 0 && first[xi] != null ? String(first[xi]) : "";
-    var yf = opts.yAxis && opts.yAxis.format;
-    host.innerHTML = '<div class="big">' + (n === null ? "—" : esc(fmtY(n, yf))) + "</div>" +
+    var vf = opts.valueFormat;
+    var text = n === null ? "—" : (vf ? fmtNumberPattern(n, vf) : compactNum(n));
+    host.innerHTML = '<div class="big">' + esc(text) + "</div>" +
       (cap ? '<div class="cap">' + esc(cap) + "</div>" : "");
   }
 
@@ -392,6 +429,12 @@
   el("st-sql").addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); }
   });
+  // Fields shouldn't need a deliberate Run: leaving the editor with new SQL
+  // fetches them for you. The Run button (and Ctrl+Enter) stay as a manual redo.
+  el("st-sql").addEventListener("blur", function () {
+    var sql = el("st-sql").value.trim();
+    if (sql && sql !== lastRunSql) run();
+  });
 
   // prefill from init
   var dbSel = el("st-db");
@@ -402,8 +445,8 @@
   var o = init.options || {};
   el("f-legend").value = (o.legend && o.legend.position) || "";
   el("f-subtitle").value = o.subtitle || "";
-  el("f-xfmt").value = (o.xAxis && o.xAxis.format) || "";
-  el("f-yfmt").value = (o.yAxis && o.yAxis.format) || "";
+  el("f-xfmt").value = o.xFormat || "";
+  el("f-vfmt").value = o.valueFormat || "";
   el("f-gridx").checked = !!(o.grid && o.grid.x === true);
   el("f-gridy").checked = !(o.grid && o.grid.y === false);
   paintWells();

@@ -3592,31 +3592,42 @@ def test_chart_display_options():
     from app import charts
     from types import SimpleNamespace
 
-    # Whitelist: valid values survive (and the subtitle is trimmed), unknown
-    # ones are dropped rather than trusted, grid always resolves to booleans.
+    # Sanitise: valid values survive (subtitle and formats trimmed), the legend
+    # is a fixed set, the formats are free patterns, grid resolves to booleans.
     clean = _clean_options({
         "legend": {"position": "right"},
         "subtitle": "  processos  ",
         "grid": {"x": True, "y": False},
-        "xAxis": {"format": "date-br"},
-        "yAxis": {"format": "percent"},
+        "xFormat": "DD/MM/YYYY",
+        "valueFormat": "0.0%",
     })
     assert clean == {
         "legend": {"position": "right"},
         "subtitle": "processos",
         "grid": {"x": True, "y": False},
-        "xAxis": {"format": "date-br"},
-        "yAxis": {"format": "percent"},
+        "xFormat": "DD/MM/YYYY",
+        "valueFormat": "0.0%",
     }, clean
 
+    # An unlisted legend is dropped; a non-string format is dropped; a free-text
+    # format is kept but trimmed; grid falls back to its defaults.
     junk = _clean_options({
         "legend": {"position": "diagonal"},
-        "xAxis": {"format": "zzz"},
+        "xFormat": 123,
         "subtitle": 123,
         "grid": "nope",
+        "valueFormat": "  R$ #,##0.00  ",
     })
-    assert junk == {"grid": {"x": False, "y": True}}, junk
+    assert junk == {"grid": {"x": False, "y": True}, "valueFormat": "R$ #,##0.00"}, junk
     assert _clean_options({}) == {"grid": {"x": False, "y": True}}
+
+    # Generic number formatting (server side of the big number).
+    assert charts.format_number(0.1, "0.0%") == "10,0%", charts.format_number(0.1, "0.0%")
+    assert charts.format_number(1234.5, "R$ #,##0.00") == "R$ 1.234,50"
+    assert charts.format_number(1720, "0.0a") == "1,7 mil"
+    assert charts.format_number(42, "#,##0") == "42"
+    assert charts.format_number(-5, "0.00") == "-5,00"
+    assert charts.format_number(None, "0.0%") == "—"
 
     # Options travel with the spec so the renderer can apply them.
     spec = charts.build_spec(

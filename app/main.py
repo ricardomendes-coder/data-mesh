@@ -1327,6 +1327,16 @@ def _spec_with_options(spec, chart) -> dict:
     return d
 
 
+def _number_value(spec, chart) -> str:
+    """The big number as text, honouring a custom value format when the chart
+    has one (options.valueFormat) — a number has no axis, so this is where its
+    format is applied. Falls back to the default KPI abbreviation."""
+    fmt = (chart.options or {}).get("valueFormat") if chart else None
+    if fmt and spec.value_raw is not None:
+        return charts.format_number(spec.value_raw, fmt)
+    return spec.value
+
+
 def _chart_preview(chart, full=False, force=False, cache_only=False):
     """Build, or fetch from cache, one chart's preview payload.
 
@@ -1382,7 +1392,7 @@ def _chart_preview(chart, full=False, force=False, cache_only=False):
         rows = spec.rows if full else spec.rows[:12]
         payload["rows"] = [["" if v is None else str(v) for v in r] for r in rows]
     else:
-        payload["value"] = spec.value
+        payload["value"] = _number_value(spec, chart)
         payload["caption"] = spec.caption
 
     # An empty result is far more often a moment than a fact — an ETL that
@@ -1559,14 +1569,20 @@ def chart_detail(
 
 
 _LEGEND_POS = {"top", "bottom", "left", "right", "hidden"}
-_X_FORMATS = {"date-iso", "date-br", "date-slash", "month-year", "month-name-br"}
-_Y_FORMATS = {"integer", "compact", "percent", "percent1", "currency-brl"}
+
+
+def _clean_fmt(v) -> str:
+    """A format is a free pattern now, not a fixed choice, so this only sanitises
+    it — strips control characters and caps the length. Empty means 'no format'."""
+    if not isinstance(v, str):
+        return ""
+    return "".join(ch for ch in v if ch >= " ").strip()[:40]
 
 
 def _clean_options(raw: dict) -> dict:
-    """Whitelist the display options coming from the browser. Anything unknown is
-    dropped rather than trusted — the blob is read straight back into the render.
-    """
+    """Sanitise the display options coming from the browser before they are
+    stored and read straight back into the render: the legend position is a
+    fixed set, the grid is booleans, the formats are free text (capped)."""
     o: dict = {}
     legend = (raw.get("legend") or {}).get("position") if isinstance(raw.get("legend"), dict) else None
     if legend in _LEGEND_POS:
@@ -1576,12 +1592,12 @@ def _clean_options(raw: dict) -> dict:
         o["subtitle"] = subtitle.strip()[:200]
     grid = raw.get("grid") if isinstance(raw.get("grid"), dict) else {}
     o["grid"] = {"x": bool(grid.get("x")), "y": bool(grid.get("y", True))}
-    xf = (raw.get("xAxis") or {}).get("format") if isinstance(raw.get("xAxis"), dict) else None
-    if xf in _X_FORMATS:
-        o["xAxis"] = {"format": xf}
-    yf = (raw.get("yAxis") or {}).get("format") if isinstance(raw.get("yAxis"), dict) else None
-    if yf in _Y_FORMATS:
-        o["yAxis"] = {"format": yf}
+    xf = _clean_fmt(raw.get("xFormat"))
+    if xf:
+        o["xFormat"] = xf
+    vf = _clean_fmt(raw.get("valueFormat"))
+    if vf:
+        o["valueFormat"] = vf
     return o
 
 
@@ -2347,7 +2363,7 @@ def dashboard_tile_data(
         payload["columns"] = spec.columns
         payload["rows"] = [["" if v is None else str(v) for v in r] for r in spec.rows]
     else:
-        payload["value"] = spec.value
+        payload["value"] = _number_value(spec, item.chart)
         payload["caption"] = spec.caption
 
     # An empty result is far more often a moment than a fact — an ETL that

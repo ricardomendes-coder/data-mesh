@@ -101,6 +101,8 @@
   .st-status{font-size:.79rem;color:var(--muted)}
   .st-status.ok{color:var(--ok);font-weight:600}
   .st-status.err{color:var(--danger);font-weight:600}
+  .st-fmt-note{font-size:.74rem;color:var(--g-300);margin:.2rem 0 0;line-height:1.4}
+  .st-fld[hidden]{display:none}
 
   @media(max-width:980px){
     .st{flex-direction:column;height:auto}
@@ -179,9 +181,9 @@
         </div>
       </div>
 
-      <div class="st-sec">
+      <div class="st-sec" id="st-format">
         <div class="st-hd">{{ _('Formato') }}</div>
-        <div class="st-fld"><span>{{ _('Legenda') }}</span>
+        <div class="st-fld" data-fmt="legend"><span>{{ _('Legenda') }}</span>
           <select id="f-legend">
             <option value="">{{ _('Automática') }}</option>
             <option value="bottom">{{ _('Abaixo') }}</option>
@@ -191,35 +193,34 @@
             <option value="hidden">{{ _('Oculta') }}</option>
           </select>
         </div>
-        <div class="st-fld"><span>{{ _('Subtítulo') }}</span>
+        <div class="st-fld" data-fmt="subtitle"><span>{{ _('Subtítulo') }}</span>
           <input type="text" id="f-subtitle" maxlength="200" placeholder="{{ _('opcional') }}">
         </div>
-        <div class="st-fld"><span>{{ _('Formato do eixo X') }}</span>
-          <select id="f-xfmt">
-            <option value="">{{ _('Automático') }}</option>
-            <option value="date-iso">2026-05-01</option>
-            <option value="date-br">01/05/2026</option>
-            <option value="date-slash">2026/05/01</option>
-            <option value="month-year">05/2026</option>
-            <option value="month-name-br">mai/2026</option>
-          </select>
+        <div class="st-fld" data-fmt="xformat"><span>{{ _('Formato do eixo X') }}</span>
+          <input type="text" id="f-xfmt" list="dl-datefmt" autocomplete="off" maxlength="40" placeholder="{{ _('ex. DD/MM/YYYY') }}">
         </div>
-        <div class="st-fld"><span>{{ _('Formato do eixo Y') }}</span>
-          <select id="f-yfmt">
-            <option value="">{{ _('Automático') }}</option>
-            <option value="integer">1.234</option>
-            <option value="compact">1,2 mi</option>
-            <option value="percent">10%</option>
-            <option value="percent1">10,0%</option>
-            <option value="currency-brl">R$ 1.234,56</option>
-          </select>
+        <div class="st-fld" data-fmt="valueformat"><span id="lbl-valuefmt">{{ _('Formato dos valores') }}</span>
+          <input type="text" id="f-vfmt" list="dl-numfmt" autocomplete="off" maxlength="40" placeholder="{{ _('ex. #,##0.00 · 0.0% · R$ #,##0.00') }}">
         </div>
-        <div class="st-fld"><span>{{ _('Grade') }}</span>
+        <div class="st-fld" data-fmt="grid"><span>{{ _('Grade') }}</span>
           <div class="st-checks">
             <label class="st-chk"><input type="checkbox" id="f-gridx"> {{ _('Vertical') }}</label>
             <label class="st-chk"><input type="checkbox" id="f-gridy" checked> {{ _('Horizontal') }}</label>
           </div>
         </div>
+        <p class="st-fmt-note" id="st-fmt-note" hidden>{{ _('A tabela mostra os dados como vieram da consulta.') }}</p>
+        <datalist id="dl-datefmt">
+          <option value="DD/MM/YYYY"></option><option value="YYYY-MM-DD"></option>
+          <option value="YYYY/MM/DD"></option><option value="MM/YYYY"></option>
+          <option value="MMM/YYYY"></option><option value="DD/MM"></option>
+          <option value="MMMM YYYY"></option>
+        </datalist>
+        <datalist id="dl-numfmt">
+          <option value="#,##0"></option><option value="#,##0.00"></option>
+          <option value="0.0%"></option><option value="0%"></option>
+          <option value="R$ #,##0.00"></option><option value="0.0a"></option>
+          <option value="0.00"></option>
+        </datalist>
       </div>
     </div>
     <div class="st-actions">

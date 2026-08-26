@@ -25,30 +25,40 @@
     );
   }
 
-  /* ---- Axis label formatting (the "2026-05-01 00:00:00 → 01/05/2026" and
-     "0.1 → 10%" the editor offers). Presets, applied at draw time to the tick
-     and the tooltip; the stored data never changes. Unknown or "auto" preset,
-     or a value that isn't the expected shape, passes straight through. ---- */
+  /* ---- Generic label formatting. A format is a free pattern, not a fixed
+     preset — the common cases (01/05/2026, 10%, 1,2 mi, R$ 1.234,56) are just
+     patterns among all the ones you can write. Applied at draw time to the tick
+     and tooltip; the stored data never changes. An empty pattern, or a value
+     that isn't the expected shape, passes straight through.
+
+     Dates use tokens: YYYY YY MMMM MMM MM M DD D HH mm ss.
+     Numbers use a pattern: #,##0.00 (grouping + decimals), a trailing % for
+     percent (x100), a trailing 'a' for compact (mil/mi/bi/tri), and any literal
+     text around it as prefix/suffix — e.g. "R$ #,##0.00" or "0.0a". ---- */
 
   var MONTHS_BR = ["jan", "fev", "mar", "abr", "mai", "jun",
                    "jul", "ago", "set", "out", "nov", "dez"];
+  var MONTHS_LONG = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                     "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 
   function dateParts(s) {
-    var m = /^(\d{4})[-/](\d{2})[-/](\d{2})/.exec(String(s));
-    return m ? { y: m[1], mo: m[2], d: m[3] } : null;
+    var m = /^(\d{4})[-/](\d{2})[-/](\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(s));
+    if (!m) return null;
+    return { Y: m[1], MM: m[2], DD: m[3], HH: m[4] || "00", mi: m[5] || "00", ss: m[6] || "00" };
   }
 
-  function fmtDate(s, preset) {
+  function fmtDate(s, pattern) {
     var p = dateParts(s);
-    if (!p) return s;
-    switch (preset) {
-      case "date-iso": return p.y + "-" + p.mo + "-" + p.d;
-      case "date-br": return p.d + "/" + p.mo + "/" + p.y;
-      case "date-slash": return p.y + "/" + p.mo + "/" + p.d;
-      case "month-year": return p.mo + "/" + p.y;
-      case "month-name-br": return (MONTHS_BR[parseInt(p.mo, 10) - 1] || p.mo) + "/" + p.y;
-      default: return s;
-    }
+    if (!p || !pattern) return s;
+    var mo = parseInt(p.MM, 10);
+    var map = {
+      YYYY: p.Y, YY: p.Y.slice(2),
+      MMMM: MONTHS_LONG[mo - 1] || p.MM, MMM: MONTHS_BR[mo - 1] || p.MM,
+      MM: p.MM, M: String(mo),
+      DD: p.DD, D: String(parseInt(p.DD, 10)),
+      HH: p.HH, mm: p.mi, ss: p.ss,
+    };
+    return pattern.replace(/YYYY|YY|MMMM|MMM|MM|DD|HH|mm|ss|M|D/g, function (t) { return map[t]; });
   }
 
   // Thousands separator, pt-BR (12345 -> "12.345").
@@ -56,45 +66,41 @@
     return String(intStr).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   }
 
-  function money2(n) {
-    var neg = n < 0 ? "-" : "";
-    var parts = Math.abs(n).toFixed(2).split(".");
-    return neg + ptGroup(parts[0]) + "," + parts[1];
-  }
-
-  // The KPI abbreviation, mirrored from charts.py _format_number for the axis.
-  function compactBR(n) {
-    var abs = Math.abs(n);
-    var units = [[1e12, " tri"], [1e9, " bi"], [1e6, " mi"], [1e3, " mil"]];
+  function compactUnit(val, decimals) {
+    var units = [[1e12, "tri"], [1e9, "bi"], [1e6, "mi"], [1e3, "mil"]], a = Math.abs(val);
     for (var i = 0; i < units.length; i++) {
-      if (abs >= units[i][0]) {
-        var s = n / units[i][0];
-        var t = Math.abs(s) < 10 ? s.toFixed(1) : s.toFixed(0);
-        return t.replace(".", ",") + units[i][1];
-      }
+      if (a >= units[i][0]) return (val / units[i][0]).toFixed(decimals).replace(".", ",") + " " + units[i][1];
     }
-    if (n === Math.round(n)) return ptGroup(String(n));
-    return money2(n);
+    return null; // below a thousand: format normally
   }
 
-  function fmtNumber(v, preset) {
+  function fmtNumber(v, pattern) {
     var n = Number(v);
-    if (!isFinite(n)) return v;
-    switch (preset) {
-      case "integer": {
-        var r = Math.round(n);
-        return (r < 0 ? "-" : "") + ptGroup(String(Math.abs(r)));
-      }
-      case "compact": return compactBR(n);
-      case "percent": return Math.round(n * 100) + "%";
-      case "percent1": return (n * 100).toFixed(1).replace(".", ",") + "%";
-      case "currency-brl": return "R$ " + money2(n);
-      default: return v;
+    if (!isFinite(n) || !pattern) return v;
+    var m = /[#0][#0.,]*/.exec(pattern);
+    var prefix = m ? pattern.slice(0, m.index) : "";
+    var numTok = m ? m[0] : "0";
+    var rest = m ? pattern.slice(m.index + numTok.length) : pattern;
+    var percent = /%/.test(pattern);
+    var compact = /a/i.test(rest);
+    var suffix = rest.replace(/[%a]/gi, "");
+    var dot = numTok.indexOf(".");
+    var decimals = dot >= 0 ? numTok.length - dot - 1 : 0;
+    var grouping = numTok.indexOf(",") >= 0;
+    var val = percent ? n * 100 : n;
+    var neg = val < 0 ? "-" : "";
+    val = Math.abs(val);
+    var body = compact ? compactUnit(val, decimals) : null;
+    if (body === null) {
+      var parts = val.toFixed(decimals).split(".");
+      if (grouping) parts[0] = ptGroup(parts[0]);
+      body = parts.length > 1 ? parts[0] + "," + parts[1] : parts[0];
     }
+    return neg + prefix + body + (percent ? "%" : "") + suffix;
   }
 
-  function usable(preset) {
-    return !!preset && preset !== "auto";
+  function usable(pattern) {
+    return !!pattern;
   }
 
   function buildDatasets(spec, compact) {
@@ -151,8 +157,8 @@
     var grid = o.grid || {};
     var xGrid = grid.x === true;
     var yGrid = grid.y !== false;
-    var xf = o.xAxis && o.xAxis.format;
-    var yf = o.yAxis && o.yAxis.format;
+    var xf = o.xFormat;
+    var yf = o.valueFormat;
     var xTicks = {
       color: INK_MUTED,
       font: { family: FONT, size: 11 },
@@ -219,8 +225,8 @@
     else if (legendPos) wantLegend = true; // an explicit place means "show it"
     else wantLegend = !!spec.showLegend;   // default: only when >1 series
     var showLegend = !compact && wantLegend && !manySeries;
-    var xf = o.xAxis && o.xAxis.format;
-    var yf = o.yAxis && o.yAxis.format;
+    var xf = o.xFormat;
+    var yf = o.valueFormat;
 
     el._chart = new Chart(el.getContext("2d"), {
       type: chartType,

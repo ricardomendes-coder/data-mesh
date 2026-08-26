@@ -30,13 +30,9 @@
     <div class="bi-tile-skel"><span></span><span></span><span></span></div>
   </div>
 
-  {% set can_style = can_customize and chart.chart_type not in ('table', 'number') %}
   <div class="bi-panel-tabs">
     <button class="bi-ptab active" data-tab="data" type="button">{{ _('Data') }}</button>
     <button class="bi-ptab" data-tab="sql" type="button">{{ _('SQL') }}</button>
-    {% if can_style %}
-    <button class="bi-ptab" data-tab="custom" type="button">{{ _('Personalizar') }}</button>
-    {% endif %}
   </div>
 
   {# The validator flags three palette slots as sub-3:1 on white, which obliges
@@ -51,71 +47,11 @@
     <a class="bi-btn sm ghost" href="{{ url_for('console') }}?tab=query&amp;database={{ chart.source_db|urlencode }}&amp;sql={{ chart.sql|strip_filters|urlencode }}">{{ _('Open SQL in Query') }}</a>
   </section>
 
-  {% if can_style %}
-  <section class="pane" data-pane="custom">
-    <form id="bi-customize" class="bi-customize"
-          data-save="{{ url_for('chart_options', slug=chart.id) }}"
-          data-options='{{ chart.options|tojson }}'>
-      <div class="bi-customize-grid">
-        <label class="bi-fld">
-          <span>{{ _('Legenda') }}</span>
-          <select name="legend">
-            <option value="">{{ _('Automática') }}</option>
-            <option value="bottom">{{ _('Abaixo') }}</option>
-            <option value="top">{{ _('Acima') }}</option>
-            <option value="left">{{ _('Esquerda') }}</option>
-            <option value="right">{{ _('Direita') }}</option>
-            <option value="hidden">{{ _('Oculta') }}</option>
-          </select>
-        </label>
-        <label class="bi-fld">
-          <span>{{ _('Subtítulo') }}</span>
-          <input type="text" name="subtitle" maxlength="200" placeholder="{{ _('opcional') }}">
-        </label>
-        <label class="bi-fld">
-          <span>{{ _('Formato do eixo X') }}</span>
-          <select name="xfmt">
-            <option value="">{{ _('Automático') }}</option>
-            <option value="date-iso">2026-05-01</option>
-            <option value="date-br">01/05/2026</option>
-            <option value="date-slash">2026/05/01</option>
-            <option value="month-year">05/2026</option>
-            <option value="month-name-br">mai/2026</option>
-          </select>
-        </label>
-        <label class="bi-fld">
-          <span>{{ _('Formato do eixo Y') }}</span>
-          <select name="yfmt">
-            <option value="">{{ _('Automático') }}</option>
-            <option value="integer">1.234</option>
-            <option value="compact">1,2 mi</option>
-            <option value="percent">10%</option>
-            <option value="percent1">10,0%</option>
-            <option value="currency-brl">R$ 1.234,56</option>
-          </select>
-        </label>
-        <label class="bi-check">
-          <input type="checkbox" name="gridx"> <span>{{ _('Grade vertical (eixo X)') }}</span>
-        </label>
-        <label class="bi-check">
-          <input type="checkbox" name="gridy"> <span>{{ _('Grade horizontal (eixo Y)') }}</span>
-        </label>
-      </div>
-      <div class="bi-customize-actions">
-        <button type="submit" class="bi-btn sm" disabled>{{ _('Salvar personalização') }}</button>
-        <span class="bi-customize-status"></span>
-      </div>
-    </form>
-  </section>
-  {% endif %}
 </div>
 
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
 <script src="{{ url_for('static', path='chart-detail.js') }}"></script>
-{% if can_style %}
-<script src="{{ url_for('static', path='chart-customize.js') }}"></script>
-{% endif %}
 <script>
 (function () {
   document.querySelectorAll('button[data-tab]').forEach(function (el) {

@@ -17,6 +17,7 @@ normal-vision separation ΔE 16.8). Consequences that follow from that run:
 Reordering these hues invalidates the run. Re-validate before touching them.
 """
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -76,7 +77,8 @@ class ChartSpec:
     rows: list[tuple] = field(default_factory=list)
     # number tiles
     value: str = ""
-    caption: str = ""
+    value_raw: float | None = None  # the unformatted number, so a custom format
+    caption: str = ""               # (options.valueFormat) can be applied later
 
     @property
     def renders_as(self) -> str:
@@ -128,6 +130,54 @@ def _format_number(value: float) -> str:
     if value == int(value):
         return f"{int(value):,}".replace(",", ".")
     return f"{value:,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+
+
+def _pt_group(digits: str) -> str:
+    return re.sub(r"\B(?=(\d{3})+(?!\d))", ".", digits)
+
+
+def _compact_unit(value: float, decimals: int) -> str | None:
+    for limit, suffix in ((1e12, "tri"), (1e9, "bi"), (1e6, "mi"), (1e3, "mil")):
+        if abs(value) >= limit:
+            return f"{value / limit:.{decimals}f}".replace(".", ",") + " " + suffix
+    return None
+
+
+def format_number(raw: Any, pattern: str) -> str:
+    """Format a number with a free pattern — the server side of the big number,
+    mirroring fmtNumber() in chart-render.js so a chart reads the same wherever
+    it is drawn.
+
+    `#,##0.00` gives grouping and decimals, a `%` makes it a percent (×100), a
+    trailing `a` makes it compact (mil/mi/bi/tri), and any literal text around
+    the number token is kept as prefix/suffix — "R$ #,##0.00", "0.0a", "0%".
+    An empty pattern falls back to the KPI abbreviation; a non-number to a dash.
+    """
+    n = _numeric(raw)
+    if n is None:
+        return "—"
+    if not pattern:
+        return _format_number(n)
+    m = re.search(r"[#0][#0.,]*", pattern)
+    prefix = pattern[: m.start()] if m else ""
+    num_tok = m.group(0) if m else "0"
+    rest = pattern[m.end():] if m else pattern
+    percent = "%" in pattern
+    compact = "a" in rest or "A" in rest
+    suffix = re.sub(r"[%aA]", "", rest)
+    dot = num_tok.find(".")
+    decimals = len(num_tok) - dot - 1 if dot >= 0 else 0
+    grouping = "," in num_tok
+    val = n * 100 if percent else n
+    neg = "-" if val < 0 else ""
+    val = abs(val)
+    body = _compact_unit(val, decimals) if compact else None
+    if body is None:
+        intp, _, frac = f"{val:.{decimals}f}".partition(".")
+        if grouping:
+            intp = _pt_group(intp)
+        body = intp + ("," + frac if frac else "")
+    return neg + prefix + body + ("%" if percent else "") + suffix
 
 
 def numeric_columns(columns: list[str], rows: list[tuple]) -> list[str]:
@@ -246,6 +296,7 @@ def build_spec(
             return spec
         raw = rows[0][columns.index(measure)]
         number = _numeric(raw)
+        spec.value_raw = number
         spec.value = "—" if number is None else _format_number(number)
         if x_column in columns:
             label = rows[0][columns.index(x_column)]
