@@ -115,6 +115,30 @@
   .st-gensql-text{margin:0;padding:.5rem .65rem;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:.7rem;line-height:1.5;color:var(--body);white-space:pre-wrap;overflow-x:auto;background:#FBFBFD}
   .st-pill-agg{border:1px solid var(--border);background:var(--page);font:inherit;font-size:.66rem;font-weight:600;color:var(--orange);border-radius:4px;padding:.08rem .1rem;cursor:pointer;max-width:96px}
 
+  /* standardized dropdown (select-menu.js) */
+  .sm{position:relative}
+  .sm-native{position:absolute!important;width:1px;height:1px;opacity:0;pointer-events:none;margin:0;padding:0;border:0;overflow:hidden}
+  .sm-trigger{width:100%;height:33px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--title);padding:0 .35rem 0 .55rem;display:flex;align-items:center;gap:.4rem;justify-content:space-between;cursor:pointer;font:inherit;font-size:.8rem;text-align:left}
+  .sm-trigger:hover{border-color:var(--g-300)}
+  .sm.sm-open .sm-trigger,.sm-trigger:focus{border-color:var(--orange);box-shadow:var(--ring);outline:none}
+  .sm-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sm-label.sm-ph{color:var(--g-300)}
+  .sm-caret{color:var(--g-300);font-size:.58rem;flex-shrink:0}
+  .sm-combo{display:flex;align-items:stretch}
+  .sm-combo-input{flex:1;border-radius:var(--r-sm) 0 0 var(--r-sm)!important;border-right:none!important}
+  .sm-combo-caret{border:1px solid var(--border-strong);border-left:none;border-radius:0 var(--r-sm) var(--r-sm) 0;background:var(--surface);color:var(--g-300);cursor:pointer;padding:0 .5rem;font-size:.58rem}
+  .st-pill .sm{max-width:118px}
+  .st-pill .sm-trigger{height:22px;padding:0 .25rem 0 .4rem;font-size:.68rem;border-radius:4px;color:var(--orange);font-weight:600;background:var(--page)}
+  /* popup lives on <body>, so these are global on purpose */
+  .sm-pop{z-index:1000;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-sm);box-shadow:var(--sh-3);overflow:hidden;display:flex;flex-direction:column;min-width:150px}
+  .sm-search{margin:.35rem;height:30px;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 .5rem;font-family:inherit;font-size:.8rem;color:var(--title);background:var(--surface);outline:none;flex-shrink:0}
+  .sm-search:focus{border-color:var(--orange)}
+  .sm-list{overflow-y:auto}
+  .sm-opt{padding:.42rem .6rem;font-size:.8rem;color:var(--title);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sm-opt:hover,.sm-opt.sm-active{background:rgba(255,90,0,.08)}
+  .sm-opt.sm-sel{color:var(--orange);font-weight:600}
+  .sm-pop[hidden]{display:none}
+
   @media(max-width:980px){
     .st{flex-direction:column;height:auto}
     .st-data,.st-insp{width:100%;border:none;border-bottom:1px solid var(--border)}
@@ -144,10 +168,10 @@
     <div id="st-dsmode">
       <div class="st-dbrow">
         <label for="st-dataset">{{ _('Dataset (tabela)') }}</label>
-        <input id="st-dataset" list="dl-datasets" autocomplete="off" placeholder="{{ _('buscar tabela…') }}">
-        <datalist id="dl-datasets">
-          {% for d in init.datasets %}<option value="{{ d.name }}">{{ d.kind }} · {{ d.columns }} col</option>{% endfor %}
-        </datalist>
+        <select id="st-dataset">
+          <option value="">{{ _('escolha uma tabela…') }}</option>
+          {% for d in init.datasets %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+        </select>
       </div>
     </div>
 
@@ -267,5 +291,6 @@
 
 <script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', path='chart-render.js') }}"></script>
+<script src="{{ url_for('static', path='select-menu.js') }}"></script>
 <script src="{{ url_for('static', path='chart-builder.js') }}"></script>
 {% endblock %}

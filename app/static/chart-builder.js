@@ -280,6 +280,10 @@
     });
     var lv = el("lbl-values");
     if (lv) lv.innerHTML = "Valores " + (state.values.length > 1 ? "<span class='opt'>(" + state.values.length + ")</span>" : "<span class='req'>•</span>");
+    enhanceAggs();
+  }
+  function enhanceAggs() {
+    if (window.enhanceSelect) document.querySelectorAll(".st-pill-agg").forEach(function (s) { window.enhanceSelect(s); });
   }
   function accepts(well, field) {
     var acc = well.getAttribute("data-accept"), k = kindOf(field);
@@ -553,6 +557,19 @@
   el("f-vfmt").value = o.valueFormat || "";
   el("f-gridx").checked = !!(o.grid && o.grid.x === true);
   el("f-gridy").checked = !(o.grid && o.grid.y === false);
+
+  // Standardized dropdowns everywhere: the base and dataset pickers, the legend,
+  // the aggregations (in paintWells), and the format fields as searchable combos.
+  function datalistVals(id) { var d = el(id); return d ? Array.prototype.map.call(d.options, function (o) { return o.value; }) : []; }
+  if (window.enhanceSelect) {
+    window.enhanceSelect(el("st-db"));
+    window.enhanceSelect(el("st-dataset"), { search: true, skipEmpty: true, searchPlaceholder: "buscar tabela…", placeholder: "escolha uma tabela…" });
+    window.enhanceSelect(el("f-legend"));
+  }
+  if (window.enhanceCombo) {
+    window.enhanceCombo(el("f-xfmt"), datalistVals("dl-datefmt"));
+    window.enhanceCombo(el("f-vfmt"), datalistVals("dl-numfmt"));
+  }
 
   applyDbCatalog();
   setMode(state.mode);
