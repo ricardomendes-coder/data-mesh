@@ -9,17 +9,34 @@
   var GEN = dlg.getAttribute("data-gen");
   var prompt = document.getElementById("dash-ai-prompt");
   var gen = document.getElementById("dash-ai-gen");
+  var spin = document.getElementById("dash-ai-spin");
   var status = document.getElementById("dash-ai-status");
 
-  function setStatus(msg, cls) { status.textContent = msg || ""; status.className = "dash-ai-status" + (cls ? " " + cls : ""); }
+  function setStatus(msg, cls) {
+    status.textContent = msg || "";
+    status.className = "ai-dlg-status" + (cls ? " " + cls : "");
+  }
+  function busy(on) {
+    gen.disabled = on;
+    if (spin) spin.hidden = !on;
+  }
 
-  open.addEventListener("click", function () { setStatus(""); dlg.showModal(); prompt.focus(); });
+  open.addEventListener("click", function () { setStatus(""); busy(false); dlg.showModal(); prompt.focus(); });
+  var close = document.getElementById("dash-ai-close");
+  if (close) close.addEventListener("click", function () { dlg.close(); });
+
+  var sugs = document.getElementById("dash-ai-sugs");
+  if (sugs) sugs.addEventListener("click", function (e) {
+    if (!e.target.classList.contains("ai-sug")) return;
+    prompt.value = e.target.textContent;
+    prompt.focus();
+  });
 
   function generate() {
     var q = prompt.value.trim();
     if (!q) { setStatus("Descreva o painel.", "err"); return; }
-    gen.disabled = true;
-    setStatus("montando o painel… isso pode levar alguns segundos");
+    busy(true);
+    setStatus("montando o painel… pode levar alguns segundos");
     fetch(GEN, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -31,11 +48,11 @@
           setStatus("pronto — abrindo o editor…");
           window.location.href = res.body.url;
         } else {
-          gen.disabled = false;
+          busy(false);
           setStatus((res.body && res.body.error) || "não foi possível montar o painel", "err");
         }
       })
-      .catch(function () { gen.disabled = false; setStatus("falha ao montar o painel", "err"); });
+      .catch(function () { busy(false); setStatus("falha ao montar o painel", "err"); });
   }
 
   gen.addEventListener("click", generate);

@@ -14,27 +14,57 @@
   </button>
 </form>
 {% if ai_enabled %}
-<button class="bi-btn" id="dash-ai-open" type="button">✦ {{ _('Painel com IA') }}</button>
+<button class="bi-btn ai-trigger" id="dash-ai-open" type="button">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 4.6L18.5 8.5 13.9 10.4 12 15l-1.9-4.6L5.5 8.5 10.1 6.6z"/><path d="M18 14l.9 2.1 2.1.9-2.1.9L18 20l-.9-2.1-2.1-.9 2.1-.9z"/></svg>
+  {{ _('Painel com IA') }}
+</button>
 <style>
-  .dash-ai-dlg{border:1px solid var(--border-strong);border-radius:var(--r-lg);padding:1.2rem 1.3rem;max-width:520px;width:92vw;box-shadow:var(--sh-3);color:var(--title);background:var(--surface)}
-  .dash-ai-dlg::backdrop{background:rgba(0,0,45,.35)}
-  .dash-ai-dlg h3{margin:.1rem 0 .3rem;font-size:1.1rem}
-  .dash-ai-hint{color:var(--muted);font-size:.85rem;margin:0 0 .8rem}
-  .dash-ai-dlg textarea{width:100%;border:1px solid var(--border-strong);border-radius:var(--r);padding:.6rem .7rem;font:inherit;font-size:.9rem;color:var(--title);background:var(--surface);outline:none;resize:vertical}
-  .dash-ai-dlg textarea:focus{border-color:var(--orange);box-shadow:var(--ring)}
-  .dash-ai-actions{display:flex;align-items:center;gap:.8rem;margin-top:.8rem}
-  .dash-ai-actions .bi-btn{margin-left:auto}
-  .dash-ai-status{font-size:.82rem;color:var(--muted)} .dash-ai-status.err{color:var(--danger)}
-  .dash-ai-x{position:absolute;top:.6rem;right:.7rem;border:none;background:none;color:var(--g-300);cursor:pointer;font-size:1rem}
+  .ai-trigger{border-color:var(--orange);color:var(--orange)}
+  .ai-trigger:hover{background:var(--orange);color:#fff}
+  .ai-dlg{border:none;border-radius:16px;padding:0;max-width:560px;width:92vw;box-shadow:0 24px 60px rgba(0,0,45,.28);color:var(--title);background:var(--surface);overflow:visible}
+  .ai-dlg::backdrop{background:rgba(0,0,45,.4);backdrop-filter:blur(2px)}
+  .ai-dlg-inner{padding:1.4rem 1.5rem 1.3rem;position:relative}
+  .ai-dlg-head{display:flex;gap:.8rem;align-items:flex-start;margin-bottom:1rem}
+  .ai-dlg-spark{flex:0 0 auto;width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--orange),#ff8a3d);color:#fff}
+  .ai-dlg-head h3{margin:.15rem 0 .2rem;font-size:1.12rem;letter-spacing:-.01em}
+  .ai-dlg-hint{color:var(--muted);font-size:.85rem;margin:0;line-height:1.45}
+  .ai-dlg textarea{width:100%;min-height:88px;border:1px solid var(--border-strong);border-radius:10px;padding:.7rem .8rem;
+    font:inherit;font-size:.92rem;color:var(--title);background:var(--surface);outline:none;resize:vertical;line-height:1.5}
+  .ai-dlg textarea:focus{border-color:var(--orange);box-shadow:var(--ring)}
+  .ai-sugs{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+  .ai-sug{font-size:.76rem;color:var(--body);background:var(--page);border:1px solid var(--border);border-radius:999px;
+    padding:.3rem .7rem;cursor:pointer;text-align:left}
+  .ai-sug:hover{border-color:var(--orange);color:var(--orange)}
+  .ai-dlg-foot{display:flex;align-items:center;gap:.8rem;margin-top:1.1rem}
+  .ai-dlg-foot .bi-btn{margin-left:auto}
+  .ai-dlg-status{font-size:.82rem;color:var(--muted)} .ai-dlg-status.err{color:var(--danger)}
+  .ai-dlg-x{position:absolute;top:.9rem;right:1rem;border:none;background:none;color:var(--g-300);cursor:pointer;font-size:1.05rem;line-height:1}
+  .ai-dlg-x:hover{color:var(--title)}
+  .ai-spin{display:inline-block;width:13px;height:13px;margin-right:.4rem;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:ai-spin .7s linear infinite;vertical-align:-2px}
+  @keyframes ai-spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.ai-spin{animation:none}}
 </style>
-<dialog id="dash-ai-dlg" class="dash-ai-dlg" data-gen="{{ url_for('dashboard_generate') }}">
-  <form method="dialog"><button class="dash-ai-x" value="cancel" aria-label="{{ _('Fechar') }}">✕</button></form>
-  <h3>{{ _('Novo painel com IA') }}</h3>
-  <p class="dash-ai-hint">{{ _('Descreva o painel; a IA monta os gráficos a partir dos datasets e abre no editor pra você ajustar.') }}</p>
-  <textarea id="dash-ai-prompt" rows="4" placeholder="{{ _('Ex.: acompanhamento de captura — total capturado, evolução semanal e por cliente') }}"></textarea>
-  <div class="dash-ai-actions">
-    <span class="dash-ai-status" id="dash-ai-status"></span>
-    <button class="bi-btn" id="dash-ai-gen" type="button">{{ _('Gerar painel') }}</button>
+<dialog id="dash-ai-dlg" class="ai-dlg" data-gen="{{ url_for('dashboard_generate') }}">
+  <div class="ai-dlg-inner">
+    <button class="ai-dlg-x" id="dash-ai-close" type="button" aria-label="{{ _('Fechar') }}">✕</button>
+    <div class="ai-dlg-head">
+      <span class="ai-dlg-spark"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 4.6L18.5 8.5 13.9 10.4 12 15l-1.9-4.6L5.5 8.5 10.1 6.6z"/><path d="M18 14l.9 2.1 2.1.9-2.1.9L18 20l-.9-2.1-2.1-.9 2.1-.9z"/></svg></span>
+      <div>
+        <h3>{{ _('Novo painel com IA') }}</h3>
+        <p class="ai-dlg-hint">{{ _('Descreva o painel; a IA monta os gráficos a partir dos datasets e abre no editor pra você ajustar.') }}</p>
+      </div>
+    </div>
+    <textarea id="dash-ai-prompt" placeholder="{{ _('Ex.: acompanhamento de captura — total capturado, evolução semanal e por cliente') }}"></textarea>
+    <div class="ai-sugs" id="dash-ai-sugs">
+      <button type="button" class="ai-sug">Acompanhamento de captura por cliente e semana</button>
+      <button type="button" class="ai-sug">Tickets de suporte por tipo e SLA</button>
+      <button type="button" class="ai-sug">Volume de antecipação por mês</button>
+    </div>
+    <div class="ai-dlg-foot">
+      <span class="ai-dlg-status" id="dash-ai-status"></span>
+      <button class="bi-btn" id="dash-ai-gen" type="button"><span class="ai-spin" id="dash-ai-spin" hidden></span>{{ _('Gerar painel') }}</button>
+    </div>
   </div>
 </dialog>
 <script src="{{ url_for('static', path='dashboard-ai.js') }}"></script>

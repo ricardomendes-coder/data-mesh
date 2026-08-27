@@ -2451,7 +2451,9 @@ async def dashboard_generate(
             created_by=user,
         ))
         w = _TILE_WIDTHS.get(spec["width"], 6)
-        h = 4 if spec["chart_type"] in ("number", "table") else 6
+        # Heights in grid rows (~8px each): a KPI is short, everything else gets
+        # the app's readable chart height so tiles aren't a squashed sliver.
+        h = 14 if spec["chart_type"] == "number" else store.DEFAULT_TILE[1]
         if x + w > 12:
             x = 0
             y += row_h

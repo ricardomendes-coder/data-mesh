@@ -37,7 +37,10 @@
     if (!q) return;
     send.disabled = true;
     out.innerHTML = "";
-    out.appendChild(el("div", "asst-skel", "Pensando no caminho e montando a query…"));
+    var sk = el("div", "asst-skel");
+    sk.appendChild(el("span", "asst-spin"));
+    sk.appendChild(el("span", null, "Pensando no caminho e montando a query…"));
+    out.appendChild(sk);
     fetch(ASK, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
