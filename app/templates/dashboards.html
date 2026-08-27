@@ -13,6 +13,32 @@
     {{ _('New dashboard') }}
   </button>
 </form>
+{% if ai_enabled %}
+<button class="bi-btn" id="dash-ai-open" type="button">✦ {{ _('Painel com IA') }}</button>
+<style>
+  .dash-ai-dlg{border:1px solid var(--border-strong);border-radius:var(--r-lg);padding:1.2rem 1.3rem;max-width:520px;width:92vw;box-shadow:var(--sh-3);color:var(--title);background:var(--surface)}
+  .dash-ai-dlg::backdrop{background:rgba(0,0,45,.35)}
+  .dash-ai-dlg h3{margin:.1rem 0 .3rem;font-size:1.1rem}
+  .dash-ai-hint{color:var(--muted);font-size:.85rem;margin:0 0 .8rem}
+  .dash-ai-dlg textarea{width:100%;border:1px solid var(--border-strong);border-radius:var(--r);padding:.6rem .7rem;font:inherit;font-size:.9rem;color:var(--title);background:var(--surface);outline:none;resize:vertical}
+  .dash-ai-dlg textarea:focus{border-color:var(--orange);box-shadow:var(--ring)}
+  .dash-ai-actions{display:flex;align-items:center;gap:.8rem;margin-top:.8rem}
+  .dash-ai-actions .bi-btn{margin-left:auto}
+  .dash-ai-status{font-size:.82rem;color:var(--muted)} .dash-ai-status.err{color:var(--danger)}
+  .dash-ai-x{position:absolute;top:.6rem;right:.7rem;border:none;background:none;color:var(--g-300);cursor:pointer;font-size:1rem}
+</style>
+<dialog id="dash-ai-dlg" class="dash-ai-dlg" data-gen="{{ url_for('dashboard_generate') }}">
+  <form method="dialog"><button class="dash-ai-x" value="cancel" aria-label="{{ _('Fechar') }}">✕</button></form>
+  <h3>{{ _('Novo painel com IA') }}</h3>
+  <p class="dash-ai-hint">{{ _('Descreva o painel; a IA monta os gráficos a partir dos datasets e abre no editor pra você ajustar.') }}</p>
+  <textarea id="dash-ai-prompt" rows="4" placeholder="{{ _('Ex.: acompanhamento de captura — total capturado, evolução semanal e por cliente') }}"></textarea>
+  <div class="dash-ai-actions">
+    <span class="dash-ai-status" id="dash-ai-status"></span>
+    <button class="bi-btn" id="dash-ai-gen" type="button">{{ _('Gerar painel') }}</button>
+  </div>
+</dialog>
+<script src="{{ url_for('static', path='dashboard-ai.js') }}"></script>
+{% endif %}
 {% endif %}
 {% endblock %}
 

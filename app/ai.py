@@ -250,3 +250,59 @@ def answer_data_question(question: str, catalog: list) -> dict:
         "datasets": [str(x).strip() for x in ds if str(x).strip()],
         "sql": str(ans.get("sql") or "").strip(),
     }
+
+
+def plan_dashboard(prompt: str, catalog: list) -> dict:
+    """Design a dashboard from a prompt: a title and a list of charts (query +
+    viz + mapping + width), grounded in the catalog. Layout is the app's job —
+    the model only picks the charts and how wide each is."""
+    lines = []
+    for d in catalog:
+        lines.append(f'### {d["name"]} ({d["kind"]})')
+        if d.get("description"):
+            lines.append(d["description"].strip())
+        lines.append("Colunas: " + ", ".join(f"{n} {t}" for n, t in d.get("columns", [])[:40]))
+        lines.append("")
+    system = (
+        "Você projeta painéis do Report Hub da V360 a partir de um pedido em português. "
+        "Use SOMENTE as tabelas e colunas do catálogo — nunca invente. Cada gráfico tem "
+        "uma query PostgreSQL agregada (schema analytics, tabela como public.\"<nome>\"), "
+        "chart_type (bar|line|area|pie|table|number), x_column (rótulo/eixo, ou \"\" para "
+        "number/table), y_columns (medidas, batendo com os aliases do SELECT), "
+        "series_column (\"\" ou coluna que quebra em séries) e width (full|half|third). "
+        "Faça de 3 a 6 gráficos: comece por um number (KPI) e uma evolução temporal, "
+        "depois recortes por categoria. Responda SOMENTE com JSON: "
+        '{"title":"...","charts":[{"title":"...","sql":"...","chart_type":"...",'
+        '"x_column":"...","y_columns":["..."],"series_column":"","width":"half"}]}'
+    )
+    user = "Catálogo:\n\n" + "\n".join(lines) + f"\n\nPedido do usuário: {prompt}"
+    if get_settings().ai_provider == "assis":
+        payload = {
+            "prompt": prompt,
+            "catalogo": [
+                {"name": d["name"], "kind": d["kind"], "description": d.get("description", ""),
+                 "columns": d.get("columns", []), "example": d.get("example", "")}
+                for d in catalog
+            ],
+        }
+        plan = _extract_json(_call_agent(get_settings().assis_dashboard_agent_key, json.dumps(payload, ensure_ascii=False)))
+    else:
+        plan = _extract_json(_complete(system, user, max_tokens=3000))
+
+    charts = []
+    for c in plan.get("charts") or []:
+        if not isinstance(c, dict) or not str(c.get("sql") or "").strip():
+            continue
+        yc = c.get("y_columns") or []
+        if isinstance(yc, str):
+            yc = yc.split(",")
+        charts.append({
+            "title": str(c.get("title") or "Gráfico").strip()[:200],
+            "sql": str(c["sql"]).strip(),
+            "chart_type": str(c.get("chart_type") or "bar"),
+            "x_column": str(c.get("x_column") or ""),
+            "y_columns": [str(x).strip() for x in yc if str(x).strip()],
+            "series_column": str(c.get("series_column") or ""),
+            "width": str(c.get("width") or "half"),
+        })
+    return {"title": str(plan.get("title") or "Painel").strip()[:200], "charts": charts}

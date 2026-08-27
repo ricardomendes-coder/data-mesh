@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     assis_token: str = ""
     assis_assistant_agent_key: str = ""
     assis_doc_agent_key: str = ""
+    assis_dashboard_agent_key: str = ""
     assis_client_name: str = ""
     assis_user_email: str = "reporthub@virtual360.io"
     # How long a cached chart preview stays usable. A preview is for recognising
