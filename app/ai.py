@@ -104,6 +104,8 @@ def _call_agent(agent_key: str, input_text: str) -> str:
     db = s.assis_client_name or s.datasets_database or ""
     body = {
         "input": input_text,
+        # Assis requires the key present even when null (mirrors AssisService).
+        "session_code": None,
         "user": {
             "email": s.assis_user_email,
             "first_name": "Report Hub",
