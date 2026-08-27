@@ -285,6 +285,26 @@ def get_columns(name: str) -> list[Column]:
     ]
 
 
+def view_definition(name: str) -> str:
+    """The SELECT that builds a view/matview, for grounding an AI description.
+    Empty string for a plain table or on any error — best-effort context."""
+    s = get_settings()
+    engine = _engine()
+    try:
+        with engine.connect() as conn:
+            d = conn.execute(
+                text(
+                    "SELECT pg_get_viewdef((quote_ident(:s) || '.' || quote_ident(:n))::regclass, true)"
+                ),
+                {"s": s.datasets_schema, "n": name},
+            ).scalar()
+        return (d or "")[:3500]
+    except Exception:
+        return ""
+    finally:
+        engine.dispose()
+
+
 def dependency_map() -> dict[str, set[str]]:
     """For each view/matview in the schema, the set of relations it reads from.
 

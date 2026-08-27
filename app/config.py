@@ -15,6 +15,39 @@ class Settings(BaseSettings):
     # Interface language. Portuguese by default because that's what the people
     # using this speak; English stays available per user. See app/i18n.py.
     default_locale: str = "pt"
+
+    # ---- AI (optional) ----
+    # Powers the in-app data assistant (a question in Portuguese → an explanation,
+    # which datasets to use, and a query) and the dataset-doc generator. Off
+    # unless a key is set: every AI path checks ai_enabled first and degrades to
+    # "não configurado" rather than erroring.
+    #
+    # Two providers:
+    #   ai_provider = "anthropic"  → native Anthropic Messages API (paid).
+    #   ai_provider = "openai"     → any OpenAI-compatible API. This covers the
+    #     free tiers used for testing: Groq (no card, fast, Llama 3.3 70B),
+    #     Google Gemini, OpenRouter, etc. Set ai_base_url / ai_model / ai_api_key.
+    ai_provider: str = "anthropic"
+    # Anthropic (native).
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5"
+    anthropic_base_url: str = "https://api.anthropic.com"
+    # OpenAI-compatible (used when ai_provider = "openai"). Defaults point at
+    # Groq's free endpoint — just add AI_API_KEY.
+    ai_api_key: str = ""
+    ai_base_url: str = "https://api.groq.com/openai/v1"
+    ai_model: str = "llama-3.3-70b-versatile"
+    ai_max_tokens: int = 2500
+    # Assis — V360's own no-code agent platform (ai_provider = "assis"). Governed,
+    # cost-limited, no separate billing: the prompt lives in the agent, and we
+    # send the catalog + question as its input. Create the agents in Assis and
+    # paste their keys + a token (Perfil do Assis → Gerar token) here.
+    assis_base_url: str = "https://assistente.v360.io/api"
+    assis_token: str = ""
+    assis_assistant_agent_key: str = ""
+    assis_doc_agent_key: str = ""
+    assis_client_name: str = ""
+    assis_user_email: str = "reporthub@virtual360.io"
     # How long a cached chart preview stays usable. A preview is for recognising
     # a chart, not reading its numbers — and a chart's shape barely moves — so
     # this is long (a week): building one runs the chart's whole query, and doing
@@ -166,6 +199,14 @@ class Settings(BaseSettings):
     #   MySQL/MariaDB -> mysql+pymysql      (add `pymysql` to requirements.txt)
     #   SQL Server    -> mssql+pyodbc       (add `pyodbc` + an ODBC driver)
     db_driver: str = "postgresql+psycopg2"
+
+    @property
+    def ai_enabled(self) -> bool:
+        if self.ai_provider == "openai":
+            return bool(self.ai_api_key)
+        if self.ai_provider == "assis":
+            return bool(self.assis_token)
+        return bool(self.anthropic_api_key)
 
     @property
     def superset_auth_enabled(self) -> bool:

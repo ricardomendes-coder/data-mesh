@@ -75,3 +75,2081 @@ hide = [
 # JOIN captura ca ON ca.c_id = co.c_id
 # LIMIT 100
 # """
+
+
+# ── Documentação gerada dos datasets em uso ──────────────────────────────────
+# Descrição + queries de exemplo dos 82 datasets usados em painéis ativos
+# (direto ou via view/mview). Fundamentado nas colunas reais e nas definições
+# das views. Os não-usados foram inativados no hub (tela Admin > Visibilidade).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[dataset]]
+name = "anticipation"
+title = "Antecipação de Recebíveis"
+description = """
+Uma linha por título de recebível antecipado (id_titulo), vinculado a uma nota fiscal (tax_document_id) e a um fornecedor (supplier_identification_number). Registra os valores da operação de antecipação/factoring, como net_value, total_value, total_value_in_balance e payment_value, além da taxa mensal de factoring (monthly_factoring_rate) e das datas de vencimento (net_due_date) e pagamento (payment_date). Alimenta a medição financeira de antecipação (mview_financeiro_medicao_antecipacao) e a análise de fornecedores frequentes de crédito.
+"""
+
+[[dataset.example]]
+title = "Valor antecipado por serviço de factoring"
+sql = """
+SELECT
+    factoring_service_name,
+    COUNT(*) AS qtd_titulos,
+    SUM(net_value) AS valor_liquido_total,
+    SUM(total_value) AS valor_total,
+    AVG(monthly_factoring_rate) AS taxa_media_mensal
+FROM public."anticipation"
+GROUP BY factoring_service_name
+ORDER BY valor_liquido_total DESC;
+"""
+
+[[dataset.example]]
+title = "Antecipações pagas nos últimos 30 dias"
+sql = """
+SELECT
+    supplier_identification_number,
+    tax_document_id,
+    net_value,
+    payment_value,
+    payment_date
+FROM public."anticipation"
+WHERE payment_date >= CURRENT_DATE - INTERVAL '30 days'
+    AND waiting_payment = false
+ORDER BY payment_date DESC;
+"""
+
+[[dataset]]
+name = "assis_suggestions"
+title = "Sugestões do Assistente (IA)"
+description = """
+Uma linha por sugestão gerada automaticamente pelo motor de automação/assistente (Assis) para um registro sugestionável, identificado por suggestable_type e suggestable_id. Guarda o tipo de sugestão (suggestion_type), quem originou a sugestão (originator_type/originator_id), o contexto usado no momento (context_snapshot), os candidatos considerados (top_candidates), os itens efetivamente selecionados (selected_items) e o resultado final (outcome). Usada no painel de Automatismo para acompanhar o comportamento das sugestões automáticas.
+"""
+
+[[dataset.example]]
+title = "Sugestões por tipo e resultado"
+sql = """
+SELECT
+    suggestion_type,
+    outcome,
+    COUNT(*) AS qtd_sugestoes
+FROM public."assis_suggestions"
+GROUP BY suggestion_type, outcome
+ORDER BY qtd_sugestoes DESC;
+"""
+
+[[dataset.example]]
+title = "Sugestões criadas nos últimos 7 dias"
+sql = """
+SELECT
+    id,
+    suggestable_type,
+    suggestion_type,
+    originator_type,
+    outcome,
+    created_at
+FROM public."assis_suggestions"
+WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY created_at DESC;
+"""
+
+[[dataset]]
+name = "atribuicao_automatica_suporte"
+title = "Disponibilidade para Atribuição Automática de Suporte"
+description = """
+Uma linha por atendente (email), dia da semana (dia_semana/dia_nome) e faixa de hora (hora_ord/hora_label), indicando o horário em que o atendente está disponível para receber atribuições automáticas de chamados de suporte. Também identifica a equipe e a guilda do atendente. Base usada no painel "Base de Horários - Disponibilidade" para visualizar a cobertura de horários do suporte.
+"""
+
+[[dataset.example]]
+title = "Atendentes disponíveis por dia e hora"
+sql = """
+SELECT
+    dia_nome,
+    hora_label,
+    equipe,
+    COUNT(DISTINCT email) AS qtd_atendentes
+FROM public."atribuicao_automatica_suporte"
+GROUP BY dia_nome, hora_label, equipe, dia_semana, hora_ord
+ORDER BY dia_semana, hora_ord;
+"""
+
+[[dataset]]
+name = "authenticity"
+title = "Autenticidade de Notas Fiscais"
+description = """
+Uma linha por verificação de autenticidade realizada sobre uma nota fiscal (tax_document_id), com o status do resultado (status), uma descrição (description) e indicação se o valor veio de cache (cache). Registra também quem originou a chamada (caller_type) e o tipo do objeto logado (loggable_type). Alimenta a medição financeira de autenticidade (mview_financeiro_medicao_autenticidade), usada no painel "[FINANCEIRO] Medições".
+"""
+
+[[dataset.example]]
+title = "Verificações de autenticidade por status"
+sql = """
+SELECT
+    status,
+    COUNT(*) AS qtd_verificacoes
+FROM public."authenticity"
+GROUP BY status
+ORDER BY qtd_verificacoes DESC;
+"""
+
+[[dataset.example]]
+title = "Verificações recentes por nota fiscal"
+sql = """
+SELECT
+    tax_document_id,
+    status,
+    description,
+    created_at
+FROM public."authenticity"
+WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+ORDER BY created_at DESC;
+"""
+
+[[dataset]]
+name = "aux_de_para_tipo_nota_categoria"
+title = "De-Para: Tipo de Nota x Categoria"
+description = """
+Tabela auxiliar de mapeamento (de-para) com uma linha por tipo de nota fiscal (tipo), associando-o à sua categoria correspondente (tipo_categoria). Usada como referência de apoio pela view_tpv_cnpjs para classificar notas por categoria.
+"""
+
+[[dataset.example]]
+title = "Categorias distintas mapeadas"
+sql = """
+SELECT
+    tipo_categoria,
+    COUNT(*) AS qtd_tipos
+FROM public."aux_de_para_tipo_nota_categoria"
+GROUP BY tipo_categoria
+ORDER BY qtd_tipos DESC;
+"""
+
+[[dataset]]
+name = "aux_tipo_antecipavel"
+title = "De-Para: Tipo de Nota x Antecipável"
+description = """
+Tabela auxiliar de mapeamento com uma linha por tipo de nota (tipo), indicando se esse tipo é antecipável (antecipavel). Usada como referência de apoio pela view_tpv_cnpjs para identificar quais notas podem ser antecipadas.
+"""
+
+[[dataset.example]]
+title = "Tipos de nota por condição de antecipação"
+sql = """
+SELECT
+    antecipavel,
+    COUNT(*) AS qtd_tipos
+FROM public."aux_tipo_antecipavel"
+GROUP BY antecipavel;
+"""
+
+[[dataset]]
+name = "bank_slips"
+title = "Boletos Bancários"
+description = """
+Uma linha por boleto bancário (id) emitido para uma nota fiscal (tax_document_id) de um cliente (customer_identification_number). Traz o número do boleto (number), o valor total (total_value), a data de vencimento (due_date), o mês de referência (mes) e o status da última etapa do processo (last_task_name). Alimenta a medição financeira de boletos (mview_financeiro_medicao_boletos), usada no painel "[FINANCEIRO] Medições".
+"""
+
+[[dataset.example]]
+title = "Valor total de boletos por mês"
+sql = """
+SELECT
+    mes,
+    COUNT(*) AS qtd_boletos,
+    SUM(total_value) AS valor_total
+FROM public."bank_slips"
+GROUP BY mes
+ORDER BY mes DESC;
+"""
+
+[[dataset.example]]
+title = "Boletos vencendo nos próximos 7 dias"
+sql = """
+SELECT
+    customer_identification_number,
+    number,
+    total_value,
+    due_date,
+    last_task_name
+FROM public."bank_slips"
+WHERE due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
+ORDER BY due_date;
+"""
+
+[[dataset]]
+name = "captura"
+title = "Captura de Notas Fiscais"
+description = """
+Materialized view com uma linha por cliente (c_id), dia de criação/emissão (dia_criacao, dia_emissao), tipo de nota (tipo_nota), tipo de finalização do processo (tipo_finalizacao), tipo de ingresso da nota (tipo_ingresso) e par CNPJ fornecedor/tomador, contendo a contagem de notas fiscais (count) e um indicador de que a nota poderia ter sido capturada automaticamente (poderia_ter_sido_capturada). É construída a partir de tax_documents agrupadas por dia e unidas a process_instances (completion_type do processo de captura). Usada nos painéis "Oficial - Indicadores V360" e "Relatório Geral - V360 [copy]".
+"""
+
+[[dataset.example]]
+title = "Notas capturadas por dia e tipo de ingresso"
+sql = """
+SELECT
+    dia_criacao,
+    tipo_ingresso,
+    SUM(count) AS qtd_notas
+FROM public."captura"
+GROUP BY dia_criacao, tipo_ingresso
+ORDER BY dia_criacao DESC;
+"""
+
+[[dataset.example]]
+title = "Notas que poderiam ter sido capturadas e não foram"
+sql = """
+SELECT
+    cnpj_fornecedor,
+    tipo_nota,
+    SUM(count) AS qtd_notas
+FROM public."captura"
+WHERE poderia_ter_sido_capturada = true
+GROUP BY cnpj_fornecedor, tipo_nota
+ORDER BY qtd_notas DESC;
+"""
+
+[[dataset]]
+name = "check_consistency_portaldofornecedor"
+title = "Checagem de Consistência - Portal do Fornecedor"
+description = """
+Uma linha por cliente (customer) e métrica monitorada (metric), comparando a contagem apurada no Portal do Fornecedor (vsupplier_count) com a contagem de referência (mt_count) e a diferença entre elas (difference). Guarda também os identificadores dos registros ausentes (missing_ids) e o momento em que a checagem foi carregada (loaded_at). Usada no painel "Portal do Fornecedor" para monitorar divergências de sincronização.
+"""
+
+[[dataset.example]]
+title = "Métricas com maior divergência por cliente"
+sql = """
+SELECT
+    customer,
+    metric,
+    vsupplier_count,
+    mt_count,
+    difference
+FROM public."check_consistency_portaldofornecedor"
+WHERE difference <> 0
+ORDER BY ABS(difference) DESC;
+"""
+
+[[dataset.example]]
+title = "Última checagem de consistência carregada"
+sql = """
+SELECT
+    customer,
+    metric,
+    difference,
+    loaded_at
+FROM public."check_consistency_portaldofornecedor"
+ORDER BY loaded_at DESC
+LIMIT 100;
+"""
+
+[[dataset]]
+name = "cs_operations_help360"
+title = "Operações de Suporte - Help360"
+description = """
+Uma linha por tarefa (id_task) associada a um chamado de suporte (id_ticket) no sistema Help360, com o responsável (id_responsible, responsible_attendant), a categoria do chamado (category_ticket, label_category), a prioridade (priority_ticket), datas de criação e conclusão (created_at, completed_at, created_at_ticket, ticket_completed_at) e métricas de tempo como horas de CS e de desenvolvimento (hours_cs, hours_dev), duração do chamado em dias (ticket_duration_days), indicadores de SLA (suport_sla, first_touch_sla, entre outros) e a nota de satisfação (resposta_csat). É a base operacional de painéis de suporte, como "Dashboard Help360", "Help360 - Gerencial" e "Help360 - Squad Suporte".
+"""
+
+[[dataset.example]]
+title = "Horas de suporte e desenvolvimento por cliente"
+sql = """
+SELECT
+    client_name,
+    COUNT(DISTINCT id_ticket) AS qtd_tickets,
+    SUM(hours_cs) AS total_horas_cs,
+    SUM(hours_dev) AS total_horas_dev,
+    AVG(resposta_csat) AS csat_medio
+FROM public."cs_operations_help360"
+GROUP BY client_name
+ORDER BY qtd_tickets DESC;
+"""
+
+[[dataset.example]]
+title = "Tarefas concluídas nos últimos 30 dias por prioridade"
+sql = """
+SELECT
+    priority_ticket,
+    COUNT(*) AS qtd_tasks,
+    AVG(ticket_duration_days) AS duracao_media_dias
+FROM public."cs_operations_help360"
+WHERE completed_at >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY priority_ticket
+ORDER BY qtd_tasks DESC;
+"""
+
+[[dataset]]
+name = "cs_operations_help360_tombamento"
+title = "Tombamento de Clientes Legados - Help360"
+description = """
+Uma linha por cliente (id_cliente, cliente), indicando a fase atual do processo de tombamento (fase) e a data em que ocorreu o tombamento (data_tombamento). Usada no painel "V0 - Clientes legados x Tombados" para acompanhar a migração de clientes legados.
+"""
+
+[[dataset.example]]
+title = "Clientes por fase de tombamento"
+sql = """
+SELECT
+    fase,
+    COUNT(*) AS qtd_clientes
+FROM public."cs_operations_help360_tombamento"
+GROUP BY fase
+ORDER BY qtd_clientes DESC;
+"""
+
+[[dataset.example]]
+title = "Tombamentos realizados nos últimos 90 dias"
+sql = """
+SELECT
+    cliente,
+    fase,
+    data_tombamento
+FROM public."cs_operations_help360_tombamento"
+WHERE data_tombamento >= CURRENT_DATE - INTERVAL '90 days'
+ORDER BY data_tombamento DESC;
+"""
+
+[[dataset]]
+name = "currency_values"
+title = "Cotações de Moedas"
+description = """
+Uma linha por moeda (currency) e data de referência (value_date), com o valor de compra (buy_value) e o valor de venda (sell_value). Usada como referência auxiliar pela view_tpv_cnpjs, apoiando cálculos que envolvem conversão de valores em moeda estrangeira.
+"""
+
+[[dataset.example]]
+title = "Última cotação por moeda"
+sql = """
+SELECT DISTINCT ON (currency)
+    currency,
+    buy_value,
+    sell_value,
+    value_date
+FROM public."currency_values"
+ORDER BY currency, value_date DESC;
+"""
+
+[[dataset.example]]
+title = "Cotações dos últimos 30 dias"
+sql = """
+SELECT
+    currency,
+    value_date,
+    buy_value,
+    sell_value
+FROM public."currency_values"
+WHERE value_date >= CURRENT_DATE - INTERVAL '30 days'
+ORDER BY currency, value_date DESC;
+"""
+
+[[dataset]]
+name = "de_x_para_clientes"
+title = "De-Para de Clientes"
+description = """
+Tabela auxiliar com uma linha por cliente, mapeando o identificador e o nome do cliente no sistema Vhelper (id_vhelper_customers, name_vhelper_customers) para o identificador (c_id) e o nome (name_cadastro_clientes) usados no cadastro interno de clientes, além da franquia e do ERP associado (erp). Usada no painel "Benchmark entre Clientes" para padronizar a identificação de clientes entre diferentes fontes.
+"""
+
+[[dataset.example]]
+title = "Clientes por ERP"
+sql = """
+SELECT
+    erp,
+    COUNT(*) AS qtd_clientes
+FROM public."de_x_para_clientes"
+GROUP BY erp
+ORDER BY qtd_clientes DESC;
+"""
+
+[[dataset.example]]
+title = "Mapeamento de nomes entre Vhelper e cadastro"
+sql = """
+SELECT
+    c_id,
+    name_vhelper_customers,
+    name_cadastro_clientes,
+    franquia
+FROM public."de_x_para_clientes"
+ORDER BY name_cadastro_clientes;
+"""
+
+[[dataset]]
+name = "divergencias_total"
+title = "Divergências de Notas Fiscais"
+description = """
+Uma linha por cliente (c_id), mês de referência (mes_criacao, mes_emissao, mes_conclusao), tipo de conclusão do fluxo (tipo_conclusao), tipo de divergência (divergencia) e fluxo (nome_fluxo), envolvendo um par fornecedor/tomador (cnpj_fornecedor, cnpj_tomador), com a quantidade de notas fiscais nessa condição (qtde_notas). Usada nos painéis "Benchmark entre Clientes" e "Relatório Geral - V360 [copy]" para acompanhar o volume de divergências no processamento de notas.
+"""
+
+[[dataset.example]]
+title = "Quantidade de notas divergentes por tipo e mês"
+sql = """
+SELECT
+    mes_criacao,
+    divergencia,
+    SUM(qtde_notas) AS total_notas
+FROM public."divergencias_total"
+GROUP BY mes_criacao, divergencia
+ORDER BY mes_criacao DESC, total_notas DESC;
+"""
+
+[[dataset.example]]
+title = "Fornecedores com mais notas divergentes"
+sql = """
+SELECT
+    fornecedor,
+    cnpj_fornecedor,
+    SUM(qtde_notas) AS total_notas
+FROM public."divergencias_total"
+GROUP BY fornecedor, cnpj_fornecedor
+ORDER BY total_notas DESC
+LIMIT 50;
+"""
+
+[[dataset]]
+name = "event_instances"
+title = "Eventos de Instâncias de Processo"
+description = """
+Uma linha por evento disparado durante a execução de uma tarefa no motor de automação de processos. As colunas `event` e `task_id` identificam o tipo do evento e a tarefa relacionada, enquanto `c_id` identifica o cliente. Não é usada diretamente em painéis, mas serve de fonte para a materialized view mview_automatismo, que consolida indicadores de automatismo.
+"""
+
+[[dataset.example]]
+title = "Quantidade de eventos por tipo"
+sql = """
+SELECT event, count(*) AS qtd_eventos
+FROM public."event_instances"
+GROUP BY event
+ORDER BY qtd_eventos DESC;
+"""
+
+[[dataset.example]]
+title = "Tarefas distintas geradoras de eventos por cliente"
+sql = """
+SELECT c_id, count(DISTINCT task_id) AS tarefas_distintas, count(*) AS qtd_eventos
+FROM public."event_instances"
+GROUP BY c_id
+ORDER BY qtd_eventos DESC
+LIMIT 20;
+"""
+
+[[dataset]]
+name = "fornecedor_notas_e_ultimo_acesso_30_dias"
+title = "Notas e Último Acesso de Fornecedores (30 Dias)"
+description = """
+Uma linha por cliente, tipo de documento e mês de criação/conclusão, trazendo a quantidade de CNPJs de fornecedores (qnty_supplier_cnpj) associados e as datas do último login do usuário do fornecedor (last_supplier_user_login_at) e do usuário root do fornecedor (last_supplier_root_user_login_at), com a data de atualização registrada em day_refresh_at. Alimenta diretamente o painel "Oficial - Indicadores V360", cruzando volume de notas com engajamento de acesso dos fornecedores nos últimos 30 dias.
+"""
+
+[[dataset.example]]
+title = "CNPJs de fornecedores por tipo de documento e mês"
+sql = """
+SELECT document_type, created_at_month, sum(qnty_supplier_cnpj) AS total_cnpjs
+FROM public."fornecedor_notas_e_ultimo_acesso_30_dias"
+WHERE created_at_month >= date_trunc('month', now()) - interval '6 months'
+GROUP BY document_type, created_at_month
+ORDER BY created_at_month DESC, total_cnpjs DESC;
+"""
+
+[[dataset.example]]
+title = "Fornecedores sem acesso recente"
+sql = """
+SELECT c_id, document_type, last_supplier_user_login_at
+FROM public."fornecedor_notas_e_ultimo_acesso_30_dias"
+WHERE last_supplier_user_login_at < now() - interval '30 days'
+ORDER BY last_supplier_user_login_at ASC
+LIMIT 50;
+"""
+
+[[dataset]]
+name = "fornecedor_ocorrencia_por_mes"
+title = "Ocorrência Mensal de Fornecedores"
+description = """
+Uma linha por fornecedor (cnpj, raiz_cnpj, supplier_name), tipo de documento e mês, registrando o mês de criação (created_at_month) e o mês de conclusão (completed_at_month) das notas associadas àquele fornecedor. Usada diretamente no painel "Oficial - Indicadores V360" para acompanhar a atividade mensal dos fornecedores por cliente (c_id).
+"""
+
+[[dataset.example]]
+title = "Fornecedores ativos por mês e tipo de documento"
+sql = """
+SELECT created_at_month, document_type, count(DISTINCT cnpj) AS fornecedores_ativos
+FROM public."fornecedor_ocorrencia_por_mes"
+GROUP BY created_at_month, document_type
+ORDER BY created_at_month DESC;
+"""
+
+[[dataset.example]]
+title = "Grupos econômicos (raiz_cnpj) com mais ocorrências"
+sql = """
+SELECT raiz_cnpj, supplier_name, count(*) AS ocorrencias
+FROM public."fornecedor_ocorrencia_por_mes"
+GROUP BY raiz_cnpj, supplier_name
+ORDER BY ocorrencias DESC
+LIMIT 20;
+"""
+
+[[dataset]]
+name = "fornecedor_primeira_ocorrencia"
+title = "Primeira Ocorrência de Fornecedores"
+description = """
+Uma linha por cliente (c_id), mês e tipo de documento, com a quantidade de CNPJs de fornecedores (qnty_cnpjs) que tiveram sua primeira ocorrência de nota naquele mês. É um indicador de novos fornecedores ativados ao longo do tempo, usado diretamente no painel "Oficial - Indicadores V360".
+"""
+
+[[dataset.example]]
+title = "Novos fornecedores por mês"
+sql = """
+SELECT month, document_type, sum(qnty_cnpjs) AS novos_fornecedores
+FROM public."fornecedor_primeira_ocorrencia"
+WHERE month >= date_trunc('month', now()) - interval '12 months'
+GROUP BY month, document_type
+ORDER BY month DESC;
+"""
+
+[[dataset]]
+name = "fup_database_avg_daily_growth"
+title = "Crescimento Diário Médio das Tabelas"
+description = """
+Materialized view com uma linha por tabela (relation) do banco monitorado, trazendo o tamanho registrado há 30 dias (size_30_days_ago), o tamanho atual (size_now) e o crescimento médio diário em GB (avg_daily_growth). É calculada a partir da tabela fup_database_tables: agrupa o tamanho total por relation e dia nos últimos 30 dias, pega o primeiro e o último dia de cada tabela e divide a diferença de tamanho por 30. Alimenta o painel "Monitoramento Banco de Dados".
+"""
+
+[[dataset.example]]
+title = "Tabelas com maior crescimento diário"
+sql = """
+SELECT relation, size_30_days_ago, size_now, avg_daily_growth
+FROM public."fup_database_avg_daily_growth"
+ORDER BY avg_daily_growth DESC
+LIMIT 20;
+"""
+
+[[dataset.example]]
+title = "Tabelas que estão diminuindo de tamanho"
+sql = """
+SELECT relation, avg_daily_growth
+FROM public."fup_database_avg_daily_growth"
+WHERE avg_daily_growth < 0
+ORDER BY avg_daily_growth ASC;
+"""
+
+[[dataset]]
+name = "fup_database_size"
+title = "Tamanho dos Bancos de Dados"
+description = """
+Uma linha por snapshot (created_at) do tamanho total de um banco de dados (database_name), com o valor em bytes (size_num), em formato legível (size_pretty) e em GB (size_gb). É coletada periodicamente e alimenta o painel "Monitoramento Banco de Dados" para acompanhar o crescimento dos bancos ao longo do tempo.
+"""
+
+[[dataset.example]]
+title = "Evolução diária do tamanho por banco de dados"
+sql = """
+SELECT database_name, date_trunc('day', created_at) AS dia, max(size_gb) AS tamanho_gb
+FROM public."fup_database_size"
+WHERE created_at >= now() - interval '30 days'
+GROUP BY database_name, date_trunc('day', created_at)
+ORDER BY dia DESC;
+"""
+
+[[dataset]]
+name = "fup_database_tables"
+title = "Tamanho das Tabelas do Banco de Dados"
+description = """
+Uma linha por snapshot (created_at) do tamanho de cada tabela (relation) de um banco de dados (database_name), detalhando o tamanho dos dados (table_size), dos índices (index_size), o total (total_size / total_size_gb) e a contagem estimada de linhas (estimated_count). É a base usada pela materialized view fup_database_avg_daily_growth e alimenta diretamente o painel "Monitoramento Banco de Dados".
+"""
+
+[[dataset.example]]
+title = "Maiores tabelas no snapshot mais recente"
+sql = """
+SELECT relation, max(total_size_gb) AS tamanho_gb, max(estimated_count) AS linhas_estimadas
+FROM public."fup_database_tables"
+WHERE created_at >= now() - interval '1 day'
+GROUP BY relation
+ORDER BY tamanho_gb DESC
+LIMIT 20;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_autenticidade"
+title = "Financeiro - Parâmetros de Autenticidade"
+description = """
+Uma linha por cliente com os parâmetros comerciais do serviço de autenticidade de notas: valor cobrado por consulta de nota (consulta_por_nota), franquia total contratada (franquia_total), mensalidade e valor por excedente. Planilha do Google Sheets importada como referência de precificação, usada como fonte pela materialized view mview_financeiro_medicao_autenticidade.
+"""
+
+[[dataset.example]]
+title = "Parâmetros comerciais de autenticidade por cliente"
+sql = """
+SELECT cliente, franquia_total, mensalidade, valor_por_excedente
+FROM public."google_sheets_financeiro_autenticidade"
+ORDER BY mensalidade DESC;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_boletos"
+title = "Financeiro - Parâmetros de Boletos"
+description = """
+Uma linha por cliente e serviço contratado de boletos, com franquia total (franquia_total), mensalidade e valor por excedente. Planilha do Google Sheets importada como tabela de referência comercial, consumida pela materialized view mview_financeiro_medicao_boletos.
+"""
+
+[[dataset.example]]
+title = "Franquia e mensalidade contratadas por cliente"
+sql = """
+SELECT cliente, servico, franquia_total, mensalidade
+FROM public."google_sheets_financeiro_boletos"
+ORDER BY franquia_total DESC;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_cadastro"
+title = "Financeiro - Cadastro de Clientes"
+description = """
+Uma linha por cliente (cadastro mestre comercial), com status e etapa do contrato (status, etapa_atual), responsáveis (ae_responsavel, cs_responsavel), datas do ciclo de vida (data_inicio_contrato, data_inicio_mrr, data_inicio_operacao, data_fim_contrato) e parâmetros financeiros/operacionais como mensalidade, franquia, classificacao e horas de suporte contratadas. Planilha do Google Sheets importada como cadastro de referência, usada pelas materialized views mview_financeiro_medicao_antecipacao e mview_financeiro_medicao_notas.
+"""
+
+[[dataset.example]]
+title = "Clientes e mensalidade total por status"
+sql = """
+SELECT status, count(*) AS qtd_clientes, sum(mensalidade) AS mensalidade_total
+FROM public."google_sheets_financeiro_cadastro"
+GROUP BY status
+ORDER BY qtd_clientes DESC;
+"""
+
+[[dataset.example]]
+title = "Contratos ativos iniciados nos últimos 12 meses"
+sql = """
+SELECT cliente, ae_responsavel, cs_responsavel, data_inicio_contrato
+FROM public."google_sheets_financeiro_cadastro"
+WHERE data_fim_contrato IS NULL
+  AND data_inicio_contrato >= now() - interval '12 months'
+ORDER BY data_inicio_contrato DESC;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_concessionarias"
+title = "Financeiro - Parâmetros de Concessionárias"
+description = """
+Uma linha por cliente e serviço de concessionárias, com franquia total contratada (franquia_total), mensalidade e valor por excedente. Planilha do Google Sheets importada como referência comercial, consumida pela materialized view mview_financeiro_medicao_concessionarias.
+"""
+
+[[dataset.example]]
+title = "Franquia contratada por cliente"
+sql = """
+SELECT cliente, servico, franquia_total, valor_por_excedente
+FROM public."google_sheets_financeiro_concessionarias"
+ORDER BY franquia_total DESC;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_faixa_excedente"
+title = "Financeiro - Faixas de Excedente"
+description = """
+Uma linha por cliente e faixa de excedente, delimitada por limite_inferior_faixa e limite_superior_faixa, com o valor unitário (valor_unitario) cobrado por unidade excedente naquela faixa. Planilha do Google Sheets importada como tabela de precificação escalonada, usada pela materialized view mview_financeiro_medicao_notas para calcular cobranças por excedente.
+"""
+
+[[dataset.example]]
+title = "Faixas de precificação por cliente"
+sql = """
+SELECT cliente, limite_inferior_faixa, limite_superior_faixa, valor_unitario
+FROM public."google_sheets_financeiro_faixa_excedente"
+ORDER BY cliente, limite_inferior_faixa;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_outros_docs"
+title = "Financeiro - Parâmetros de Outros Documentos"
+description = """
+Uma linha por cliente e serviço de outros documentos, com franquia total (franquia_total), mensalidade e valor por excedente. Planilha do Google Sheets importada como referência comercial, consumida pela materialized view mview_financeiro_medicao_outros_docs.
+"""
+
+[[dataset.example]]
+title = "Mensalidade contratada por cliente"
+sql = """
+SELECT cliente, servico, mensalidade
+FROM public."google_sheets_financeiro_outros_docs"
+ORDER BY mensalidade DESC;
+"""
+
+[[dataset]]
+name = "google_sheets_financeiro_pedidos"
+title = "Financeiro - Parâmetros de Pedidos"
+description = """
+Uma linha por cliente e serviço de pedidos, com franquia total (franquia_total), mensalidade e valor por excedente. Planilha do Google Sheets importada como referência comercial, consumida pela materialized view mview_financeiro_medicao_pedidos.
+"""
+
+[[dataset.example]]
+title = "Franquia e valor de excedente por cliente"
+sql = """
+SELECT cliente, servico, franquia_total, valor_por_excedente
+FROM public."google_sheets_financeiro_pedidos"
+ORDER BY franquia_total DESC;
+"""
+
+[[dataset]]
+name = "hubspot_deals"
+title = "Negócios do HubSpot (CRM)"
+description = """
+Uma linha por negócio (deal) cadastrado no HubSpot, identificado por `hubspot_id`. Traz dados comerciais como valor (`amount`, `amount_in_home_currency`), datas de criação e fechamento (`createdate`, `closedate`) e motivos de ganho ou perda (`closed_won_reason`, `closed_lost_reason`), além de dezenas de campos de qualificação e pontuação usados pelo time comercial (ABM, FPN, etapas de CS) para acompanhar o funil de vendas. É usada no dashboard "Comercial V1".
+"""
+
+[[dataset.example]]
+title = "Negócios criados por mês e valor total"
+sql = """
+SELECT
+    date_trunc('month', createdate) AS mes_criacao,
+    count(*) AS qtd_negocios,
+    sum(amount) AS valor_total
+FROM public."hubspot_deals"
+WHERE createdate >= now() - interval '12 months'
+GROUP BY 1
+ORDER BY 1;
+"""
+
+[[dataset.example]]
+title = "Motivos de perda de negócios fechados"
+sql = """
+SELECT
+    closed_lost_reason,
+    count(*) AS qtd_negocios_perdidos
+FROM public."hubspot_deals"
+WHERE closedate IS NOT NULL
+  AND closed_lost_reason IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;
+"""
+
+[[dataset]]
+name = "human_tasks"
+title = "Tarefas Humanas de Processos"
+description = """
+Uma linha por tarefa (human task) executada dentro de uma instância de processo (`process_instance_id`) do V360, vinculada a uma definição de tarefa (`task_definition_id`) e a um cliente (`c_id`). Registra a criação (`created_at`) e conclusão (`completed_at`) da tarefa, quem a concluiu (`completed_by_id`) e seu status (`status_id`). É a tabela-base usada para montar a matview `mview_automatismo`, que classifica tarefas em manuais ou automáticas.
+"""
+
+[[dataset.example]]
+title = "Tarefas concluídas por dia nos últimos 30 dias"
+sql = """
+SELECT
+    date_trunc('day', completed_at) AS dia,
+    count(*) AS qtd_tarefas_concluidas
+FROM public."human_tasks"
+WHERE completed_at >= now() - interval '30 days'
+GROUP BY 1
+ORDER BY 1;
+"""
+
+[[dataset.example]]
+title = "Tempo médio de conclusão por definição de tarefa"
+sql = """
+SELECT
+    task_definition_id,
+    count(*) AS qtd_tarefas,
+    avg(extract(epoch FROM completed_at - created_at)) / 3600 AS horas_medias
+FROM public."human_tasks"
+WHERE completed_at IS NOT NULL
+GROUP BY 1
+ORDER BY 3 DESC;
+"""
+
+[[dataset]]
+name = "itens"
+title = "Itens de Notas Fiscais"
+description = """
+Uma linha por item (linha de produto ou serviço) de uma nota fiscal (`tax_document_id`), com código do item (`item_code`, `erp_item_code`, `erp_item_name`), quantidade, preço unitário e valor total (`quantity`, `unit_price`, `total_value`), além do código CFOP e do pedido de compra associado (`purchase_order`). Não é usada diretamente em nenhum painel ativo, mas alimenta a matview `mview_financeiro_medicao_notas`.
+"""
+
+[[dataset.example]]
+title = "Valor total de itens por pedido de compra"
+sql = """
+SELECT
+    purchase_order,
+    count(*) AS qtd_itens,
+    sum(total_value) AS valor_total
+FROM public."itens"
+WHERE purchase_order IS NOT NULL
+GROUP BY 1
+ORDER BY 3 DESC
+LIMIT 100;
+"""
+
+[[dataset.example]]
+title = "Itens criados nos últimos 7 dias"
+sql = """
+SELECT
+    tax_document_id,
+    item_code,
+    quantity,
+    unit_price,
+    total_value
+FROM public."itens"
+WHERE created_at >= now() - interval '7 days'
+ORDER BY created_at DESC
+LIMIT 100;
+"""
+
+[[dataset]]
+name = "kpi_big_numbers_notas"
+title = "KPI - Big Numbers de Notas"
+description = """
+Tabela pré-agregada com uma linha por cliente (`c_id`), tipo de nota (`nota_tipo`) e fluxo (`nome_fluxo`), já contendo quantidade e valor somados (`quantidade`, `valor`). Traz múltiplas datas de referência do período (`mes_created`, `mes_completed`, `mes_emissao`) para permitir cortes temporais diferentes, além de CNPJs e moeda envolvidos. Não é usada diretamente em painel ativo, alimentando a view `view_tpv_cnpjs`.
+"""
+
+[[dataset.example]]
+title = "Quantidade e valor de notas por mês de emissão e tipo"
+sql = """
+SELECT
+    mes_emissao,
+    nota_tipo,
+    sum(quantidade) AS qtd_total,
+    sum(valor) AS valor_total
+FROM public."kpi_big_numbers_notas"
+GROUP BY 1, 2
+ORDER BY 1 DESC;
+"""
+
+[[dataset]]
+name = "kpi_captura_medicao"
+title = "KPI - Medição de Captura de Notas"
+description = """
+Tabela pré-agregada com uma linha por combinação de cliente (`c_id`), tipo de nota (`tipo_nota`), mês de emissão (`mes_emissao`), mês de criação (`mes_criacao`), tipo de finalização (`completion_type`) e forma de captura da nota (`nota_captura`), trazendo a quantidade de notas (`qtde_notas`). É usada no painel "CPI Captura - Gerencial - Medição" para acompanhar o volume de notas capturadas por fluxo (`nome_fluxo`).
+"""
+
+[[dataset.example]]
+title = "Notas capturadas por mês de emissão e tipo de finalização"
+sql = """
+SELECT
+    mes_emissao,
+    completion_type,
+    sum(qtde_notas) AS qtd_notas
+FROM public."kpi_captura_medicao"
+GROUP BY 1, 2
+ORDER BY 1 DESC;
+"""
+
+[[dataset]]
+name = "kpi_cpi_captura"
+title = "KPI - CPI de Captura por Fornecedor"
+description = """
+Tabela pré-agregada com uma linha por cliente (`c_id`), fornecedor (`razao_social_fornecedor`, `customer_identification_number`) e prefeitura/estado (`cod_prefeitura`, `nome_prefeitura`, `estado`), por mês de emissão e criação da nota. Traz quantidade de notas (`qtde_notas`), estatísticas de prazo entre emissão e captura (`avg_issue_to_capture_days`, `median`) e o indicador `could_have_been_captured`. É usada nos painéis "Benchmark entre Clientes", "Oficial - Indicadores V360" e "Relatório Geral - V360 [copy]".
+"""
+
+[[dataset.example]]
+title = "Prazo médio de captura por cliente"
+sql = """
+SELECT
+    c_id,
+    count(*) AS qtd_registros,
+    avg(avg_issue_to_capture_days) AS media_dias_captura
+FROM public."kpi_cpi_captura"
+WHERE mes_emissao >= (current_date - interval '6 months')
+GROUP BY 1
+ORDER BY 3 DESC;
+"""
+
+[[dataset.example]]
+title = "Notas que poderiam ter sido capturadas"
+sql = """
+SELECT
+    could_have_been_captured,
+    count(*) AS qtd_registros,
+    sum(qtde_notas) AS total_notas
+FROM public."kpi_cpi_captura"
+GROUP BY 1;
+"""
+
+[[dataset]]
+name = "kpi_cpi_captura_autenticidade"
+title = "KPI - Autenticidade na Captura"
+description = """
+Uma linha por documento (`id`) com o resultado da checagem de autenticidade realizada na captura, indicando se a consulta foi feita por robô (`authenticity_from_robot`), o motivo de falha quando houver (`authenticity_fail_reason`), a data de atualização (`authenticity_updated_at`), o valor do documento (`total_value`) e o cliente (`c_id`). É usada no painel "Relatório Geral - V360 [copy]".
+"""
+
+[[dataset.example]]
+title = "Motivos de falha de autenticidade via robô"
+sql = """
+SELECT
+    authenticity_fail_reason,
+    count(*) AS qtd_documentos,
+    sum(total_value) AS valor_total
+FROM public."kpi_cpi_captura_autenticidade"
+WHERE authenticity_from_robot = true
+  AND authenticity_fail_reason IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;
+"""
+
+[[dataset]]
+name = "kpi_integrations_checklist"
+title = "Checklist de KPIs de Integração"
+description = """
+Uma linha por medição de um KPI de qualidade de integração (`nome_kpi`, `identifier_kpi`) para um cliente (`client_id`), comparando o valor medido (`valor_medido`) contra a meta (`alvo`, `operador_alvo`, `unidade_medida`) em um intervalo analisado (`inicio_intervalo_analisado`, `fim_intervalo_analisado`), com o status resultante (`status_medicao`). É usada no painel "Qualidade - Integração".
+"""
+
+[[dataset.example]]
+title = "Últimas medições de KPI por cliente"
+sql = """
+SELECT
+    client_id,
+    nome_kpi,
+    valor_medido,
+    alvo,
+    status_medicao
+FROM public."kpi_integrations_checklist"
+WHERE data_medicao >= now() - interval '30 days'
+ORDER BY data_medicao DESC;
+"""
+
+[[dataset.example]]
+title = "Quantidade de medições por status"
+sql = """
+SELECT
+    status_medicao,
+    count(*) AS qtd_medicoes
+FROM public."kpi_integrations_checklist"
+GROUP BY 1
+ORDER BY 2 DESC;
+"""
+
+[[dataset]]
+name = "leitura_indicador_automatismo"
+title = "Indicador de Automatismo de Leitura Fiscal"
+description = """
+Uma linha por documento fiscal lido (`vinvoice_tax_document_id`) de um cliente (`c_id`), indicando o provedor e template de leitura usados (`provider`, `tesserocr_template`, `textract_template`), a presença de XML/PDF nos anexos e nos resultados de parsing (`has_xml_on_attachments`, `has_pdf_on_attachments`, `has_xml_on_parsing_results`, `has_pdf_on_parsing_results`) e se houve alteração de campos após a leitura (`has_changed_flag`, `changed_columns`). É usada nos painéis "Alerta de Leitura XML" e "Leitura - Indicador de Automatismo Fiscal".
+"""
+
+[[dataset.example]]
+title = "Leituras por provedor e tipo de finalização (30 dias)"
+sql = """
+SELECT
+    provider,
+    completion_type,
+    count(*) AS qtd_leituras
+FROM public."leitura_indicador_automatismo"
+WHERE completed_at >= now() - interval '30 days'
+GROUP BY 1, 2
+ORDER BY 3 DESC;
+"""
+
+[[dataset.example]]
+title = "Presença de XML entre anexos e resultado de parsing"
+sql = """
+SELECT
+    has_xml_on_attachments,
+    has_xml_on_parsing_results,
+    count(*) AS qtd_documentos
+FROM public."leitura_indicador_automatismo"
+GROUP BY 1, 2;
+"""
+
+[[dataset]]
+name = "leitura_indicador_automatismo_concessionarias"
+title = "Indicador de Automatismo de Leitura - Concessionárias"
+description = """
+Uma linha por documento fiscal de concessionária lido (`vinvoice_tax_document_id`) de um cliente (`c_id`), no mesmo modelo da leitura fiscal geral: provedor de leitura (`provider`), tipo do documento (`tax_document_type`), presença de XML/PDF nos anexos e no resultado de parsing, e se houve alteração de campos (`has_changed_flag`, `changed_columns`). Não é usada diretamente em painel ativo; alimenta a view `view_leitura_indicador_automatismo_concessionarias`.
+"""
+
+[[dataset.example]]
+title = "Documentos de concessionária por provedor e alterações"
+sql = """
+SELECT
+    provider,
+    count(*) AS qtd_documentos,
+    sum(CASE WHEN has_changed_flag THEN 1 ELSE 0 END) AS qtd_com_alteracao
+FROM public."leitura_indicador_automatismo_concessionarias"
+GROUP BY 1
+ORDER BY 2 DESC;
+"""
+
+[[dataset]]
+name = "leitura_indicadores"
+title = "Indicadores de Leitura de Notas"
+description = """
+Uma linha por documento fiscal (`tax_document_id`) de um cliente (`c_id`), indicando o fluxo (`fluxo`) e o tipo de entrada da nota (`tipo_entrada`), com a data de criação do documento (`tax_document_created_at`) e de conclusão da leitura (`completed_at`). O campo `field_analysis` (jsonb) traz a análise campo a campo do resultado da leitura. Não é usada diretamente em painel ativo; alimenta a view `view_leitura_indicadores`.
+"""
+
+[[dataset.example]]
+title = "Documentos lidos por fluxo e tipo de entrada (30 dias)"
+sql = """
+SELECT
+    fluxo,
+    tipo_entrada,
+    count(*) AS qtd_documentos
+FROM public."leitura_indicadores"
+WHERE tax_document_created_at >= now() - interval '30 days'
+GROUP BY 1, 2
+ORDER BY 3 DESC;
+"""
+
+[[dataset]]
+name = "mview_automatismo"
+title = "Automatismo de Tarefas por Nota"
+description = """
+Materialized view com uma linha por tarefa (`id_tarefa`) executada no processamento de cada nota fiscal (`tax_documents`) dos últimos 6 meses, cruzando `tax_documents`, `process_instances`, `processes`, `human_tasks`, `task_definitions`, `statuses`, `users` e `event_instances`. Classifica cada tarefa como manual ou automática (`tarefa_manual`, `processo_manual`) com base em quem a concluiu e se houve evento de integração de ERP associado, e indica se o fluxo é um "hub de entrada" (`hub_de_entrada`). É usada no painel "Automatismo".
+"""
+
+[[dataset.example]]
+title = "Tarefas manuais x automáticas por fluxo"
+sql = """
+SELECT
+    nome_fluxo,
+    tarefa_manual,
+    count(*) AS qtd_tarefas
+FROM public."mview_automatismo"
+GROUP BY 1, 2
+ORDER BY 1, 2;
+"""
+
+[[dataset.example]]
+title = "Tempo médio de execução por etapa"
+sql = """
+SELECT
+    step,
+    count(*) AS qtd_tarefas,
+    avg(extract(epoch FROM finalizacao_tarefa - criacao_tarefa)) / 3600 AS horas_medias
+FROM public."mview_automatismo"
+WHERE finalizacao_tarefa IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_antecipacao"
+title = "Medição Financeira - Antecipação"
+description = """
+Materialized view com uma linha por cliente ativo com antecipação de recebíveis habilitada (`cliente`, `c_id`) e por mês (`mes`) desde janeiro de 2026, cruzando o cadastro de clientes (`google_sheets_financeiro_cadastro`) com a tabela `anticipation`. Traz quantidade de títulos e faturas antecipados (`qtd_titulos_antecipados`, `qtd_faturas_antecipadas`), valores antecipados e pagos (`valor_total_antecipado`, `valor_pago_antecipado`) e a divisão por serviço de factoring (`qtd_own_cash`, `qtd_financial_portal`, `qtd_abc`). É usada no painel "[FINANCEIRO] Medições".
+"""
+
+[[dataset.example]]
+title = "Antecipações por cliente nos últimos 6 meses"
+sql = """
+SELECT
+    cliente,
+    mes,
+    qtd_titulos_antecipados,
+    valor_total_antecipado,
+    valor_pago_antecipado
+FROM public."mview_financeiro_medicao_antecipacao"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, cliente;
+"""
+
+[[dataset.example]]
+title = "Volume mensal por serviço de factoring"
+sql = """
+SELECT
+    mes,
+    sum(qtd_own_cash) AS qtd_own_cash,
+    sum(qtd_financial_portal) AS qtd_financial_portal,
+    sum(qtd_abc) AS qtd_abc
+FROM public."mview_financeiro_medicao_antecipacao"
+GROUP BY 1
+ORDER BY 1;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_autenticidade"
+title = "Medição Financeira - Autenticidade"
+description = """
+Materialized view com uma linha por cliente (`cliente`) e mês (`mes`), agregando as consultas de autenticidade feitas sobre `tax_documents` junto com `authenticity` (`total_consultas`). Compara o total de consultas com a franquia contratada (`franquia_total`, `mensalidade`) para calcular o excedente e seu valor de cobrança (`excedente`, `valor_por_excedente`, `valor_excedente_total`). É usada no painel "[FINANCEIRO] Medições".
+"""
+
+[[dataset.example]]
+title = "Excedente de autenticidade por cliente e mês"
+sql = """
+SELECT
+    cliente,
+    mes,
+    total_consultas,
+    franquia_total,
+    excedente,
+    valor_excedente_total
+FROM public."mview_financeiro_medicao_autenticidade"
+WHERE mes >= date_trunc('month', now()) - interval '3 months'
+ORDER BY mes DESC, cliente;
+"""
+
+[[dataset.example]]
+title = "Receita mensal de excedente de autenticidade"
+sql = """
+SELECT
+    mes,
+    sum(valor_excedente_total) AS receita_excedente
+FROM public."mview_financeiro_medicao_autenticidade"
+GROUP BY 1
+ORDER BY 1;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_boletos"
+title = "Medição Financeira de Boletos"
+description = """
+Materialized view usada na medição financeira do serviço de boletos por cliente e mês. Cada linha representa um cliente (`c_id`), serviço e mês (`mes`), combinando os valores contratados (`franquia_total`, `mensalidade`, `valor_por_excedente`) vindos da planilha `google_sheets_financeiro_boletos` com a contagem real de boletos emitidos (`qtde_notas`), obtida a partir de `bank_slips` (boletos com `transaction_id` preenchido e `due_date` posterior à criação). O `valor_total` é o valor cobrado pelo excedente de boletos acima da franquia contratada, nunca sendo negativo.
+"""
+
+[[dataset.example]]
+title = "Valor total cobrado por cliente no mês"
+sql = """
+SELECT
+    c_id,
+    servico,
+    mes,
+    qtde_notas,
+    valor_total
+FROM public."mview_financeiro_medicao_boletos"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, valor_total DESC;
+"""
+
+[[dataset.example]]
+title = "Excedente acumulado por serviço"
+sql = """
+SELECT
+    servico,
+    SUM(qtde_notas) AS total_boletos,
+    SUM(valor_total) AS total_excedente_cobrado
+FROM public."mview_financeiro_medicao_boletos"
+GROUP BY servico
+ORDER BY total_excedente_cobrado DESC;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_concessionarias"
+title = "Medição Financeira de Concessionárias"
+description = """
+Materialized view de medição financeira para faturas de concessionárias (energia, gás, telecom e água) por cliente e mês. Uma linha por combinação de `cliente`, `servico` e `mes`, unindo os parâmetros contratuais da planilha `google_sheets_financeiro_concessionarias` (`franquia_total`, `mensalidade`, `valor_por_excedente`) com a contagem de documentos fiscais (`qtde_notas`) do tipo `Vinvoice::ElectricityInvoice`, `Vinvoice::GasInvoice`, `Vinvoice::TelecomInvoice` e `Vinvoice::WaterInvoice`, extraída de `tax_documents`. O `valor_total` é calculado como o excedente sobre a franquia multiplicado pelo valor por excedente.
+"""
+
+[[dataset.example]]
+title = "Faturas de concessionárias e cobrança por cliente"
+sql = """
+SELECT
+    cliente,
+    servico,
+    mes,
+    qtde_notas,
+    valor_total
+FROM public."mview_financeiro_medicao_concessionarias"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, cliente;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_notas"
+title = "Medição Financeira de Notas Fiscais"
+description = """
+Materialized view central de medição financeira de notas fiscais, com uma linha por cliente (`cliente`/`c_id`) e mês (`mes`), somando as informações contratuais (franquia, mensalidade, datas de contrato) aos volumes reais processados em `tax_documents` e `process_instances`. Traz contagens segmentadas por status de processamento (`qtd_em_aberto`, `qtd_erro`, `qtd_notas_total`) e por tipo de documento (`qtd_material`, `qtd_servico`, `qtd_cte`, `qtd_cteos`, `qtd_remessa`, `qtd_transferencia`, entre outros), além do excedente sobre a franquia contratada (`qtd_excedente_volumetria`, `total_excedente`) e um indicador booleano de estouro de franquia (`estourou_franquia`).
+"""
+
+[[dataset.example]]
+title = "Estouro de franquia por cliente no mês"
+sql = """
+SELECT
+    cliente,
+    mes,
+    qtd_notas_total,
+    total_excedente,
+    estourou_franquia
+FROM public."mview_financeiro_medicao_notas"
+WHERE estourou_franquia = true
+    AND mes >= date_trunc('month', now()) - interval '3 months'
+ORDER BY total_excedente DESC;
+"""
+
+[[dataset.example]]
+title = "Volume de notas por tipo de documento"
+sql = """
+SELECT
+    cliente,
+    mes,
+    SUM(qtd_cte) AS total_cte,
+    SUM(qtd_material) AS total_material,
+    SUM(qtd_servico) AS total_servico,
+    SUM(qtd_erro) AS total_erro
+FROM public."mview_financeiro_medicao_notas"
+GROUP BY cliente, mes
+ORDER BY mes DESC;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_outros_docs"
+title = "Medição Financeira de Outros Documentos"
+description = """
+Materialized view de medição financeira para documentos fiscais classificados como "outros" (`Vinvoice::OtherInvoice` e `Vinvoice::SpotOtherInvoice`), com uma linha por `cliente`, `servico` e `mes`. Combina os parâmetros contratuais da planilha `google_sheets_financeiro_outros_docs` com a contagem mensal desses documentos em `tax_documents`, calculando o `valor_total` cobrado pelo volume que excede a `franquia_total` multiplicado pelo `valor_por_excedente`.
+"""
+
+[[dataset.example]]
+title = "Cobrança de excedente por cliente"
+sql = """
+SELECT
+    cliente,
+    servico,
+    mes,
+    qtde_notas,
+    valor_total
+FROM public."mview_financeiro_medicao_outros_docs"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, valor_total DESC;
+"""
+
+[[dataset]]
+name = "mview_financeiro_medicao_pedidos"
+title = "Medição Financeira de Pedidos de Compra"
+description = """
+Materialized view de medição financeira de pedidos de compra, com uma linha por `cliente`, `servico` e `mes`. Une os parâmetros contratuais da planilha `google_sheets_financeiro_pedidos` (`franquia_total`, `mensalidade`, `valor_por_excedente`) à contagem mensal de pedidos criados na tabela `purchase_orders` (`qtde_notas`), calculando o `valor_total` cobrado pelo volume de pedidos que excede a franquia contratada.
+"""
+
+[[dataset.example]]
+title = "Pedidos de compra e valor cobrado por mês"
+sql = """
+SELECT
+    cliente,
+    mes,
+    qtde_notas,
+    valor_total
+FROM public."mview_financeiro_medicao_pedidos"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, valor_total DESC;
+"""
+
+[[dataset]]
+name = "mview_fornecedores_logins_comparativo"
+title = "Comparativo de Logins de Fornecedores"
+description = """
+Materialized view que compara, por cliente (`c_id`) e mês (`mes`), o volume de logins de fornecedores entre o portal principal e o Vsupplier. Agrega `mview_oficial_fornecedores_usuarios` para calcular `Logins por CNPJ Raiz` e `Logins por CNPJ Único` (por CNPJ completo), e `portaldofornecedor_usuarios_login` para calcular `Logins por CNPJ Raiz (Vsupplier)`, contando CNPJs raiz distintos que efetuaram login em cada mês.
+"""
+
+[[dataset.example]]
+title = "Comparativo de logins por cliente"
+sql = """
+SELECT
+    c_id,
+    mes,
+    "Logins por CNPJ Raiz",
+    "Logins por CNPJ Único",
+    "Logins por CNPJ Raiz (Vsupplier)"
+FROM public."mview_fornecedores_logins_comparativo"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+ORDER BY mes DESC, "Logins por CNPJ Raiz" DESC;
+"""
+
+[[dataset]]
+name = "mview_oficial_fornecedores_com_nota"
+title = "Fornecedores com Nota Emitida"
+description = """
+Materialized view com uma linha por combinação de cliente (`c_id`), CNPJ do fornecedor (`cnpj`) e dia de emissão (`created_at`), listando fornecedores que tiveram ao menos um documento fiscal processado com sucesso (ou arquivado) em `tax_documents`, cruzado com `process_instances` para filtrar apenas processos concluídos com `SUCCESS`, `ARCHIVED` ou ainda em aberto.
+"""
+
+[[dataset.example]]
+title = "Fornecedores com nota emitida por dia"
+sql = """
+SELECT
+    c_id,
+    created_at::date AS dia,
+    COUNT(DISTINCT cnpj) AS fornecedores_com_nota
+FROM public."mview_oficial_fornecedores_com_nota"
+WHERE created_at >= now() - interval '90 days'
+GROUP BY c_id, created_at::date
+ORDER BY dia DESC;
+"""
+
+[[dataset]]
+name = "mview_oficial_fornecedores_usuarios"
+title = "Usuários de Fornecedores"
+description = """
+Materialized view com uma linha por combinação de cliente (`c_id`), CNPJ do fornecedor (`cnpj`) e usuário (`email`), trazendo a data do último login (`ultimo_login`). É construída a partir do cruzamento de `suppliers`, `supplier_users` e `user_logins` (agregando o login mais recente por usuário). Serve de base para `mview_fornecedores_logins_comparativo`.
+"""
+
+[[dataset.example]]
+title = "Usuários de fornecedores sem login recente"
+sql = """
+SELECT
+    c_id,
+    cnpj,
+    email,
+    ultimo_login
+FROM public."mview_oficial_fornecedores_usuarios"
+WHERE ultimo_login < now() - interval '90 days'
+ORDER BY ultimo_login ASC;
+"""
+
+[[dataset]]
+name = "mview_task_fact"
+title = "Fato de Tarefas de Processos"
+description = """
+Tabela fato com uma linha por tarefa (`id_task_v360`) executada dentro de um processo (`id_process_v360`) associado a um documento fiscal (`id_tax_document_v360`). Traz métricas de tempo (`spent_minutes_in_task`, `spent_days_in_task`, `aging_minutes_open_task`, `aging_days_open_task`, `spent_workhours_24_5_in_task`), atributos do documento (`access_key`, `number`, `operation_nature`, `document_type`, `supplier_cnpj`, `customer_cnpj`, `total_value`) e do processo/tarefa (`workflow_name`, `task_name`, `task_type`, `task_status`, `task_completion_status`, `task_completed`, `business_unit`, `tag_name`). É usada para monitoramento operacional do datalake.
+"""
+
+[[dataset.example]]
+title = "Tempo médio gasto por tipo de tarefa"
+sql = """
+SELECT
+    task_type,
+    task_status,
+    COUNT(*) AS qtd_tarefas,
+    AVG(spent_minutes_in_task) AS media_minutos_gastos,
+    AVG(aging_days_open_task) AS media_dias_em_aberto
+FROM public."mview_task_fact"
+WHERE task_created_at >= now() - interval '30 days'
+GROUP BY task_type, task_status
+ORDER BY qtd_tarefas DESC;
+"""
+
+[[dataset.example]]
+title = "Tarefas em aberto há mais tempo"
+sql = """
+SELECT
+    id_task_v360,
+    workflow_name,
+    task_name,
+    supplier_name,
+    aging_days_open_task
+FROM public."mview_task_fact"
+WHERE task_completed = false
+ORDER BY aging_days_open_task DESC
+LIMIT 100;
+"""
+
+[[dataset]]
+name = "portaldofornecedor_logins_eventos"
+title = "Eventos de Login do Portal do Fornecedor"
+description = """
+Tabela com uma linha por evento de login (`audit_id`) no Portal do Fornecedor, registrando a data/hora do login (`data_login`), o CNPJ (`cnpj`) e CNPJ raiz (`cnpj_raiz`) do fornecedor, o e-mail do usuário (`usuario_email`), e os nomes do cliente (`nome_cliente`) e do fornecedor (`nome_fornecedor`) envolvidos.
+"""
+
+[[dataset.example]]
+title = "Eventos de login recentes por cliente"
+sql = """
+SELECT
+    nome_cliente,
+    nome_fornecedor,
+    usuario_email,
+    data_login
+FROM public."portaldofornecedor_logins_eventos"
+WHERE data_login >= now() - interval '30 days'
+ORDER BY data_login DESC;
+"""
+
+[[dataset.example]]
+title = "Contagem de logins por CNPJ raiz e cliente"
+sql = """
+SELECT
+    nome_cliente,
+    cnpj_raiz,
+    COUNT(*) AS qtd_logins
+FROM public."portaldofornecedor_logins_eventos"
+GROUP BY nome_cliente, cnpj_raiz
+ORDER BY qtd_logins DESC;
+"""
+
+[[dataset]]
+name = "portaldofornecedor_users_by_monthday"
+title = "Primeiro Login de Fornecedores por Dia do Mês"
+description = """
+View que analisa, por ano, mês e dia do mês (`year`, `month`, `day_of_month`), quantos CNPJs raiz distintos (`distinct_cnpj_raiz_count`) tiveram seu PRIMEIRO login do mês naquele dia específico, a partir de `portaldofornecedor_usuarios_login`. Também classifica o dia em uma semana genérica (`generic_week_date`) e em uma data genérica de calendário (`generic_day_date`), úteis para comparar a distribuição de primeiros logins ao longo do mês entre diferentes períodos.
+"""
+
+[[dataset.example]]
+title = "Distribuição de primeiros logins por semana genérica"
+sql = """
+SELECT
+    generic_week_date,
+    SUM(distinct_cnpj_raiz_count) AS total_primeiros_logins
+FROM public."portaldofornecedor_users_by_monthday"
+GROUP BY generic_week_date
+ORDER BY generic_week_date;
+"""
+
+[[dataset]]
+name = "portaldofornecedor_usuarios"
+title = "Usuários do Portal do Fornecedor"
+description = """
+Tabela com uma linha por usuário (`user_id`) cadastrado no Portal do Fornecedor, trazendo e-mail (`user_email`), cargo e departamento (`user_job_role`, `user_job_department`), o cliente V360 associado (`v360_customer_db_name`), status de atividade (`external_user_active`), identificador externo (`identification_number`, `identifier_origin`) e datas de criação e último login (`user_created_at`, `user_last_sign_in_at`).
+"""
+
+[[dataset.example]]
+title = "Usuários ativos por cliente"
+sql = """
+SELECT
+    v360_customer_db_name,
+    COUNT(*) AS qtd_usuarios,
+    COUNT(*) FILTER (WHERE external_user_active = true) AS qtd_ativos
+FROM public."portaldofornecedor_usuarios"
+GROUP BY v360_customer_db_name
+ORDER BY qtd_usuarios DESC;
+"""
+
+[[dataset.example]]
+title = "Usuários sem login recente"
+sql = """
+SELECT
+    user_email,
+    v360_customer_db_name,
+    user_last_sign_in_at
+FROM public."portaldofornecedor_usuarios"
+WHERE user_last_sign_in_at < now() - interval '90 days'
+   OR user_last_sign_in_at IS NULL
+ORDER BY user_last_sign_in_at ASC NULLS FIRST;
+"""
+
+[[dataset]]
+name = "portaldofornecedor_usuarios_login"
+title = "Logins de Usuários do Portal do Fornecedor"
+description = """
+Tabela com uma linha por login (`data_login`) de um CNPJ raiz (`cnpj_raiz`) de fornecedor no Portal do Fornecedor, agregada por mês (`mes`) e cliente (`nome_cliente`). Traz o e-mail do usuário (`usuario_email`), a data de criação do usuário (`user_created_at`) e as datas do primeiro login do usuário (`first_login_user`) e do primeiro login daquele CNPJ (`first_login_cnpj`). É fonte para `mview_fornecedores_logins_comparativo` e `portaldofornecedor_users_by_monthday`.
+"""
+
+[[dataset.example]]
+title = "Logins mensais por cliente"
+sql = """
+SELECT
+    nome_cliente,
+    mes,
+    COUNT(DISTINCT cnpj_raiz) AS cnpjs_distintos,
+    COUNT(*) AS total_logins
+FROM public."portaldofornecedor_usuarios_login"
+WHERE mes >= date_trunc('month', now()) - interval '6 months'
+GROUP BY nome_cliente, mes
+ORDER BY mes DESC;
+"""
+
+[[dataset.example]]
+title = "Novos CNPJs (primeiro login) por mês"
+sql = """
+SELECT
+    nome_cliente,
+    date_trunc('month', first_login_cnpj) AS mes_primeiro_login,
+    COUNT(DISTINCT cnpj_raiz) AS novos_cnpjs
+FROM public."portaldofornecedor_usuarios_login"
+GROUP BY nome_cliente, date_trunc('month', first_login_cnpj)
+ORDER BY mes_primeiro_login DESC;
+"""
+
+[[dataset]]
+name = "process_instances"
+title = "Instâncias de Processo"
+description = """
+Tabela com uma linha por instância de processo (`id`) executado sobre uma entidade (`processable_type`/`processable_id`, ex.: documentos fiscais), identificada pelo cliente (`c_id`). Registra o tipo de conclusão (`completion_type`, ex.: SUCCESS, ERROR, CANCELED, ARCHIVED), as datas de criação, atualização e conclusão (`created_at`, `updated_at`, `completed_at`), o processo relacionado (`process_id`) e a tarefa mais recente (`recent_task_id`). É fonte para diversas matviews de captura, automatismo e medição financeira, como `mview_financeiro_medicao_notas` e `mview_oficial_fornecedores_com_nota`.
+"""
+
+[[dataset.example]]
+title = "Processos por status de conclusão no período"
+sql = """
+SELECT
+    c_id,
+    completion_type,
+    COUNT(*) AS qtd_processos
+FROM public."process_instances"
+WHERE created_at >= now() - interval '30 days'
+GROUP BY c_id, completion_type
+ORDER BY qtd_processos DESC;
+"""
+
+[[dataset.example]]
+title = "Tempo médio de conclusão por tipo de entidade"
+sql = """
+SELECT
+    processable_type,
+    COUNT(*) AS qtd_processos,
+    AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600) AS media_horas_conclusao
+FROM public."process_instances"
+WHERE completed_at IS NOT NULL
+GROUP BY processable_type
+ORDER BY qtd_processos DESC;
+"""
+
+[[dataset]]
+name = "processes"
+title = "Processos (Fluxos) Cadastrados"
+description = """
+Uma linha por processo (fluxo de trabalho) cadastrado em cada cliente. Traz o identificador do cliente (c_id), o id interno, o nome técnico (name) e o título exibido (title) do processo, além da data de criação (created_at). É consultada pela materialized view mview_automatismo e pela tabela teste para associar tarefas ao fluxo ao qual pertencem.
+"""
+
+[[dataset.example]]
+title = "Quantidade de processos por cliente"
+sql = """
+SELECT c_id, count(*) AS qtd_processos
+FROM public."processes"
+GROUP BY c_id
+ORDER BY qtd_processos DESC;
+"""
+
+[[dataset.example]]
+title = "Processos criados nos últimos 90 dias"
+sql = """
+SELECT c_id, name, title, created_at
+FROM public."processes"
+WHERE created_at >= now() - interval '90 days'
+ORDER BY created_at DESC;
+"""
+
+[[dataset]]
+name = "purchase_orders"
+title = "Pedidos de Compra"
+description = """
+Uma linha por pedido de compra (purchase order) de um cliente, identificado por c_id e id. Armazena o número do pedido (purchase_order) e as datas de criação e atualização do registro (created_at, updated_at). É utilizada pela materialized view mview_financeiro_medicao_pedidos em medições financeiras relacionadas a pedidos.
+"""
+
+[[dataset.example]]
+title = "Pedidos criados por cliente nos últimos 180 dias"
+sql = """
+SELECT c_id, count(*) AS qtd_pedidos
+FROM public."purchase_orders"
+WHERE created_at >= now() - interval '180 days'
+GROUP BY c_id
+ORDER BY qtd_pedidos DESC;
+"""
+
+[[dataset.example]]
+title = "Últimos pedidos de compra registrados"
+sql = """
+SELECT c_id, purchase_order, created_at, updated_at
+FROM public."purchase_orders"
+ORDER BY created_at DESC
+LIMIT 100;
+"""
+
+[[dataset]]
+name = "servicos_financeiros_fornecedores_frequentes_credito"
+title = "Fornecedores Frequentes para Crédito"
+description = """
+Materialized view com uma linha por combinação de cliente (cliente) e fornecedor (cnpj/nome), consolidando o valor total de notas fiscais emitidas em cada mês de 2025 (colunas jan_25 a dez_25). É construída a partir de tax_documents unida a process_instances (considerando apenas processos concluídos com sucesso) e suppliers, com sinalização de antecipação de recebíveis obtida de anticipation. Também calcula a quantidade de meses com notas, a média, a mediana, o desvio padrão e o coeficiente de variação (dp_media) dos valores mensais, usados para identificar fornecedores recorrentes elegíveis a crédito.
+"""
+
+[[dataset.example]]
+title = "Fornecedores recorrentes e de baixa variação de valores"
+sql = """
+SELECT cliente, cnpj, nome, qtd_meses_com_notas, media_valores, dp_media, has_anticipation
+FROM public."servicos_financeiros_fornecedores_frequentes_credito"
+WHERE qtd_meses_com_notas >= 6 AND dp_media <= 0.3
+ORDER BY media_valores DESC;
+"""
+
+[[dataset.example]]
+title = "Média de valores por cliente"
+sql = """
+SELECT cliente, count(*) AS qtd_fornecedores, sum(media_valores) AS soma_media_valores
+FROM public."servicos_financeiros_fornecedores_frequentes_credito"
+GROUP BY cliente
+ORDER BY soma_media_valores DESC;
+"""
+
+[[dataset]]
+name = "servicos_financeiros_volume_potencial_cliente"
+title = "Volume Potencial de Crédito por Cliente"
+description = """
+Materialized view com uma linha por cliente, resumindo o potencial de oferta de serviços financeiros de antecipação de recebíveis. É calculada a partir da matview servicos_financeiros_fornecedores_frequentes_credito, agregando o ticket médio do cliente (ticket_medio_cliente), a quantidade de fornecedores recorrentes (fornecedores_recorrentes) e de fornecedores que já utilizam antecipação (fornecedores_com_antecipacao), além do volume potencial de operações com e sem antecipação (volume_potencial_com_antecipacao, volume_potencial_sem_antecipacao).
+"""
+
+[[dataset.example]]
+title = "Ranking de clientes por volume potencial sem antecipação"
+sql = """
+SELECT cliente, ticket_medio_cliente, fornecedores_recorrentes, fornecedores_com_antecipacao,
+       volume_potencial_com_antecipacao, volume_potencial_sem_antecipacao
+FROM public."servicos_financeiros_volume_potencial_cliente"
+ORDER BY volume_potencial_sem_antecipacao DESC;
+"""
+
+[[dataset]]
+name = "statuses"
+title = "Catálogo de Status"
+description = """
+Uma linha por status configurado no processo de cada cliente (c_id), identificado pelo id e pelo nome (name). O campo has_bookkeeping_tag indica se o status está marcado como relevante para contabilização (bookkeeping). É referenciada pela mview_automatismo e pela tabela teste para qualificar em que status uma tarefa se encontra.
+"""
+
+[[dataset.example]]
+title = "Status marcados para contabilização"
+sql = """
+SELECT c_id, name
+FROM public."statuses"
+WHERE has_bookkeeping_tag = true
+ORDER BY c_id, name;
+"""
+
+[[dataset.example]]
+title = "Quantidade de status cadastrados por cliente"
+sql = """
+SELECT c_id, count(*) AS qtd_status
+FROM public."statuses"
+GROUP BY c_id
+ORDER BY qtd_status DESC;
+"""
+
+[[dataset]]
+name = "supplier_users"
+title = "Vínculo de Usuários a Fornecedores"
+description = """
+Uma linha por vínculo entre um usuário (user_id) e um fornecedor/parceiro comercial (commercial_partner_id) dentro de um cliente (c_id), identificado pelo id do registro. É utilizada pela materialized view mview_oficial_fornecedores_usuarios para relacionar usuários do portal aos fornecedores que representam.
+"""
+
+[[dataset.example]]
+title = "Quantidade de usuários distintos por fornecedor"
+sql = """
+SELECT c_id, commercial_partner_id, count(DISTINCT user_id) AS qtd_usuarios
+FROM public."supplier_users"
+GROUP BY c_id, commercial_partner_id
+ORDER BY qtd_usuarios DESC;
+"""
+
+[[dataset]]
+name = "suppliers"
+title = "Fornecedores"
+description = """
+Uma linha por fornecedor cadastrado em um cliente (c_id), identificado pelo id, com nome (name), CNPJ (supplier_cnpj), tipo (type) e datas de criação/atualização (created_at, updated_at). Os campos active e enable_receivables_anticipation indicam, respectivamente, se o fornecedor está ativo e se está habilitado para antecipação de recebíveis. Alimenta o dashboard [OFICIAL] Fornecedores e é usada nas matviews mview_oficial_fornecedores_usuarios e servicos_financeiros_fornecedores_frequentes_credito.
+"""
+
+[[dataset.example]]
+title = "Fornecedores ativos habilitados para antecipação"
+sql = """
+SELECT c_id, name, supplier_cnpj
+FROM public."suppliers"
+WHERE active = true AND enable_receivables_anticipation = true
+ORDER BY c_id, name;
+"""
+
+[[dataset.example]]
+title = "Quantidade de fornecedores por cliente e tipo"
+sql = """
+SELECT c_id, type, count(*) AS qtd_fornecedores
+FROM public."suppliers"
+GROUP BY c_id, type
+ORDER BY qtd_fornecedores DESC;
+"""
+
+[[dataset]]
+name = "tarefas_maior_consumo_cliente"
+title = "Consumo de Tempo por Tarefa e Cliente"
+description = """
+Uma linha por cliente (c_id), mês de finalização (mes_finalizacao_tarefa), tipo de tarefa (task_definition_id/nome_task_definition), fluxo (nome_fluxo) e tipo de nota (tipo_nota), agregando a quantidade de tarefas concluídas (qntd_tarefas) e o tempo total gasto em segundos/minutos/horas (spent_total_task_seconds, spent_total_task_minutes, spent_total_task_hours). Traz também estatísticas de tempo por tarefa: média (media_segundos) e percentis 50, 90, 95 e 100 em segundos, além do timestamp da última atualização (last_refresh_at). É usada no dashboard Relatório Horas Infra para identificar quais tarefas mais consomem tempo de processamento.
+"""
+
+[[dataset.example]]
+title = "Tarefas com maior consumo de horas nos últimos 3 meses"
+sql = """
+SELECT c_id, nome_task_definition, nome_fluxo,
+       sum(spent_total_task_hours) AS horas_totais,
+       sum(qntd_tarefas) AS qtd_tarefas
+FROM public."tarefas_maior_consumo_cliente"
+WHERE mes_finalizacao_tarefa >= date_trunc('month', now()) - interval '3 months'
+GROUP BY c_id, nome_task_definition, nome_fluxo
+ORDER BY horas_totais DESC
+LIMIT 20;
+"""
+
+[[dataset.example]]
+title = "P95 médio de duração por tipo de tarefa"
+sql = """
+SELECT nome_task_definition, avg(p95_segundos) AS p95_medio_segundos
+FROM public."tarefas_maior_consumo_cliente"
+GROUP BY nome_task_definition
+ORDER BY p95_medio_segundos DESC;
+"""
+
+[[dataset]]
+name = "tarefas_total_processamento_cliente"
+title = "Processamento Total por Cliente"
+description = """
+Uma linha por cliente (c_id), mês (mes_finalizacao_tarefa), fluxo (nome_fluxo) e tipo de nota (tipo_nota), consolidando a quantidade de tarefas concluídas (qntd_tarefas), o tempo total gasto em minutos (spent_total_task_minutet) e a quantidade de notas processadas (qntd_notas). Complementa a tabela tarefas_maior_consumo_cliente no dashboard Relatório Horas Infra, dando uma visão do volume total de processamento por cliente e fluxo.
+"""
+
+[[dataset.example]]
+title = "Minutos e notas processadas por cliente nos últimos 6 meses"
+sql = """
+SELECT c_id,
+       sum(spent_total_task_minutet) AS minutos_totais,
+       sum(qntd_notas) AS notas_totais
+FROM public."tarefas_total_processamento_cliente"
+WHERE mes_finalizacao_tarefa >= date_trunc('month', now()) - interval '6 months'
+GROUP BY c_id
+ORDER BY minutos_totais DESC;
+"""
+
+[[dataset.example]]
+title = "Tarefas e notas por fluxo e tipo de nota"
+sql = """
+SELECT nome_fluxo, tipo_nota, sum(qntd_tarefas) AS qtd_tarefas, sum(qntd_notas) AS qtd_notas
+FROM public."tarefas_total_processamento_cliente"
+GROUP BY nome_fluxo, tipo_nota
+ORDER BY qtd_tarefas DESC;
+"""
+
+[[dataset]]
+name = "task_definitions"
+title = "Definições de Tarefa"
+description = """
+Uma linha por definição de tarefa (tipo de tarefa) configurada em um cliente (c_id), identificada pelo id, com nome (name), tipo (type), descrição (description), etapa do fluxo (step) e categoria (category). Os campos has_bookkeeping_tag, vsupplier_category, is_revised_category e categorized_by indicam se a tarefa está marcada para contabilização e como/por quem foi categorizada. É referenciada pela mview_automatismo, pela tabela teste e pelas views de auditoria view_automatismo_item_category_audits e view_automatismo_task_category_audits.
+"""
+
+[[dataset.example]]
+title = "Definições de tarefa marcadas para contabilização"
+sql = """
+SELECT c_id, name, category, step
+FROM public."task_definitions"
+WHERE has_bookkeeping_tag = true
+ORDER BY c_id, name;
+"""
+
+[[dataset.example]]
+title = "Quantidade de definições de tarefa por cliente e categoria"
+sql = """
+SELECT c_id, category, count(*) AS qtd
+FROM public."task_definitions"
+GROUP BY c_id, category
+ORDER BY qtd DESC;
+"""
+
+[[dataset]]
+name = "tax_documents"
+title = "Documentos Fiscais"
+description = """
+Uma linha por documento fiscal (nota fiscal) de um cliente (c_id), identificado pelo id, com valor total (total_value) e líquido (net_value), datas de emissão (issue_date) e vencimento líquido (net_due_date), CNPJ do fornecedor (supplier_cnpj) e do cliente/tomador (customer_cnpj), tipo de documento (type) e moeda (currency). Também traz campos de controle de captura e escrituração, como provider, could_have_been_captured, bookkept, bookkeeping_date, detected_po_heuristic, completed_at, assigned_user e last_task_name. Alimenta os dashboards Monitoramento Datalake e [FINANCEIRO] Medições, além de diversas matviews como captura, mview_automatismo, mview_financeiro_medicao_autenticidade, mview_financeiro_medicao_concessionarias e mview_financeiro_medicao_notas.
+"""
+
+[[dataset.example]]
+title = "Valor total de documentos fiscais emitidos no mês corrente por cliente"
+sql = """
+SELECT c_id, count(*) AS qtd_documentos, sum(total_value) AS valor_total
+FROM public."tax_documents"
+WHERE issue_date >= date_trunc('month', now())
+GROUP BY c_id
+ORDER BY valor_total DESC;
+"""
+
+[[dataset.example]]
+title = "Documentos fiscais ainda não escriturados"
+sql = """
+SELECT c_id, supplier_cnpj, total_value, issue_date
+FROM public."tax_documents"
+WHERE bookkept = false OR bookkept IS NULL
+ORDER BY issue_date DESC
+LIMIT 100;
+"""
+
+[[dataset]]
+name = "temporary_audits_item_modifications"
+title = "Auditoria de Alterações em Itens de Nota"
+description = """
+Uma linha por alteração de campo registrada na auditoria de itens de documento fiscal (invoice_item_id), vinculada à tarefa (task_id/task_name/task_definition_id) e ao documento fiscal (tax_document_id/tax_document_number) em que ocorreu. Guarda o usuário responsável (user_id), a ação realizada (action), a versão do registro auditado (version), o campo alterado (campo) e os valores antigo e novo em JSON (valor_antigo, valor_novo), com o timestamp da alteração (audit_created_at). É a fonte da view view_automatismo_item_category_audits.
+"""
+
+[[dataset.example]]
+title = "Alterações de campo em itens nos últimos 30 dias"
+sql = """
+SELECT c_id, tax_document_number, campo, valor_antigo, valor_novo, audit_created_at
+FROM public."temporary_audits_item_modifications"
+WHERE audit_created_at >= now() - interval '30 days'
+ORDER BY audit_created_at DESC;
+"""
+
+[[dataset.example]]
+title = "Quantidade de alterações de item por usuário"
+sql = """
+SELECT c_id, user_id, count(*) AS qtd_alteracoes
+FROM public."temporary_audits_item_modifications"
+GROUP BY c_id, user_id
+ORDER BY qtd_alteracoes DESC;
+"""
+
+[[dataset]]
+name = "temporary_audits_modifications"
+title = "Auditoria de Alterações em Tarefas"
+description = """
+Uma linha por alteração de campo registrada na auditoria de tarefas (task_id/task_name/task_definition_id), vinculada ao documento fiscal (tax_document_number). Guarda o usuário responsável (user_id), a ação realizada (action), a versão auditada (version), o campo alterado (campo), os valores antigo e novo em JSON (valor_antigo, valor_novo) e o timestamp da alteração (audit_created_at). É a fonte da view view_automatismo_task_category_audits, complementando a auditoria em nível de item registrada em temporary_audits_item_modifications.
+"""
+
+[[dataset.example]]
+title = "Alterações de tarefa nos últimos 30 dias"
+sql = """
+SELECT c_id, task_name, campo, valor_antigo, valor_novo, audit_created_at
+FROM public."temporary_audits_modifications"
+WHERE audit_created_at >= now() - interval '30 days'
+ORDER BY audit_created_at DESC;
+"""
+
+[[dataset.example]]
+title = "Quantidade de alterações por tipo de ação"
+sql = """
+SELECT c_id, action, count(*) AS qtd
+FROM public."temporary_audits_modifications"
+GROUP BY c_id, action
+ORDER BY qtd DESC;
+"""
+
+[[dataset]]
+name = "teste"
+title = "Tarefas de Automatismo por Nota (Petrório)"
+description = """
+Uma linha por tarefa humana (human_task) concluída em um processo de automatismo aplicado a uma nota fiscal (tax_document), materializada a partir do join entre process_instances, tax_documents, processes, human_tasks, task_definitions, statuses e users. Traz o id da nota (id_nota), a tarefa (task_name), o status (status_name), o processo (process_name), a etapa e a categoria (step, category) e o dia de criação da instância (dia). A consulta que gera a matview é fixa para o cliente petrorio_prod e para o mês de janeiro de 2026, com process_total contando o total diário de processos concluídos (SUCCESS/ARCHIVED/CANCELED) daquele processo.
+"""
+
+[[dataset.example]]
+title = "Notas processadas por dia e processo"
+sql = """
+SELECT dia, process_name, count(DISTINCT id_nota) AS notas_processadas
+FROM public."teste"
+GROUP BY dia, process_name
+ORDER BY dia DESC
+LIMIT 100
+"""
+
+[[dataset.example]]
+title = "Tarefas por status"
+sql = """
+SELECT status_name, task_name, count(*) AS total_tarefas
+FROM public."teste"
+GROUP BY status_name, task_name
+ORDER BY total_tarefas DESC
+"""
+
+[[dataset]]
+name = "tickets"
+title = "Tickets de Suporte (Help360)"
+description = """
+Uma linha por ticket de suporte aberto no Help360, identificado por id_ticket. Traz o cliente (customer_name, customer_id), o tipo e a prioridade do chamado (type, priority), as datas de abertura e conclusão (created_at, completed_at, concluded_at), o cumprimento do SLA (sla, sla_duration) e a resposta de satisfação (csat_answer). process_id e recent_task_id relacionam o ticket a um processo e à tarefa mais recente associada.
+"""
+
+[[dataset.example]]
+title = "Tickets por tipo e prioridade (últimos 30 dias)"
+sql = """
+SELECT type, priority, count(*) AS total_tickets,
+       avg(sla_duration) AS sla_duration_media
+FROM public."tickets"
+WHERE created_at >= now() - interval '30 days'
+GROUP BY type, priority
+ORDER BY total_tickets DESC
+"""
+
+[[dataset.example]]
+title = "Cumprimento de SLA e respostas de CSAT"
+sql = """
+SELECT sla, count(*) AS total_tickets,
+       count(csat_answer) AS respostas_csat
+FROM public."tickets"
+GROUP BY sla
+"""
+
+[[dataset]]
+name = "user_logins"
+title = "Login de Usuários"
+description = """
+Uma linha por usuário (id) de um cliente (c_id), com o e-mail (email), a situação de cadastro (active, user_created_at, is_api_user) e o timestamp do login (login_at). É a base usada para calcular métricas de recência de acesso, servindo de origem para a materialized view mview_oficial_fornecedores_usuarios.
+"""
+
+[[dataset.example]]
+title = "Usuários com login nos últimos 7 dias, por cliente"
+sql = """
+SELECT c_id,
+       count(*) AS total_usuarios,
+       count(*) FILTER (WHERE login_at >= now() - interval '7 days') AS logins_7d
+FROM public."user_logins"
+WHERE is_api_user IS NOT TRUE
+GROUP BY c_id
+ORDER BY total_usuarios DESC
+"""
+
+[[dataset]]
+name = "users"
+title = "Usuários"
+description = """
+Uma linha por usuário (id) de um cliente (c_id), com e-mail (email), situação de cadastro (active), data de criação (user_created_at) e sinalização de usuário de API (is_api_user). Funciona como tabela de referência de usuários, consumida pela matview mview_automatismo e pela matview teste para filtrar usuários que não são de API.
+"""
+
+[[dataset.example]]
+title = "Usuários ativos por cliente"
+sql = """
+SELECT c_id,
+       count(*) AS total_usuarios,
+       count(*) FILTER (WHERE active) AS usuarios_ativos
+FROM public."users"
+GROUP BY c_id
+ORDER BY total_usuarios DESC
+"""
+
+[[dataset]]
+name = "usuarios_login"
+title = "Usuários Ativos por Recência de Login"
+description = """
+Uma linha por cliente (c_id) e por data de apuração (created_at), com a contagem de usuários segmentados por recência do último login: ativos no último dia (active_last_1_day), nos últimos 7, 14 e 28 dias, ativos há mais de 28 dias (active_above_28_days) e usuários sem atividade (not_active). É uma tabela de snapshot agregada, usada no relatório geral de uso da plataforma.
+"""
+
+[[dataset.example]]
+title = "Última apuração de usuários ativos por cliente"
+sql = """
+SELECT c_id, active_last_1_day, active_last_7_days, active_last_28_days, not_active
+FROM public."usuarios_login"
+WHERE created_at = (SELECT max(created_at) FROM public."usuarios_login")
+ORDER BY active_last_7_days DESC
+"""
+
+[[dataset]]
+name = "vfactoring_anticipation_info"
+title = "Antecipação de Recebíveis (Factoring)"
+description = """
+Uma linha por título financeiro (id_titulo) gerado a partir de uma nota fiscal (id_nota, numero_nota) de um fornecedor (cnpj_fornecedor, nome_fornecedor) para um tomador (cnpj_tomador, nome_tomador). Registra se o título está disponível para antecipação (disponivel_para_antecipar) e se foi de fato antecipado (antecipado), com os valores envolvidos (valor_titulo, valor_pago, receita_financeira_recebida, taxa_media_mensal), prazos (prazo_pagamento, periodo_antecipado) e as datas do ciclo (emissão, vencimento, pagamento, criação da nota, do título e da fatura). origem_capital e label_origem_capital identificam a fonte de capital usada na antecipação.
+"""
+
+[[dataset.example]]
+title = "Valor antecipado por fornecedor (últimos 90 dias)"
+sql = """
+SELECT cnpj_fornecedor, nome_fornecedor,
+       count(*) FILTER (WHERE antecipado) AS titulos_antecipados,
+       sum(valor_pago) FILTER (WHERE antecipado) AS valor_pago_total,
+       sum(receita_financeira_recebida) AS receita_financeira_total
+FROM public."vfactoring_anticipation_info"
+WHERE data_criacao_titulo >= now() - interval '90 days'
+GROUP BY cnpj_fornecedor, nome_fornecedor
+ORDER BY valor_pago_total DESC NULLS LAST
+"""
+
+[[dataset.example]]
+title = "Taxa média por origem de capital"
+sql = """
+SELECT origem_capital, label_origem_capital,
+       count(*) AS titulos,
+       avg(taxa_media_mensal) AS taxa_media_mensal
+FROM public."vfactoring_anticipation_info"
+WHERE antecipado = true
+GROUP BY origem_capital, label_origem_capital
+ORDER BY titulos DESC
+"""
+
+[[dataset]]
+name = "view_automatismo_item_category_audits"
+title = "Auditoria de Alterações Automáticas por Item"
+description = """
+View agregada a partir de temporary_audits_item_modifications (alterações em itens de nota fiscal) unida a task_definitions, agrupando por cliente (c_id), etapa (step), categoria (category), ação (action) e campo alterado (campo). Uma linha por combinação dessas dimensões, trazendo a quantidade de atualizações (updates), o total de eventos distintos no campo e na categoria (eventos_no_campo, eventos_na_categoria), quantos itens foram afetados (itens_afetados) e a lista dos valores antigos e novos observados (valores_antigos, valores_novos).
+"""
+
+[[dataset.example]]
+title = "Campos mais alterados automaticamente por etapa"
+sql = """
+SELECT c_id, step, category, campo,
+       sum(updates) AS total_updates,
+       sum(itens_afetados) AS itens_afetados
+FROM public."view_automatismo_item_category_audits"
+GROUP BY c_id, step, category, campo
+ORDER BY total_updates DESC
+LIMIT 50
+"""
+
+[[dataset]]
+name = "view_automatismo_task_category_audits"
+title = "Auditoria de Alterações Automáticas por Tarefa"
+description = """
+View agregada a partir de temporary_audits_modifications (alterações aplicadas por tarefas de automatismo, em nível de tarefa e não de item) unida a task_definitions. Uma linha por combinação de cliente (c_id), etapa (step), categoria (category) e campo alterado (campo), com a contagem de atualizações (updates) e a lista de valores novos distintos observados (valor_novo).
+"""
+
+[[dataset.example]]
+title = "Campos mais alterados por categoria de tarefa"
+sql = """
+SELECT c_id, step, category, campo, updates
+FROM public."view_automatismo_task_category_audits"
+ORDER BY updates DESC
+LIMIT 50
+"""
+
+[[dataset]]
+name = "view_leitura_indicador_automatismo"
+title = "Indicador de Leitura do Automatismo Fiscal"
+description = """
+View sobre a tabela leitura_indicador_automatismo: quando uma nota (vinvoice_tax_document_id) teve preenchimento manual (has_changed_flag = true), gera uma linha por campo alterado (changed_column, obtido via json_object_keys dos campos alterados); quando o preenchimento foi automático (has_changed_flag = false), gera uma única linha por nota com is_automatic = 'automático'. Traz o tipo de leitor e o provedor (reader_type, provider), a prefeitura (city_hall_name), o tipo de conclusão (completion_type) e flags sobre a presença de XML/PDF nos anexos e nos resultados de parsing.
+"""
+
+[[dataset.example]]
+title = "Notas com preenchimento automático x manual (últimos 30 dias)"
+sql = """
+SELECT c_id, is_automatic, count(*) AS total
+FROM public."view_leitura_indicador_automatismo"
+WHERE completed_at >= now() - interval '30 days'
+GROUP BY c_id, is_automatic
+ORDER BY total DESC
+"""
+
+[[dataset.example]]
+title = "Campos mais alterados por provedor"
+sql = """
+SELECT provider, changed_column, count(*) AS ocorrencias
+FROM public."view_leitura_indicador_automatismo"
+WHERE has_changed_flag = true
+GROUP BY provider, changed_column
+ORDER BY ocorrencias DESC
+LIMIT 50
+"""
+
+[[dataset]]
+name = "view_leitura_indicador_automatismo_concessionarias"
+title = "Indicador de Leitura do Automatismo - Concessionárias"
+description = """
+Mesma lógica do indicador de leitura do automatismo fiscal, mas aplicada à tabela leitura_indicador_automatismo_concessionarias, voltada a notas de concessionárias (utilities): gera uma linha por campo alterado (changed_column) quando houve intervenção manual (has_changed_flag = true), ou uma única linha por nota quando o preenchimento foi automático. Inclui o tipo do documento fiscal (tax_document_type), o CNPJ do fornecedor final (final_supplier_identification_number) e sua raiz de 8 dígitos (supplier_root).
+"""
+
+[[dataset.example]]
+title = "Alterações por raiz de CNPJ e tipo de documento"
+sql = """
+SELECT supplier_root, tax_document_type, count(*) AS total
+FROM public."view_leitura_indicador_automatismo_concessionarias"
+WHERE completed_at >= now() - interval '30 days'
+GROUP BY supplier_root, tax_document_type
+ORDER BY total DESC
+LIMIT 50
+"""
+
+[[dataset]]
+name = "view_leitura_indicadores"
+title = "Leitura de Indicadores por Campo"
+description = """
+View sobre a tabela leitura_indicadores que expande o JSON field_analysis com jsonb_each: uma linha por campo (field_name) analisado dentro da leitura de cada nota fiscal (tax_document_id) de um cliente (client). Traz o valor lido e o valor final (read_value, final_value), a origem da leitura (read_source), o tipo de intervenção (intervention_type) e uma flag indicando leitura sem valor (read_value_null).
+"""
+
+[[dataset.example]]
+title = "Campos sem leitura por cliente (últimos 30 dias)"
+sql = """
+SELECT client, field_name,
+       count(*) AS total_campos,
+       sum(read_value_null) AS campos_sem_leitura
+FROM public."view_leitura_indicadores"
+WHERE created_at >= now() - interval '30 days'
+GROUP BY client, field_name
+ORDER BY total_campos DESC
+LIMIT 50
+"""
+
+[[dataset]]
+name = "view_tpv_cnpjs"
+title = "TPV de Notas por CNPJ"
+description = """
+View sobre kpi_big_numbers_notas combinada com tabelas auxiliares de tipo antecipável (aux_tipo_antecipavel), categoria de nota (aux_de_para_tipo_nota_categoria) e cotação de moeda (currency_values) para converter o valor para uma moeda comum (valor_convertido). Uma linha por combinação de tipo de nota (nota_tipo), cliente (cliente), mês de criação/conclusão/emissão e conjunto de CNPJs (cnpjs, raizes_cnpjs), com a quantidade e o valor agregados (quantidade, valor). É filtrada para notas com finalização SUCCESS ou ARCHIVED e exclui alguns clientes específicos.
+"""
+
+[[dataset.example]]
+title = "TPV convertido por cliente e mês (ano corrente)"
+sql = """
+SELECT cliente, mes_completed,
+       sum(valor_convertido) AS tpv_convertido,
+       sum(quantidade) AS quantidade_notas
+FROM public."view_tpv_cnpjs"
+WHERE mes_completed >= date_trunc('year', now())::date
+GROUP BY cliente, mes_completed
+ORDER BY tpv_convertido DESC
+"""
+
+[[dataset.example]]
+title = "Valor total por elegibilidade de antecipação e categoria"
+sql = """
+SELECT antecipavel, nota_categoria,
+       count(*) AS registros,
+       sum(valor_convertido) AS valor_total
+FROM public."view_tpv_cnpjs"
+GROUP BY antecipavel, nota_categoria
+ORDER BY valor_total DESC
+"""
+
+[[dataset]]
+name = "vinvoice_inconsistency_report_historical"
+title = "Histórico de Inconsistências (Vinvoice)"
+description = """
+Uma linha por inconsistência identificada em uma tarefa de um processo do Vinvoice, com o tipo e o id do objeto processável ("Processable Type", "Processable ID"), a instância de processo ("Process Instance ID"), a tarefa ("Task ID", "Task Type", "Task Name", "Task Updated At"), o responsável (assignee) e a descrição do problema ("Problem Definiton"). As colunas active, created_at e updated_at indicam se a inconsistência segue ativa e quando foi registrada/atualizada.
+"""
+
+[[dataset.example]]
+title = "Inconsistências ativas por processo e tarefa"
+sql = """
+SELECT c_id, process, "Task Name", "Problem Definiton", count(*) AS total
+FROM public."vinvoice_inconsistency_report_historical"
+WHERE active = true
+GROUP BY c_id, process, "Task Name", "Problem Definiton"
+ORDER BY total DESC
+LIMIT 50
+"""
+
+[[dataset.example]]
+title = "Inconsistências ativas por responsável (últimos 90 dias)"
+sql = """
+SELECT assignee, count(*) AS inconsistencias_ativas
+FROM public."vinvoice_inconsistency_report_historical"
+WHERE active = true AND created_at >= now() - interval '90 days'
+GROUP BY assignee
+ORDER BY inconsistencias_ativas DESC
+"""
+

@@ -32,6 +32,42 @@ description = "What this {{ dataset.kind }} holds, and its grain."</pre>
 </div>
 {% endif %}
 
+{% if can_doc %}
+<style>
+  .ds-doc{border:1px solid var(--border);border-radius:var(--r);background:var(--surface);margin:0 0 1.2rem;box-shadow:var(--sh-1)}
+  .ds-doc>summary{cursor:pointer;list-style:none;padding:.6rem .9rem;font-size:.82rem;font-weight:600;color:var(--muted)}
+  .ds-doc>summary::-webkit-details-marker{display:none}
+  .ds-doc>summary::before{content:"▸ ";color:var(--g-300)}
+  .ds-doc[open]>summary::before{content:"▾ "}
+  .ds-doc-body{padding:0 .9rem .9rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.7rem}
+  .ds-doc-row{display:flex;align-items:center;gap:.7rem;padding-top:.7rem}
+  .ds-doc-status{font-size:.8rem;color:var(--muted)} .ds-doc-status.ok{color:var(--ok);font-weight:600} .ds-doc-status.err{color:var(--danger);font-weight:600}
+  .ds-fld{display:block} .ds-fld>span{display:block;font-size:.72rem;font-weight:600;color:var(--muted);margin-bottom:.3rem}
+  .ds-fld input,.ds-fld textarea{width:100%;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:.5rem .6rem;font:inherit;font-size:.85rem;color:var(--title);background:var(--surface);outline:none}
+  .ds-fld textarea{resize:vertical;line-height:1.5}
+  .ds-fld textarea#ds-examples{font-family:var(--mono);font-size:.76rem}
+  .ds-fld input:focus,.ds-fld textarea:focus{border-color:var(--orange);box-shadow:var(--ring)}
+</style>
+<details class="ds-doc" id="ds-doc"
+         data-gen="{{ url_for('dataset_doc_generate', name=dataset.name) }}"
+         data-save="{{ url_for('dataset_doc_save', name=dataset.name) }}">
+  <summary>{{ _('Documentação') }} ({{ _('admin') }})</summary>
+  <div class="ds-doc-body">
+    <div class="ds-doc-row">
+      {% if ai_enabled %}<button type="button" class="bi-btn sm" id="ds-gen">✦ {{ _('Gerar com IA') }}</button>{% endif %}
+      <span class="ds-doc-status" id="ds-doc-status"></span>
+    </div>
+    <label class="ds-fld"><span>{{ _('Título') }}</span><input type="text" id="ds-title" value="{{ dataset.title or '' }}"></label>
+    <label class="ds-fld"><span>{{ _('Descrição') }}</span><textarea id="ds-desc" rows="4">{{ dataset.description or '' }}</textarea></label>
+    <label class="ds-fld"><span>{{ _('Exemplos') }} — JSON [{"title","sql"}]</span>
+      <textarea id="ds-examples" rows="8" spellcheck="false"></textarea></label>
+    <div class="ds-doc-row"><button type="button" class="bi-btn sm" id="ds-save">{{ _('Salvar') }}</button></div>
+  </div>
+</details>
+<script id="ds-examples-json" type="application/json">{{ doc_examples_json }}</script>
+<script src="{{ url_for('static', path='dataset-doc.js') }}"></script>
+{% endif %}
+
 <div class="bi-panel-tabs">
   <button class="bi-ptab active" data-tab="preview" type="button">
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12v10H2z"/><path d="M2 6.5h12M6 6.5V13"/></svg>

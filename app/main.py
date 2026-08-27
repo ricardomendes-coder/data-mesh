@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import charts, datasets, db, filters, i18n, oidc, reports, store, superset_session, users
+from . import ai, charts, datasets, db, filters, i18n, oidc, reports, store, superset_session, users
 from .auth import NotAuthenticated, end_session, get_current_user, require_login, start_session
 from .config import get_settings
 
@@ -686,6 +686,9 @@ def _shell_context(user: str, active_nav: str, access: store.Access | None = Non
             nav.has_any(store.DASHBOARD) or nav.allows(store.FEATURE, "dashboard_builder")
         ),
         "nav_datasets": nav.allows(store.FEATURE, "dataset_catalog"),
+        # The assistant shows only when the AI is configured and the person can
+        # already browse the catalog it grounds its answers in.
+        "nav_assistant": settings.ai_enabled and nav.allows(store.FEATURE, "dataset_catalog"),
         "user": user,
         "title": settings.app_title,
         "active_nav": active_nav,
@@ -872,6 +875,22 @@ def dataset_detail(
     if dataset is None:
         return _catalog_failure(f"Unknown dataset: {name!r}.", 404)
 
+    # An in-app doc (edited or AI-generated) overrides the datasets.toml one.
+    try:
+        override = store.get_dataset_doc(dataset.name)
+    except Exception:
+        logger.exception("Could not read dataset doc for %r", dataset.name)
+        override = None
+    if override:
+        if override.get("title"):
+            dataset.title = override["title"]
+        dataset.description = override.get("description", dataset.description)
+        if override.get("examples"):
+            dataset.examples = [
+                datasets.Example(title=e.get("title", "Exemplo"), sql=e.get("sql", ""))
+                for e in override["examples"] if e.get("sql")
+            ]
+
     context = _shell_context(
         user,
         "datasets",
@@ -882,6 +901,12 @@ def dataset_detail(
         preview_rows=[],
         preview_error=None,
         default_query=f"SELECT *\nFROM {dataset.name}\nLIMIT 100",
+        can_doc=bool(request.session.get("is_admin")),
+        ai_enabled=ai.enabled(),
+        doc_examples_json=json.dumps(
+            [{"title": e.title, "sql": e.sql} for e in (dataset.examples or [])],
+            ensure_ascii=False,
+        ),
     )
 
     try:
@@ -902,6 +927,168 @@ def dataset_detail(
         context["preview_error"] = "Could not load a preview. Check the server logs."
 
     return templates.TemplateResponse(request, "dataset_detail.html", context)
+
+
+def _merged_dataset_doc(name: str, manifest, overrides: dict):
+    """A dataset's doc, DB override winning over datasets.toml: (description,
+    examples) where examples is [{title, sql}]."""
+    base = manifest.entries.get(name, {})
+    o = overrides.get(name, {})
+    desc = o.get("description") or base.get("description", "")
+    exs = o.get("examples") or base.get("example", [])
+    return desc, exs
+
+
+def _assistant_catalog(question: str, access: store.Access, limit: int = 10) -> list:
+    """The datasets to put in front of the model for a question: active, granted
+    ones, ranked by word overlap with the question, then their real columns. A
+    small, relevant, grounded slice — never the whole warehouse."""
+    try:
+        manifest = datasets.load_manifest()
+        overrides = store.dataset_doc_overrides()
+        inactive = store.catalog_inactive("dataset")
+        ds = [
+            d for d in datasets.list_datasets()
+            if d.name not in inactive and access.allows(store.DATASET, d.name)
+        ]
+    except Exception:
+        logger.exception("Could not build the assistant catalog")
+        return []
+    qtok = set(re.findall(r"[\wà-úÀ-Ú]+", question.lower()))
+    scored = []
+    for d in ds:
+        desc, exs = _merged_dataset_doc(d.name, manifest, overrides)
+        hay = (d.name + " " + desc).lower()
+        score = len(qtok & set(re.findall(r"[\wà-úÀ-Ú]+", hay)))
+        scored.append((score, d, desc, exs))
+    scored.sort(key=lambda x: -x[0])
+    chosen = [s for s in scored if s[0] > 0][:limit] or scored[:limit]
+    out = []
+    for _score, d, desc, exs in chosen:
+        try:
+            cols = [(c.name, c.type) for c in datasets.get_columns(d.name)][:40]
+        except Exception:
+            cols = []
+        out.append({
+            "name": d.name, "kind": d.kind, "description": desc,
+            "columns": cols, "example": (exs[0].get("sql", "") if exs else ""),
+        })
+    return out
+
+
+@app.get("/assistant", response_class=HTMLResponse)
+def assistant_page(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """The data assistant: ask in Portuguese, get an explanation, the datasets to
+    use, and a query. Grounded in the documented catalog."""
+    if not _may_browse_datasets(access):
+        return _forbidden(
+            request, user, i18n.t("You don't have access to the dataset catalog."), access=access
+        )
+    context = _shell_context(
+        user, "assistant", access,
+        ai_enabled=ai.enabled(),
+        console_url=str(request.url_for("console")),
+        catalog_db=settings.datasets_database,
+    )
+    return templates.TemplateResponse(request, "assistant.html", context)
+
+
+@app.post("/assistant/ask")
+async def assistant_ask(
+    request: Request,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """A question → {explanation, datasets, sql}. Grounded in a relevant slice of
+    the catalog; the model is told to use only the tables and columns shown."""
+    if not _may_browse_datasets(access):
+        return JSONResponse({"error": "Sem acesso ao catálogo."}, status_code=403)
+    if not ai.enabled():
+        return JSONResponse({"error": "A IA não está configurada (defina ANTHROPIC_API_KEY)."}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    question = str((body or {}).get("question") or "").strip()[:1000]
+    if not question:
+        return JSONResponse({"error": "Escreva uma pergunta."}, status_code=400)
+    catalog = _assistant_catalog(question, access)
+    if not catalog:
+        return JSONResponse({"error": "Nenhum dataset acessível para consultar."}, status_code=400)
+    try:
+        answer = ai.answer_data_question(question, catalog)
+    except ai.AIError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    logger.info("Assistant answered a question for %s (%d datasets)", user, len(catalog))
+    return JSONResponse({"ok": True, **answer})
+
+
+@app.post("/datasets/{name}/doc/generate")
+def dataset_doc_generate(
+    request: Request,
+    name: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Draft a dataset's doc with the AI, from its columns and definition, and
+    save it as the current doc. Admin only."""
+    if not request.session.get("is_admin"):
+        return JSONResponse({"error": "Apenas administradores."}, status_code=403)
+    if not access.allows(store.DATASET, name):
+        return JSONResponse({"error": "Sem acesso a esse dataset."}, status_code=403)
+    if not ai.enabled():
+        return JSONResponse({"error": "A IA não está configurada."}, status_code=400)
+    try:
+        ds = datasets.get_dataset(name)
+    except Exception as exc:
+        return JSONResponse({"error": "Catálogo indisponível.", "detail": _db_error_detail(exc)}, status_code=502)
+    if ds is None:
+        return JSONResponse({"error": "Dataset desconhecido."}, status_code=404)
+    try:
+        cols = [(c.name, c.type) for c in datasets.get_columns(ds.name)]
+    except Exception as exc:
+        return JSONResponse({"error": "Não foi possível ler as colunas.", "detail": _db_error_detail(exc)}, status_code=502)
+    definition = datasets.view_definition(ds.name) if ds.kind in ("view", "matview") else ""
+    try:
+        draft = ai.generate_dataset_doc(ds.name, ds.kind, cols, definition)
+    except ai.AIError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    store.upsert_dataset_doc(ds.name, draft["title"], draft["description"], draft["examples"], user)
+    logger.info("Dataset %r doc generated by %s", ds.name, user)
+    return JSONResponse({"ok": True, **draft})
+
+
+@app.post("/datasets/{name}/doc")
+async def dataset_doc_save(
+    request: Request,
+    name: str,
+    user: str = Depends(signed_in_user),
+    access: store.Access = Depends(access_for),
+):
+    """Save an edited dataset doc. Admin only."""
+    if not request.session.get("is_admin"):
+        return JSONResponse({"error": "Apenas administradores."}, status_code=403)
+    if not access.allows(store.DATASET, name):
+        return JSONResponse({"error": "Sem acesso a esse dataset."}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    title = str((body or {}).get("title") or "").strip()[:200]
+    description = str((body or {}).get("description") or "").strip()[:4000]
+    examples = []
+    for ex in (body or {}).get("examples") or []:
+        if isinstance(ex, dict) and str(ex.get("sql") or "").strip():
+            examples.append({
+                "title": str(ex.get("title") or "Exemplo")[:120],
+                "sql": str(ex["sql"]).strip()[:4000],
+            })
+    store.upsert_dataset_doc(name, title, description, examples, user)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/query", response_class=HTMLResponse)

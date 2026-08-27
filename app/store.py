@@ -593,6 +593,23 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "0024_dataset_docs",
+        """
+        -- Dataset documentation editable in the app: a title, a description and
+        -- example queries, per dataset. The version-controlled datasets.toml is
+        -- the base; a row here overrides it, so an edit (or an AI-generated
+        -- draft) is saved without a deploy. Absent = fall back to the file.
+        CREATE TABLE IF NOT EXISTS dataset_docs (
+            name        text        PRIMARY KEY,
+            title       text        NOT NULL DEFAULT '',
+            description text        NOT NULL DEFAULT '',
+            examples    jsonb       NOT NULL DEFAULT '[]'::jsonb,
+            updated_by  text        NOT NULL DEFAULT '',
+            updated_at  timestamptz NOT NULL DEFAULT now()
+        );
+        """,
+    ),
 ]
 
 
@@ -1149,6 +1166,63 @@ def catalog_inactive(kind: str) -> set[str]:
             }
     except Exception:
         return set()
+
+
+def dataset_doc_overrides() -> dict:
+    """Every in-app dataset doc, {name: {title, description, examples}}. These
+    override datasets.toml; a dataset with no row falls back to the file."""
+    if not available():
+        return {}
+    try:
+        with engine().connect() as conn:
+            out = {}
+            for name, title, desc, ex in conn.execute(
+                text("SELECT name, title, description, examples FROM dataset_docs")
+            ):
+                out[name] = {
+                    "title": title or "",
+                    "description": desc or "",
+                    "examples": ex if isinstance(ex, list) else json.loads(ex or "[]"),
+                }
+            return out
+    except Exception:
+        logger.exception("Could not read dataset_docs")
+        return {}
+
+
+def get_dataset_doc(name: str) -> dict | None:
+    """One dataset's in-app doc, or None when only the file (or nothing) has it."""
+    if not available():
+        return None
+    with engine().connect() as conn:
+        row = conn.execute(
+            text("SELECT title, description, examples FROM dataset_docs WHERE name = :n"),
+            {"n": name},
+        ).first()
+    if not row:
+        return None
+    ex = row[2]
+    return {
+        "title": row[0] or "",
+        "description": row[1] or "",
+        "examples": ex if isinstance(ex, list) else json.loads(ex or "[]"),
+    }
+
+
+def upsert_dataset_doc(name: str, title: str, description: str, examples: list, user: str) -> None:
+    """Save (create or overwrite) a dataset's in-app doc."""
+    with engine().begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dataset_docs (name, title, description, examples, updated_by, updated_at) "
+                "VALUES (:n, :t, :d, CAST(:e AS jsonb), :u, now()) "
+                "ON CONFLICT (name) DO UPDATE SET title = EXCLUDED.title, "
+                "description = EXCLUDED.description, examples = EXCLUDED.examples, "
+                "updated_by = EXCLUDED.updated_by, updated_at = now()"
+            ),
+            {"n": name, "t": title or "", "d": description or "",
+             "e": json.dumps(examples or []), "u": user or ""},
+        )
 
 
 def set_catalog_active(kind: str, name: str, active: bool) -> None:
